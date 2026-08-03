@@ -44,7 +44,7 @@ app.use(express.json());
 app.use(cors({
     origin: APP_ORIGIN,
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type']
+    allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning']
 }));
 
 function randomToken(bytes) {
@@ -61,6 +61,12 @@ function base64url(buffer) {
 function getBearerToken(req) {
     const auth = req.headers.authorization || '';
     return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+}
+
+function generateRequestId() {
+    const rand = Math.floor(100000 + Math.random() * 900000);
+    const stamp = Date.now().toString(36).slice(-4);
+    return `PV_${rand}_${stamp}`;
 }
 
 async function fetchRobloxGroupRoles(robloxUserId) {
@@ -133,10 +139,6 @@ async function getSession(req) {
     if (Date.now() - lastSynced > ACCESS_SYNC_INTERVAL_MS) {
         try {
             const access = await computeAccess(data.roblox_user_id);
-            if (!access.permissions.length) {
-                await supabase.from('hr_sessions').delete().eq('token', token);
-                return null;
-            }
             const updated = {
                 ...data,
                 roles: access.roleNames,
@@ -240,8 +242,6 @@ app.get('/roblox-auth-callback', async (req, res) => {
         return;
     }
 
-    if (!access.permissions.length) { fail('not_allowed_hr'); return; }
-
     const token = randomToken(32);
     const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS).toISOString();
 
@@ -284,6 +284,42 @@ app.post('/hr-data', async (req, res) => {
 
     const action = req.body && req.body.action;
     const payload = (req.body && req.body.payload) || {};
+
+    if (action === 'submit_request') {
+        const robloxUsername = payload.robloxUsername && String(payload.robloxUsername).trim();
+        const taskName = payload.taskName && String(payload.taskName).trim();
+        const game = payload.game && String(payload.game).trim();
+        const workRaw = payload.workRaw != null ? String(payload.workRaw) : '';
+        const timeWorked = payload.timeWorked != null ? String(payload.timeWorked).trim() : '';
+        const payment = Number(payload.payment);
+        const currency = payload.currency === 'USD' ? 'USD' : 'ROBUX';
+
+        if (!robloxUsername || !taskName || !game || !(payment > 0)) {
+            res.status(400).json({ ok: false, error: 'invalid_fields' });
+            return;
+        }
+
+        const id = generateRequestId();
+
+        const { error } = await supabase.from('payment_requests').insert({
+            id,
+            requested_by: session.roblox_username,
+            roblox_username: robloxUsername,
+            task_name: taskName,
+            game,
+            work_raw: workRaw,
+            time_worked: timeWorked,
+            payment,
+            currency,
+            paid: false,
+            paid_at: null,
+            created_at: new Date().toISOString()
+        });
+
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, id });
+        return;
+    }
 
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
@@ -446,11 +482,6 @@ app.post('/hr-data', async (req, res) => {
     if (action === 'refresh_access') {
         try {
             const access = await computeAccess(session.roblox_user_id);
-            if (!access.permissions.length) {
-                await supabase.from('hr_sessions').delete().eq('token', getBearerToken(req));
-                res.status(401).json({ ok: false, error: 'access_revoked' });
-                return;
-            }
             await supabase.from('hr_sessions').update({
                 roles: access.roleNames,
                 permissions: access.permissions,

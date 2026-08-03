@@ -256,6 +256,12 @@
       background: var(--err-bg);
     }
 
+    input:disabled {
+      background: var(--bg);
+      color: var(--ink-soft);
+      cursor: not-allowed;
+    }
+
     .row2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -698,6 +704,63 @@
       flex-shrink: 0;
     }
 
+    .lock-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(23, 26, 33, .55);
+      backdrop-filter: blur(2px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      padding: 20px;
+    }
+
+    .lock-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 32px 30px;
+      max-width: 380px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 24px 60px -20px rgba(20, 22, 30, .45);
+    }
+
+    .lock-card .gate-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--ink);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 15px;
+      margin: 0 auto 16px;
+    }
+
+    .lock-card h2 {
+      font-size: 19px;
+      margin: 0 0 6px;
+      font-weight: 700;
+    }
+
+    .lock-card p {
+      color: var(--ink-soft);
+      font-size: 13.5px;
+      margin: 0 0 20px;
+      line-height: 1.55;
+    }
+
+    .lock-note {
+      margin-top: 16px;
+      font-size: 11.5px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
     .dash-shell {
       max-width: 1280px;
       margin: 0 auto;
@@ -1089,10 +1152,10 @@
     const SUPABASE_URL = 'https://tixfcxypoyedqbkiwbtx.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGZjeHlwb3llZHFia2l3YnR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NzExMDUsImV4cCI6MjEwMTI0NzEwNX0.0biB2dg46s1Cy_Gpq6ZuL3fHnSLJP2xJO8RHpKRGaS8';
     const EDGE_BASE = 'https://nobbiest-proboxing-corine.ngrok-free.dev';
-    const TABLE = 'payment_requests';
     const GAMES_TABLE = 'games';
     const SETTINGS_TABLE = 'app_settings';
     const SESSION_STORAGE_KEY = 'hl_hr_session_token';
+    const RETURN_HASH_KEY = 'hl_return_hash';
 
     const PERMISSION_LABELS = {
       'dashboard.view': 'View dashboard',
@@ -1110,7 +1173,7 @@
       if (!SUPABASE_URL || SUPABASE_URL.indexOf('YOUR_SUPABASE') === 0) {
         configError = 'Supabase is not configured yet. Open this file and set SUPABASE_URL and SUPABASE_ANON_KEY near the top of the script.';
       } else if (!EDGE_BASE || EDGE_BASE.indexOf('YOUR-SERVER-DOMAIN') !== -1) {
-        configError = 'The HR login backend is not configured yet. Set EDGE_BASE near the top of the script to your server URL.';
+        configError = 'The login backend is not configured yet. Set EDGE_BASE near the top of the script to your server URL.';
       } else {
         supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       }
@@ -1162,12 +1225,6 @@
     function fmtDate(ts) {
       const d = new Date(ts);
       return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
-    }
-
-    function genId() {
-      const rand = Math.floor(100000 + Math.random() * 900000);
-      const stamp = Date.now().toString(36).slice(-4);
-      return `PV_${rand}_${stamp}`;
     }
 
     function hslToHex(h, s, l) {
@@ -1295,30 +1352,6 @@
       };
     }
 
-    function clientToRow(data) {
-      return {
-        id: data.id,
-        requested_by: data.requestedBy || null,
-        roblox_username: data.robloxUsername || null,
-        task_name: data.taskName || null,
-        game: data.game || null,
-        work_raw: data.workRaw || null,
-        time_worked: data.timeWorked || null,
-        payment: Number(data.payment) || 0,
-        currency: data.currency || 'ROBUX',
-        paid: !!data.paid,
-        paid_at: data.paidAt ? new Date(data.paidAt).toISOString() : null,
-        created_at: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString()
-      };
-    }
-
-    async function saveRequest(data) {
-      if (!supabaseClient) throw new Error(configError || 'Supabase is not configured.');
-      const { error } = await supabaseClient.from(TABLE).insert(clientToRow(data));
-      if (error) throw error;
-      return true;
-    }
-
     async function loadGames() {
       if (!supabaseClient) return;
       const { data, error } = await supabaseClient.from(GAMES_TABLE).select('id,name').order('name', { ascending: true });
@@ -1346,6 +1379,21 @@
     }
     function clearToken() {
       try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { }
+    }
+
+    function beginLogin(returnHash) {
+      try { sessionStorage.setItem(RETURN_HASH_KEY, returnHash || window.location.hash || '#/'); } catch (e) { }
+      window.location.href = EDGE_BASE + '/roblox-auth-start';
+    }
+
+    function takeReturnHash() {
+      let target = '#/';
+      try {
+        const stored = sessionStorage.getItem(RETURN_HASH_KEY);
+        if (stored) target = stored;
+        sessionStorage.removeItem(RETURN_HASH_KEY);
+      } catch (e) { }
+      return target;
     }
 
     async function verifySession() {
@@ -1406,6 +1454,19 @@
     async function updateRequest(data) {
       await callHrData('mark_paid', { id: data.id });
       return true;
+    }
+
+    async function saveRequest(data) {
+      const json = await callHrData('submit_request', {
+        robloxUsername: data.robloxUsername,
+        taskName: data.taskName,
+        game: data.game,
+        workRaw: data.workRaw,
+        timeWorked: data.timeWorked,
+        payment: data.payment,
+        currency: data.currency
+      });
+      return json;
     }
 
     async function addGame(name) {
@@ -1612,7 +1673,7 @@
       }
 
       if (isHrAuthed) {
-        window.location.hash = '#/dashboard';
+        window.location.hash = takeReturnHash();
       } else {
         const fallbackErr = err || (token ? 'session_invalid' : null);
         window.location.hash = '#/hr' + (fallbackErr ? ('?error=' + encodeURIComponent(fallbackErr)) : '');
@@ -1644,7 +1705,7 @@
         <a class="link" href="https://www.hugolabs.eu" target="_blank" rel="noopener">hugolabs.eu</a>
         ${isHrAuthed
           ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span>${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
-          : `<a class="hr-pill" href="#/hr">Login as HR</a>`}
+          : `<a class="hr-pill" href="#/hr">Sign in</a>`}
       </div>
     </div>`;
     }
@@ -1658,7 +1719,6 @@
       const params = parseHashQuery();
       const err = params.get('error');
       const errorMessages = {
-        not_allowed_hr: 'Your Roblox account is not assigned a role with access to this tool.',
         invalid_state: 'That sign-in attempt was invalid or expired, please try again.',
         state_expired: 'That sign-in attempt expired, please try again.',
         missing_code_or_state: 'Sign-in was incomplete, please try again.',
@@ -1675,25 +1735,23 @@
     <div class="gate-shell">
       <div class="gate-card">
         <div class="gate-icon">PV</div>
-        <h2>HR access</h2>
+        <h2>Sign in</h2>
         <p>Sign in with your Roblox account. Your access level is based on the role assigned to your Roblox group rank or account.</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         ${message ? `<div class="error-box"><span>${esc(message)}</span></div>` : ''}
         <button class="btn btn-primary roblox-btn" id="robloxSignInBtn" ${configError ? 'disabled' : ''}>
           Sign in with Roblox
         </button>
-        <div class="gate-note">Only accounts assigned a role can access this.</div>
+        <div class="gate-note">You need a Roblox account to use this tool.</div>
       </div>
     </div>`;
 
       const btn = document.getElementById('robloxSignInBtn');
-      if (btn) btn.addEventListener('click', () => {
-        window.location.href = EDGE_BASE + '/roblox-auth-start';
-      });
+      if (btn) btn.addEventListener('click', () => beginLogin('#/dashboard'));
     }
 
     function renderDashboard() {
-      if (!hasPermission('dashboard.view')) { window.location.hash = '#/manage'; return; }
+      if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('roles.manage') ? '#/manage' : '#/'; return; }
       let allRequests = [];
       let filter = 'pending';
       let expanded = new Set();
@@ -1874,7 +1932,7 @@
       const canManageRate = hasPermission('settings.manage_rate');
       const canManageRoles = hasPermission('roles.manage');
 
-      if (!canManageGames && !canManageRate && !canManageRoles) { window.location.hash = '#/dashboard'; return; }
+      if (!canManageGames && !canManageRate && !canManageRoles) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
 
       let savingRate = false;
       let rateError = null;
@@ -2142,6 +2200,27 @@
     }
 
     function renderCreateView() {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+
+      if (!isHrAuthed) {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="lock-overlay">
+      <div class="lock-card">
+        <div class="gate-icon">PV</div>
+        <h2>Sign in to continue</h2>
+        <p>You need to sign in with your Roblox account before you can submit a payment request. This lets HR verify who submitted each request.</p>
+        ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
+        <button class="btn btn-primary roblox-btn" id="lockSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
+        <div class="lock-note">You can't submit a request until you sign in.</div>
+      </div>
+    </div>`;
+        wireTopbarSignOut();
+        const btn = document.getElementById('lockSignInBtn');
+        if (btn) btn.addEventListener('click', () => beginLogin('#/'));
+        return;
+      }
+
       let submitted = false;
       let submitting = false;
       let submitError = null;
@@ -2155,10 +2234,9 @@
         const timeWorked = document.getElementById('f_time')?.value.trim() || '';
         const paymentRaw = document.getElementById('f_payment')?.value || '0';
         const currency = document.getElementById('f_currency')?.value || 'ROBUX';
-        const requestedBy = document.getElementById('f_requester')?.value.trim() || '';
         return {
-          id: genId(), robloxUsername: username, taskName: task, game, workRaw, timeWorked,
-          payment: Number(paymentRaw) || 0, currency, requestedBy, createdAt: Date.now(), paid: false, paidAt: null
+          id: '', robloxUsername: username, taskName: task, game, workRaw, timeWorked,
+          payment: Number(paymentRaw) || 0, currency, requestedBy: hrUsername, createdAt: Date.now(), paid: false, paidAt: null
         };
       }
 
@@ -2233,7 +2311,7 @@
             </div>
           </div>
           <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
-          <div class="field"><label>Requested by <span class="hint">(optional)</span></label><input type="text" id="f_requester" placeholder="Your name"></div>
+          <div class="field"><label>Requested by</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
           <button class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
         </div>
 
@@ -2246,7 +2324,7 @@
 
         wireTopbarSignOut();
 
-        const ids = ['f_username', 'f_task', 'f_game', 'f_work', 'f_time', 'f_payment', 'f_currency', 'f_requester'];
+        const ids = ['f_username', 'f_task', 'f_game', 'f_work', 'f_time', 'f_payment', 'f_currency'];
         ids.forEach(id => {
           const el = document.getElementById(id);
           if (!el) return;
