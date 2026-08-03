@@ -1,0 +1,2285 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HugoLabs Payment Log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <style>
+    :root {
+      --bg: #F5F6F8;
+      --surface: #FFFFFF;
+      --ink: #171A21;
+      --ink-soft: #5B616E;
+      --muted: #8A93A3;
+      --line: #E4E7ED;
+      --accent: #3730D9;
+      --accent-soft: #EEEDFB;
+      --warn-bg: #FFF7E6;
+      --warn-line: #F1E4BC;
+      --warn-text: #8A6300;
+      --ok-bg: #E9F7EF;
+      --ok-line: #C7E9D3;
+      --ok-text: #178A4C;
+      --err-bg: #FDEDEC;
+      --err-line: #F5C6C0;
+      --err-text: #B3311C;
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-weight: 700;
+      font-size: 14.5px;
+      letter-spacing: .1px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .brand .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .brand small {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 12px;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .topbar a.link {
+      color: var(--ink-soft);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .topbar a.link:hover {
+      color: var(--ink);
+    }
+
+    .hr-pill {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      text-decoration: none;
+    }
+
+    .hr-pill:hover {
+      background: var(--bg);
+    }
+
+    .hr-pill .dot-live {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ok-text);
+    }
+
+    .shell {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+    }
+
+    .create-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 1fr;
+      gap: 32px;
+      align-items: start;
+    }
+
+    @media (max-width:900px) {
+      .create-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .heading-block {
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 5px 10px;
+      border-radius: 6px;
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-size: 28px;
+      margin: 0 0 8px;
+      font-weight: 700;
+      letter-spacing: -.4px;
+    }
+
+    .sub {
+      color: var(--ink-soft);
+      font-size: 14.5px;
+      line-height: 1.6;
+      max-width: 54ch;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 26px;
+    }
+
+    .field {
+      margin-bottom: 18px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--ink-soft);
+      margin-bottom: 7px;
+      letter-spacing: .2px;
+    }
+
+    .field .hint {
+      font-weight: 400;
+      color: #9BA1AC;
+      margin-left: 6px;
+    }
+
+    .field .err-hint {
+      color: var(--err-text);
+      font-size: 12px;
+      margin-top: 5px;
+    }
+
+    input[type=text],
+    input[type=number],
+    input[type=password],
+    textarea,
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      color: var(--ink);
+      background: #FCFCFD;
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 120px;
+      line-height: 1.6;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+      background: #fff;
+    }
+
+    input.field-invalid,
+    textarea.field-invalid,
+    select.field-invalid {
+      border-color: var(--err-line);
+      background: var(--err-bg);
+    }
+
+    .row2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .row3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+    }
+
+    .btn {
+      appearance: none;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 14px;
+      border-radius: 9px;
+      padding: 12px 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-decoration: none;
+      transition: transform .12s, box-shadow .12s, background .12s, opacity .12s;
+    }
+
+    .btn:active {
+      transform: scale(.98);
+    }
+
+    .btn-primary {
+      background: var(--ink);
+      color: #fff;
+      width: 100%;
+    }
+
+    .btn-primary:hover {
+      background: #000;
+    }
+
+    .btn-ghost {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .btn-ghost:hover {
+      background: #E2E0FA;
+    }
+
+    .btn-ok {
+      background: var(--ok-text);
+      color: #fff;
+    }
+
+    .btn-ok:hover {
+      background: #126B3B;
+    }
+
+    .btn-ok:disabled {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      cursor: default;
+      opacity: 1;
+    }
+
+    .btn-sm {
+      padding: 7px 12px;
+      font-size: 12.5px;
+      border-radius: 7px;
+    }
+
+    .btn:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    .preview-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .preview-label::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--line);
+    }
+
+    .invoice {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 2px rgba(20, 22, 30, .03), 0 8px 24px -14px rgba(20, 22, 30, .16);
+      overflow: hidden;
+    }
+
+    .invoice-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 26px 32px 22px;
+    }
+
+    .doc-type {
+      text-align: right;
+    }
+
+    .doc-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .9px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .doc-id {
+      font-size: 13px;
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 0;
+    }
+
+    .parties {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: 20px 32px;
+      gap: 20px;
+    }
+
+    .party-label {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .party-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .party-value.mono {
+      font-size: 13px;
+    }
+
+    @media (max-width:640px) {
+      .parties {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .stat-grid {
+        grid-template-columns: 1fr 1fr !important;
+      }
+    }
+
+    .task-block {
+      padding: 20px 32px;
+      border-top: 1px solid var(--line);
+    }
+
+    .task-label {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: .6px;
+      margin-bottom: 7px;
+    }
+
+    .task-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -.2px;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 4px 32px 20px;
+    }
+
+    .stat-card {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 13px 14px;
+    }
+
+    .stat-card .stat-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .stat-card .stat-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .stat-card.stat-status .stat-value {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border: 1px solid var(--warn-line);
+    }
+
+    .stat-card.stat-status.is-paid .stat-value {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      border: 1px solid var(--ok-line);
+    }
+
+    .items-block {
+      padding: 20px 32px 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .items-head {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: .6px;
+      margin-bottom: 12px;
+    }
+
+    .items-list {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .items-list li {
+      font-size: 13.8px;
+      line-height: 1.7;
+      color: #33363D;
+      padding: 6px 0 6px 4px;
+    }
+
+    .items-list li::marker {
+      color: var(--muted);
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    .items-list li .lead {
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .empty-note {
+      color: var(--muted);
+      font-size: 13px;
+      padding: 6px 0;
+    }
+
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 22px 32px;
+      border-top: 1px solid var(--line);
+      background: linear-gradient(180deg, #FAFAFB, #F5F6F8);
+    }
+
+    .total-label {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+    }
+
+    .total-value {
+      font-size: 25px;
+      font-weight: 800;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      letter-spacing: -.3px;
+    }
+
+    .total-value .robux-icon {
+      height: 1em;
+      width: 1em;
+      display: inline-block;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+
+    .invoice-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 32px 18px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .foot-contact {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .confirm-box {
+      background: var(--ok-bg);
+      border: 1px solid var(--ok-line);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .confirm-box .icon {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .confirm-box .txt strong {
+      display: block;
+      color: var(--ink);
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+
+    .confirm-box .txt span {
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+
+    .error-box {
+      background: var(--err-bg);
+      border: 1px solid var(--err-line);
+      color: var(--err-text);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .gate-shell {
+      max-width: 400px;
+      margin: 90px auto;
+      padding: 0 20px;
+    }
+
+    .gate-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 30px 28px;
+      text-align: center;
+    }
+
+    .gate-card .gate-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--ink);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 15px;
+      margin: 0 auto 16px;
+    }
+
+    .gate-card h2 {
+      font-size: 19px;
+      margin: 0 0 6px;
+      font-weight: 700;
+    }
+
+    .gate-card p {
+      color: var(--ink-soft);
+      font-size: 13.5px;
+      margin: 0 0 20px;
+      line-height: 1.55;
+    }
+
+    .gate-card .field {
+      text-align: left;
+    }
+
+    .gate-note {
+      margin-top: 16px;
+      font-size: 11.5px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .roblox-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .roblox-btn svg {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+
+    .dash-shell {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+
+    .dash-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .dash-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 4px;
+    }
+
+    .tab-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 12.5px;
+      padding: 7px 13px;
+      border-radius: 6px;
+      color: var(--ink-soft);
+    }
+
+    .tab-btn.active {
+      background: var(--ink);
+      color: #fff;
+    }
+
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+    }
+
+    table.req-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      min-width: 1080px;
+    }
+
+    table.req-table thead th {
+      text-align: left;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 11px 14px;
+      background: #FAFAFB;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+
+    table.req-table tbody td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    table.req-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    table.req-table tbody tr:hover {
+      background: #FBFBFD;
+    }
+
+    table.req-table td.id-cell {
+      color: var(--muted);
+      font-size: 11.5px;
+    }
+
+    table.req-table td.name-cell strong {
+      display: block;
+      color: var(--ink);
+      font-size: 13.5px;
+    }
+
+    table.req-table td.name-cell span {
+      display: block;
+      color: var(--muted);
+      font-size: 11.5px;
+      margin-top: 2px;
+    }
+
+    table.req-table td.task-cell {
+      max-width: 240px;
+    }
+
+    table.req-table td.task-cell .task-name {
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    table.req-table td.task-cell .task-count {
+      color: var(--muted);
+      font-size: 11.5px;
+      margin-top: 2px;
+    }
+
+    table.req-table td.pay-cell {
+      white-space: nowrap;
+      font-weight: 700;
+    }
+
+    table.req-table td.pay-cell img {
+      height: 1em;
+      width: 1em;
+      object-fit: contain;
+      vertical-align: -0.08em;
+      margin-right: 4px;
+    }
+
+    table.req-table td.actions-cell {
+      white-space: nowrap;
+    }
+
+    table.req-table td.actions-cell .btn {
+      margin-right: 6px;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 4px 9px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+
+    .status-chip.pending {
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border: 1px solid var(--warn-line);
+    }
+
+    .status-chip.paid {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      border: 1px solid var(--ok-line);
+    }
+
+    .expand-toggle {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink-soft);
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    tr.detail-row td {
+      background: #FAFAFB;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    tr.detail-row .detail-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12.8px;
+      color: #33363D;
+      line-height: 1.7;
+    }
+
+    tr.detail-row .detail-empty {
+      color: var(--muted);
+      font-size: 12.5px;
+    }
+
+    .dash-empty {
+      text-align: center;
+      padding: 70px 20px;
+      color: var(--ink-soft);
+    }
+
+    .dash-empty h3 {
+      color: var(--ink);
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+
+    .dash-loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+      font-size: 13.5px;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: #A2A8B4;
+      font-size: 12px;
+      margin-top: 22px;
+    }
+
+    .game-badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 999px;
+      color: #fff;
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+
+    .manage-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    @media (max-width:820px) {
+      .manage-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .rate-display {
+      font-size: 36px;
+      font-weight: 800;
+      color: var(--ink);
+      letter-spacing: -.5px;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .rate-display .rate-sub {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .game-chip-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    .game-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12.5px;
+      font-weight: 700;
+      margin: 0 8px 8px 0;
+    }
+
+    .game-chip .del {
+      cursor: pointer;
+      opacity: .55;
+      font-weight: 800;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .game-chip .del:hover {
+      opacity: 1;
+    }
+
+    .perm-chip-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .perm-chip {
+      display: inline-flex;
+      align-items: center;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .perm-check-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .perm-check-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    .perm-check-item input {
+      width: auto;
+    }
+
+    .role-row {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+
+    .role-row-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .role-row-top strong {
+      font-size: 14px;
+      color: var(--ink);
+    }
+
+    .role-meta {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .assignment-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .assignment-row:last-child {
+      border-bottom: none;
+    }
+
+    ::selection {
+      background: var(--accent-soft);
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="app"></div>
+
+  <script>
+    const SUPABASE_URL = 'https://tixfcxypoyedqbkiwbtx.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGZjeHlwb3llZHFia2l3YnR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NzExMDUsImV4cCI6MjEwMTI0NzEwNX0.0biB2dg46s1Cy_Gpq6ZuL3fHnSLJP2xJO8RHpKRGaS8';
+    const EDGE_BASE = 'https://nobbiest-proboxing-corine.ngrok-free.dev';
+    const TABLE = 'payment_requests';
+    const GAMES_TABLE = 'games';
+    const SETTINGS_TABLE = 'app_settings';
+    const SESSION_STORAGE_KEY = 'hl_hr_session_token';
+
+    const PERMISSION_LABELS = {
+      'dashboard.view': 'View dashboard',
+      'dashboard.mark_paid': 'Mark requests paid',
+      'dashboard.export': 'Export / copy data',
+      'settings.manage_games': 'Manage games',
+      'settings.manage_rate': 'Manage DevEx rate',
+      'roles.manage': 'Manage roles and access'
+    };
+    const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
+
+    let supabaseClient = null;
+    let configError = null;
+    try {
+      if (!SUPABASE_URL || SUPABASE_URL.indexOf('YOUR_SUPABASE') === 0) {
+        configError = 'Supabase is not configured yet. Open this file and set SUPABASE_URL and SUPABASE_ANON_KEY near the top of the script.';
+      } else if (!EDGE_BASE || EDGE_BASE.indexOf('YOUR-SERVER-DOMAIN') !== -1) {
+        configError = 'The HR login backend is not configured yet. Set EDGE_BASE near the top of the script to your server URL.';
+      } else {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      }
+    } catch (e) {
+      configError = 'Could not start the Supabase client. Double check SUPABASE_URL and SUPABASE_ANON_KEY.';
+    }
+
+    const ROBUX_IMG = 'https://devforum-uploads.s3.dualstack.us-east-2.amazonaws.com/uploads/original/4X/e/a/9/ea98f8c6c438d2d8136a6751282a153c6b28b892.png';
+    const CURRENCY_SYMBOL = { USD: '$' };
+
+    let DEVEX_RATE = 0.0038;
+    let GAMES = [];
+
+    let isHrAuthed = false;
+    let hrUsername = '';
+    let hrRoles = [];
+    let hrPermissions = [];
+    let authReady = false;
+    let appDataReady = false;
+
+    function hasPermission(permission) {
+      return hrPermissions.includes(permission);
+    }
+
+    function devexLabel() {
+      const per10k = DEVEX_RATE * 10000;
+      return `DevEx rate: $${per10k.toFixed(2)} per 10,000 Robux (${DEVEX_RATE})`;
+    }
+
+    function fmtAmount(data) {
+      const isRobux = data.currency === 'ROBUX';
+      const n = isRobux
+        ? Number(data.payment || 0).toLocaleString()
+        : Number(data.payment || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (isRobux) return `<img class="robux-icon" src="${ROBUX_IMG}" alt="Robux">${n}`;
+      return `${CURRENCY_SYMBOL[data.currency] || ''}${n} ${data.currency}`;
+    }
+
+    function devexEquivalent(data) {
+      if (data.currency !== 'ROBUX') return '';
+      const usd = (Number(data.payment) || 0) * DEVEX_RATE;
+      return `&asymp; $${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD at DevEx`;
+    }
+
+    function esc(str) {
+      return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function fmtDate(ts) {
+      const d = new Date(ts);
+      return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function genId() {
+      const rand = Math.floor(100000 + Math.random() * 900000);
+      const stamp = Date.now().toString(36).slice(-4);
+      return `PV_${rand}_${stamp}`;
+    }
+
+    function hslToHex(h, s, l) {
+      s /= 100; l /= 100;
+      const k = n => (n + h / 30) % 12;
+      const a = s * Math.min(l, 1 - l);
+      const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+      const toHex = x => Math.round(255 * x).toString(16).padStart(2, '0');
+      return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+    }
+    function gameColor(name) {
+      const s = String(name || '');
+      let hash = 0;
+      for (let i = 0; i < s.length; i++) hash = s.charCodeAt(i) + ((hash << 5) - hash);
+      const hue = Math.abs(hash) % 360;
+      return hslToHex(hue, 65, 45);
+    }
+
+    function copyText(text, btn, label) {
+      const done = () => flashBtn(btn, label || 'Copied!');
+      const legacyCopy = () => {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '0';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          if (ok) done(); else flashBtn(btn, 'Select and copy');
+        } catch (e) { flashBtn(btn, 'Select and copy'); }
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done).catch(legacyCopy);
+      } else {
+        legacyCopy();
+      }
+    }
+
+    function flashBtn(btn, msg) {
+      if (!btn) return;
+      const original = btn.textContent;
+      btn.textContent = msg;
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }
+
+    function parseWorkLines(raw) {
+      return String(raw || '')
+        .split('\n')
+        .map(l => l.trim().replace(/^->\s*/, '').replace(/^-\s*/, ''))
+        .filter(Boolean)
+        .map(text => {
+          let lead = text, rest = '';
+          const periodIdx = text.indexOf('. ');
+          if (periodIdx !== -1) { lead = text.slice(0, periodIdx + 1); rest = text.slice(periodIdx + 2); }
+          return { lead, rest };
+        });
+    }
+
+    function renderInvoice(data) {
+      const items = parseWorkLines(data.workRaw || '');
+      const isPaid = !!data.paid;
+      const listHtml = items.length
+        ? `<ol class="items-list">${items.map(item => `
+        <li><span class="lead">${esc(item.lead)}</span>${item.rest ? ` ${esc(item.rest)}` : ''}</li>`).join('')}</ol>`
+        : `<div class="empty-note">No work items added yet.</div>`;
+
+      return `
+    <div class="invoice">
+      <div class="invoice-top">
+        <div class="brand"><span class="dot"></span>HugoLabs</div>
+        <div class="doc-type">
+          <div class="doc-label">Payment Request</div>
+          <div class="doc-id mono">${esc(data.id)}</div>
+        </div>
+      </div>
+      <hr class="divider">
+      <div class="parties">
+        <div><div class="party-label">Requested by</div><div class="party-value">${esc(data.requestedBy || '-')}</div></div>
+        <div><div class="party-label">Roblox account</div><div class="party-value mono">${esc(data.robloxUsername || '-')}</div></div>
+        <div><div class="party-label">Date logged</div><div class="party-value mono">${esc(fmtDate(data.createdAt || Date.now()))}</div></div>
+      </div>
+      <div class="task-block">
+        <div class="task-label">Task</div>
+        <div class="task-title">${esc(data.taskName || 'Untitled task')}</div>
+        ${data.game ? `<div style="margin-top:9px;"><span class="game-badge" style="background:${gameColor(data.game)};">${esc(data.game)}</span></div>` : ''}
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-label">Time worked</div><div class="stat-value">${esc(data.timeWorked || '-')}</div></div>
+        <div class="stat-card"><div class="stat-label">Work items</div><div class="stat-value">${items.length}</div></div>
+        <div class="stat-card stat-status${isPaid ? ' is-paid' : ''}"><div class="stat-label">Status</div><div class="stat-value">${isPaid ? `Paid ${esc(fmtDate(data.paidAt || Date.now()))}` : 'Pending'}</div></div>
+      </div>
+      <div class="items-block">
+        <div class="items-head">Work completed</div>
+        ${listHtml}
+      </div>
+      <div class="total-row">
+        <div class="total-label">${isPaid ? 'Total Paid' : 'Total Due'}</div>
+        <div style="text-align:right;">
+          <div class="total-value">${fmtAmount(data)}</div>
+          ${data.currency === 'ROBUX' ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px;">${devexEquivalent(data)}</div>` : ''}
+        </div>
+      </div>
+      <div class="invoice-foot"><span class="foot-contact">${devexLabel()}</span></div>
+    </div>`;
+    }
+
+    function rowToClient(row) {
+      return {
+        id: row.id,
+        requestedBy: row.requested_by || '',
+        robloxUsername: row.roblox_username || '',
+        taskName: row.task_name || '',
+        game: row.game || '',
+        workRaw: row.work_raw || '',
+        timeWorked: row.time_worked || '',
+        payment: row.payment,
+        currency: row.currency || 'ROBUX',
+        paid: !!row.paid,
+        paidAt: row.paid_at ? new Date(row.paid_at).getTime() : null,
+        createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now()
+      };
+    }
+
+    function clientToRow(data) {
+      return {
+        id: data.id,
+        requested_by: data.requestedBy || null,
+        roblox_username: data.robloxUsername || null,
+        task_name: data.taskName || null,
+        game: data.game || null,
+        work_raw: data.workRaw || null,
+        time_worked: data.timeWorked || null,
+        payment: Number(data.payment) || 0,
+        currency: data.currency || 'ROBUX',
+        paid: !!data.paid,
+        paid_at: data.paidAt ? new Date(data.paidAt).toISOString() : null,
+        created_at: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString()
+      };
+    }
+
+    async function saveRequest(data) {
+      if (!supabaseClient) throw new Error(configError || 'Supabase is not configured.');
+      const { error } = await supabaseClient.from(TABLE).insert(clientToRow(data));
+      if (error) throw error;
+      return true;
+    }
+
+    async function loadGames() {
+      if (!supabaseClient) return;
+      const { data, error } = await supabaseClient.from(GAMES_TABLE).select('id,name').order('name', { ascending: true });
+      if (error) { console.error('loadGames failed:', error.message); return; }
+      GAMES = data || [];
+    }
+
+    async function loadDevexRate() {
+      if (!supabaseClient) return;
+      const { data, error } = await supabaseClient.from(SETTINGS_TABLE).select('devex_rate').eq('id', 1).maybeSingle();
+      if (!error && data && data.devex_rate != null) DEVEX_RATE = Number(data.devex_rate);
+    }
+
+    async function loadAppData() {
+      if (!supabaseClient) { appDataReady = true; return; }
+      await Promise.all([loadGames(), loadDevexRate()]);
+      appDataReady = true;
+    }
+
+    function getStoredToken() {
+      try { return localStorage.getItem(SESSION_STORAGE_KEY); } catch (e) { return null; }
+    }
+    function storeToken(token) {
+      try { localStorage.setItem(SESSION_STORAGE_KEY, token); } catch (e) { }
+    }
+    function clearToken() {
+      try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { }
+    }
+
+    async function verifySession() {
+      const token = getStoredToken();
+      if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; return; }
+      try {
+        const res = await fetch(EDGE_BASE + '/hr-session', {
+          headers: { Authorization: 'Bearer ' + token }
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.ok) {
+          isHrAuthed = true;
+          hrUsername = json.robloxUsername || '';
+          hrRoles = json.roles || [];
+          hrPermissions = json.permissions || [];
+        } else {
+          isHrAuthed = false;
+          hrUsername = '';
+          hrRoles = [];
+          hrPermissions = [];
+          clearToken();
+        }
+      } catch (e) {
+        isHrAuthed = false;
+        hrUsername = '';
+        hrRoles = [];
+        hrPermissions = [];
+      }
+    }
+
+    async function callHrData(action, payload) {
+      const token = getStoredToken();
+      const res = await fetch(EDGE_BASE + '/hr-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (token || '') },
+        body: JSON.stringify({ action, payload: payload || {} })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) {
+        if (res.status === 401) { clearToken(); isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; }
+        throw new Error((json && json.error) || 'That request failed.');
+      }
+      return json;
+    }
+
+    async function loadAllRequests() {
+      const json = await callHrData('list_requests');
+      return (json.data || []).map(rowToClient);
+    }
+
+    async function updateRequest(data) {
+      await callHrData('mark_paid', { id: data.id });
+      return true;
+    }
+
+    async function addGame(name) {
+      await callHrData('add_game', { name });
+      await loadGames();
+    }
+
+    async function deleteGame(id) {
+      await callHrData('delete_game', { id });
+      await loadGames();
+    }
+
+    async function saveDevexRate(rate) {
+      await callHrData('save_rate', { rate });
+      DEVEX_RATE = rate;
+    }
+
+    async function listRoles() {
+      const json = await callHrData('list_roles');
+      return json.data || [];
+    }
+
+    async function addRole(role) {
+      await callHrData('add_role', role);
+    }
+
+    async function updateRole(id, role) {
+      await callHrData('update_role', { id, ...role });
+    }
+
+    async function deleteRole(id) {
+      await callHrData('delete_role', { id });
+    }
+
+    async function listRoleAssignments() {
+      const json = await callHrData('list_role_assignments');
+      return json.data || [];
+    }
+
+    async function addRoleAssignment(roleId, robloxUserId) {
+      await callHrData('add_role_assignment', { roleId, robloxUserId });
+    }
+
+    async function deleteRoleAssignment(id) {
+      await callHrData('delete_role_assignment', { id });
+    }
+
+    function rowToTSV(d) {
+      const items = parseWorkLines(d.workRaw || '');
+      const work = items.map(i => i.rest ? `${i.lead} ${i.rest}` : i.lead).join(' | ');
+      return [
+        d.id, d.requestedBy || '', d.robloxUsername || '', d.game || '', d.taskName || '',
+        d.timeWorked || '', String(d.payment || 0), d.currency,
+        d.paid ? 'Paid' : 'Pending', fmtDate(d.createdAt || Date.now()), work
+      ].join('\t');
+    }
+    const TSV_HEADER = ['ID', 'Requested By', 'Roblox Username', 'Game', 'Task', 'Time Worked', 'Payment', 'Currency', 'Status', 'Date Logged', 'Work Completed'].join('\t');
+
+    async function exportRequestsToXlsx(rows, sheetLabel) {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'HugoLabs Payment Log';
+      workbook.created = new Date();
+
+      const sheetName = (sheetLabel || 'Payments').slice(0, 31);
+      const sheet = workbook.addWorksheet(sheetName, { views: [{ showGridLines: false }] });
+
+      sheet.columns = [
+        { width: 5 },
+        { width: 26 },
+        { width: 22 },
+        { width: 20 },
+        { width: 52 },
+        { width: 12 },
+        { width: 12 },
+        { width: 12 },
+        { width: 12 },
+        { width: 14 }
+      ];
+
+      sheet.mergeCells('A1:J3');
+      const banner = sheet.getCell('A1');
+      banner.value = 'HugoLabs Payment Log';
+      banner.font = { name: 'Arial', size: 20, bold: true, color: { argb: 'FFFFFFFF' } };
+      banner.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
+      for (let r = 1; r <= 3; r++) {
+        for (let c = 1; c <= 10; c++) {
+          sheet.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF171A21' } };
+        }
+      }
+
+      sheet.mergeCells('A4:J4');
+      const sub = sheet.getCell('A4');
+      sub.value = `Exported ${new Date().toLocaleString()}, DevEx rate ${(DEVEX_RATE * 10000).toFixed(2)} USD per 10,000 Robux`;
+      sub.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF5B616E' } };
+
+      const headerRowNum = 6;
+      const headers = ['#', 'DEV RBLX USERNAME', 'PRODUCER', 'GAME', 'TASK/BUG TITLE', 'APPROVED', 'PAID', 'R$', 'USD', 'DATE'];
+      const headerRow = sheet.getRow(headerRowNum);
+      headers.forEach((h, i) => { headerRow.getCell(i + 1).value = h; });
+      headerRow.eachCell(cell => {
+        cell.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF171A21' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      });
+      headerRow.height = 22;
+      sheet.views = [{ state: 'frozen', ySplit: headerRowNum, showGridLines: false }];
+
+      rows.forEach((d, i) => {
+        const rowNum = headerRowNum + 1 + i;
+        const isRobux = d.currency === 'ROBUX';
+        const row = sheet.getRow(rowNum);
+        row.getCell(1).value = i + 1;
+        row.getCell(2).value = d.robloxUsername || '';
+        row.getCell(3).value = d.requestedBy || '';
+        row.getCell(4).value = d.game || '';
+        row.getCell(5).value = d.taskName || '';
+        row.getCell(6).value = true;
+        row.getCell(7).value = !!d.paid;
+        if (isRobux) {
+          row.getCell(8).value = Number(d.payment) || 0;
+          row.getCell(9).value = { formula: `IF(H${rowNum}="","",H${rowNum}*${DEVEX_RATE})` };
+        } else {
+          row.getCell(8).value = '';
+          row.getCell(9).value = Number(d.payment) || 0;
+        }
+        row.getCell(10).value = new Date(d.createdAt || Date.now());
+        row.getCell(10).numFmt = 'dd/mm/yyyy';
+        row.getCell(8).numFmt = '#,##0';
+        row.getCell(9).numFmt = '$#,##0.00';
+        row.eachCell(cell => {
+          cell.border = { bottom: { style: 'thin', color: { argb: 'FFE4E7ED' } } };
+          cell.font = { name: 'Arial', size: 11 };
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `hugolabs-payments-${(sheetLabel || 'all').toLowerCase()}-${stamp}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function parseHashQuery() {
+      const hash = window.location.hash;
+      const qIndex = hash.indexOf('?');
+      const query = qIndex === -1 ? '' : hash.slice(qIndex + 1);
+      return new URLSearchParams(query);
+    }
+
+    async function initAuth() {
+      await verifySession();
+      await loadAppData();
+      authReady = true;
+      route();
+    }
+
+    async function hrSignOut() {
+      const token = getStoredToken();
+      if (token) {
+        try {
+          await fetch(EDGE_BASE + '/hr-session', {
+            method: 'DELETE',
+            headers: { Authorization: 'Bearer ' + token }
+          });
+        } catch (e) { }
+      }
+      clearToken();
+      isHrAuthed = false;
+      hrUsername = '';
+      hrRoles = [];
+      hrPermissions = [];
+      window.location.hash = '#/';
+    }
+
+    const app = document.getElementById('app');
+
+    async function handleAuthCallback() {
+      app.innerHTML = `
+    ${topbar()}
+    <div class="gate-shell">
+      <div class="gate-card">
+        <div class="gate-icon">PV</div>
+        <h2>Signing you in</h2>
+        <p>Confirming your Roblox account.</p>
+      </div>
+    </div>`;
+
+      const params = parseHashQuery();
+      const err = params.get('error');
+      const token = params.get('session');
+
+      if (token) {
+        storeToken(token);
+        await verifySession();
+      }
+
+      if (isHrAuthed) {
+        window.location.hash = '#/dashboard';
+      } else {
+        const fallbackErr = err || (token ? 'session_invalid' : null);
+        window.location.hash = '#/hr' + (fallbackErr ? ('?error=' + encodeURIComponent(fallbackErr)) : '');
+      }
+    }
+
+    function route() {
+      if (!authReady) return;
+      const path = window.location.hash.split('?')[0];
+      if (path === '#/auth-callback') { handleAuthCallback(); return; }
+      if (path === '#/hr' || path === '#/dashboard') {
+        if (isHrAuthed) renderDashboard(); else renderHrGate();
+      } else if (path === '#/manage') {
+        if (isHrAuthed) renderManagePanel(); else renderHrGate();
+      } else {
+        renderCreateView();
+      }
+    }
+    window.addEventListener('hashchange', route);
+    initAuth();
+
+    function topbar() {
+      const canSeeDashboard = isHrAuthed && hasPermission('dashboard.view');
+      const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('roles.manage'));
+      return `
+    <div class="topbar">
+      <a class="brand" href="#"><span class="dot"></span>HugoLabs<small>Payment Log</small></a>
+      <div class="topbar-right">
+        <a class="link" href="https://www.hugolabs.eu" target="_blank" rel="noopener">hugolabs.eu</a>
+        ${isHrAuthed
+          ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span>${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
+          : `<a class="hr-pill" href="#/hr">Login as HR</a>`}
+      </div>
+    </div>`;
+    }
+
+    function wireTopbarSignOut() {
+      const btn = document.getElementById('signOutBtn');
+      if (btn) btn.addEventListener('click', hrSignOut);
+    }
+
+    function renderHrGate() {
+      const params = parseHashQuery();
+      const err = params.get('error');
+      const errorMessages = {
+        not_allowed_hr: 'Your Roblox account is not assigned a role with access to this tool.',
+        invalid_state: 'That sign-in attempt was invalid or expired, please try again.',
+        state_expired: 'That sign-in attempt expired, please try again.',
+        missing_code_or_state: 'Sign-in was incomplete, please try again.',
+        token_exchange_failed: 'Roblox could not confirm your sign-in, please try again.',
+        userinfo_failed: 'Could not read your Roblox profile, please try again.',
+        hr_check_failed: 'Could not check your access, please try again.',
+        session_create_failed: 'Could not start your session, please try again.',
+        session_invalid: 'Your sign-in could not be confirmed, please try again.'
+      };
+      const message = err ? (errorMessages[err] || 'Could not sign you in, please try again.') : null;
+
+      app.innerHTML = `
+    ${topbar()}
+    <div class="gate-shell">
+      <div class="gate-card">
+        <div class="gate-icon">PV</div>
+        <h2>HR access</h2>
+        <p>Sign in with your Roblox account. Your access level is based on the role assigned to your Roblox group rank or account.</p>
+        ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
+        ${message ? `<div class="error-box"><span>${esc(message)}</span></div>` : ''}
+        <button class="btn btn-primary roblox-btn" id="robloxSignInBtn" ${configError ? 'disabled' : ''}>
+          Sign in with Roblox
+        </button>
+        <div class="gate-note">Only accounts assigned a role can access this.</div>
+      </div>
+    </div>`;
+
+      const btn = document.getElementById('robloxSignInBtn');
+      if (btn) btn.addEventListener('click', () => {
+        window.location.href = EDGE_BASE + '/roblox-auth-start';
+      });
+    }
+
+    function renderDashboard() {
+      if (!hasPermission('dashboard.view')) { window.location.hash = '#/manage'; return; }
+      let allRequests = [];
+      let filter = 'pending';
+      let expanded = new Set();
+      let loading = true;
+      let loadError = null;
+
+      const canMarkPaid = hasPermission('dashboard.mark_paid');
+      const canExport = hasPermission('dashboard.export');
+
+      function paint() {
+        const counts = {
+          all: allRequests.length,
+          pending: allRequests.filter(r => !r.paid).length,
+          paid: allRequests.filter(r => r.paid).length
+        };
+        const rows = allRequests.filter(r => filter === 'all' ? true : filter === 'pending' ? !r.paid : r.paid);
+
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        <div>
+          <span class="eyebrow">HR dashboard</span>
+          <h1 style="margin-bottom:4px;">Payment requests</h1>
+          <p class="sub">All team members see the same dashboard, every change you will make will get saved instantly.</p>
+        </div>
+        <div class="dash-toolbar">
+          ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('roles.manage')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
+          <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
+          ${canExport ? `<button class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
+        </div>
+      </div>
+
+      <div class="tabs" style="margin-bottom:16px;">
+        <button class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (${counts.all})</button>
+        <button class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (${counts.pending})</button>
+        <button class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (${counts.paid})</button>
+      </div>
+
+      <div class="table-wrap">
+        ${loading ? `<div class="dash-loading">Loading payment requests...</div>` : loadError ? `
+          <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>
+        ` : rows.length === 0 ? `
+          <div class="dash-empty"><h3>Nothing here</h3><p>No ${filter === 'all' ? '' : filter + ' '}payment requests yet.</p></div>
+        ` : `
+        <div class="table-scroll">
+          <table class="req-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>ID</th>
+                <th>Requested by</th>
+                <th>Task</th>
+                <th>Game</th>
+                <th>Time worked</th>
+                <th>Payment</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => renderRow(r)).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>
+      <div class="footer-note">Data is stored in a database and shared across everyone using this tool.</div>
+    </div>`;
+
+        wireTopbarSignOut();
+
+        function renderRow(r) {
+          const items = parseWorkLines(r.workRaw || '');
+          const isOpen = expanded.has(r.id);
+          const rowHtml = `
+            <tr>
+              <td><button class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
+              <td class="id-cell mono">${esc(r.id)}</td>
+              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${esc(r.robloxUsername || '-')}</span></td>
+              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}</div></td>
+              <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
+              <td>${esc(r.timeWorked || '-')}</td>
+              <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
+              <td><span class="status-chip ${r.paid ? 'paid' : 'pending'}">${r.paid ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : 'Pending'}</span></td>
+              <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
+              <td class="actions-cell">
+                ${!r.paid && canMarkPaid ? `<button class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
+                ${canExport ? `<button class="btn btn-ghost btn-sm" data-copy="${esc(r.id)}">Copy row</button>` : ''}
+              </td>
+            </tr>`;
+          const detailHtml = isOpen ? `
+            <tr class="detail-row">
+              <td colspan="10">
+                ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
+              </td>
+            </tr>` : '';
+          return rowHtml + detailHtml;
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.filter; paint(); }));
+
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', () => { load(); });
+
+        const retryBtn = document.getElementById('retryBtn');
+        if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
+
+        const copyAllBtn = document.getElementById('copyAllBtn');
+        if (copyAllBtn) copyAllBtn.addEventListener('click', (e) => {
+          const tsv = [TSV_HEADER, ...rows.map(rowToTSV)].join('\n');
+          copyText(tsv, e.currentTarget, 'Copied table!');
+        });
+
+        const exportXlsxBtn = document.getElementById('exportXlsxBtn');
+        if (exportXlsxBtn) exportXlsxBtn.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          const original = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Building file...';
+          try {
+            await exportRequestsToXlsx(rows, filter);
+          } catch (err) {
+            alert('Could not build the spreadsheet. Please try again.');
+          } finally {
+            btn.disabled = false;
+            btn.textContent = original;
+          }
+        });
+
+        document.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => {
+          const id = b.dataset.toggle;
+          if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+          paint();
+        }));
+
+        document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', (e) => {
+          const id = b.dataset.copy;
+          const r = allRequests.find(x => x.id === id);
+          if (r) copyText([TSV_HEADER, rowToTSV(r)].join('\n'), e.currentTarget, 'Copied!');
+        }));
+
+        document.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async (e) => {
+          const id = b.dataset.paid;
+          const r = allRequests.find(x => x.id === id);
+          if (!r) return;
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = 'Saving...';
+          try {
+            r.paid = true;
+            r.paidAt = Date.now();
+            await updateRequest(r);
+            paint();
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = 'Mark paid';
+            alert('Could not save. Check your connection and try again.');
+          }
+        }));
+      }
+
+      async function load() {
+        loading = true; loadError = null; paint();
+        try {
+          allRequests = await loadAllRequests();
+        } catch (err) {
+          loadError = (err && err.message) ? err.message : 'Something went wrong while reading the shared request list.';
+        }
+        loading = false;
+        paint();
+      }
+
+      load();
+    }
+
+    function renderManagePanel() {
+      const canManageGames = hasPermission('settings.manage_games');
+      const canManageRate = hasPermission('settings.manage_rate');
+      const canManageRoles = hasPermission('roles.manage');
+
+      if (!canManageGames && !canManageRate && !canManageRoles) { window.location.hash = '#/dashboard'; return; }
+
+      let savingRate = false;
+      let rateError = null;
+      let rateSuccess = false;
+      let addingGame = false;
+      let gameError = null;
+
+      let roles = [];
+      let assignments = [];
+      let rolesLoading = canManageRoles;
+      let rolesError = null;
+      let addingRole = false;
+      let addRoleError = null;
+      let addingAssignment = false;
+      let addAssignmentError = null;
+
+      function paint() {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      <div class="heading-block">
+        <span class="eyebrow">HR dashboard</span>
+        <h1>Manage</h1>
+        <p class="sub">Manage the application here, every change is automatically saved for everyone.</p>
+      </div>
+
+      <div class="manage-grid">
+        ${canManageRate ? `
+        <div class="panel">
+          <div class="preview-label">DevEx rate</div>
+          <div class="rate-display">$<span id="rateBig">${(DEVEX_RATE * 10000).toFixed(2)}</span><span class="rate-sub">per 10,000 Robux</span></div>
+          <p class="sub" style="margin:0 0 18px;">Stored as USD per Robux: <span class="mono">${DEVEX_RATE}</span></p>
+          ${rateError ? `<div class="error-box"><span>${esc(rateError)}</span></div>` : ''}
+          ${rateSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Rate updated</strong><span>New requests and exports now use this rate.</span></div></div>` : ''}
+          <div class="field">
+            <label>USD per 10,000 Robux</label>
+            <input type="number" id="ratePer10k" min="0" step="0.01" value="${(DEVEX_RATE * 10000).toFixed(2)}">
+          </div>
+          <button class="btn btn-primary" id="saveRateBtn" ${savingRate ? 'disabled' : ''}>${savingRate ? 'Saving...' : 'Save rate'}</button>
+        </div>` : ''}
+
+        ${canManageGames ? `
+        <div class="panel">
+          <div class="preview-label">Games</div>
+          ${gameError ? `<div class="error-box"><span>${esc(gameError)}</span></div>` : ''}
+          <div class="game-chip-wrap">
+            ${GAMES.length ? GAMES.map(g => `
+              <span class="game-chip" style="background:${gameColor(g.name)}1F;color:${gameColor(g.name)};border:1px solid ${gameColor(g.name)}55;">
+                ${esc(g.name)}
+                <span class="del" data-del-game="${esc(g.id)}" title="Remove game">&times;</span>
+              </span>`).join('')
+              : `<div class="empty-note">No games yet. Add the first one below.</div>`}
+          </div>
+          <div class="field">
+            <label>Add a game</label>
+            <input type="text" id="newGameName" placeholder="e.g. Tower Defense Tycoon">
+          </div>
+          <button class="btn btn-ok" id="addGameBtn" ${addingGame ? 'disabled' : ''}>${addingGame ? 'Adding...' : 'Add game'}</button>
+        </div>` : ''}
+      </div>
+
+      ${canManageRoles ? `
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">Access control</span>
+        <h1>Roles and permissions</h1>
+        <p class="sub">A role can be tied to a Roblox group and minimum rank, or assigned directly to individual accounts. A user gets the union of permissions from every role they qualify for.</p>
+      </div>
+
+      <div class="manage-grid">
+        <div class="panel">
+          <div class="preview-label">Roles</div>
+          ${rolesError ? `<div class="error-box"><span>${esc(rolesError)}</span></div>` : ''}
+          ${rolesLoading ? `<div class="dash-loading">Loading roles...</div>` : roles.length === 0 ? `<div class="empty-note">No roles yet. Create the first one below.</div>` : roles.map(r => `
+            <div class="role-row">
+              <div class="role-row-top">
+                <div>
+                  <strong>${esc(r.name)}</strong>
+                  <div class="role-meta">${r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'}</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}">Remove</button>
+              </div>
+              <div class="perm-chip-wrap">
+                ${(r.permissions || []).length ? r.permissions.map(p => `<span class="perm-chip">${esc(PERMISSION_LABELS[p] || p)}</span>`).join('') : `<span class="empty-note">No permissions granted</span>`}
+              </div>
+            </div>`).join('')}
+
+          <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
+            <div class="preview-label">Add a role</div>
+            ${addRoleError ? `<div class="error-box"><span>${esc(addRoleError)}</span></div>` : ''}
+            <div class="field"><label>Role name</label><input type="text" id="newRoleName" placeholder="e.g. Producer"></div>
+            <div class="row2">
+              <div class="field"><label>Roblox group ID <span class="hint">(optional)</span></label><input type="number" id="newRoleGroupId" placeholder="e.g. 123456"></div>
+              <div class="field"><label>Minimum rank <span class="hint">(optional)</span></label><input type="number" id="newRoleMinRank" placeholder="e.g. 100" min="0" max="255"></div>
+            </div>
+            <div class="field">
+              <label>Permissions</label>
+              <div class="perm-check-grid">
+                ${ALL_PERMISSIONS.map(p => `
+                  <label class="perm-check-item"><input type="checkbox" class="newRolePerm" value="${p}"> ${esc(PERMISSION_LABELS[p])}</label>`).join('')}
+              </div>
+            </div>
+            <button class="btn btn-ok" id="addRoleBtn" ${addingRole ? 'disabled' : ''}>${addingRole ? 'Adding...' : 'Add role'}</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="preview-label">Manual assignments</div>
+          <p class="sub" style="margin:0 0 14px;">Grant a role to a specific Roblox account regardless of group rank. Useful for one-off access.</p>
+          ${assignments.length === 0 ? `<div class="empty-note">No manual assignments yet.</div>` : assignments.map(a => `
+            <div class="assignment-row">
+              <span>${esc(a.roblox_username || a.roblox_user_id)} &rarr; <strong>${esc((a.roles && a.roles.name) || 'Unknown role')}</strong></span>
+              <button class="btn btn-ghost btn-sm" data-del-assignment="${esc(a.id)}">Remove</button>
+            </div>`).join('')}
+
+          <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
+            <div class="preview-label">Assign a role</div>
+            ${addAssignmentError ? `<div class="error-box"><span>${esc(addAssignmentError)}</span></div>` : ''}
+            <div class="field"><label>Roblox user ID</label><input type="number" id="newAssignmentUserId" placeholder="e.g. 1234567"></div>
+            <div class="field">
+              <label>Role</label>
+              <select id="newAssignmentRoleId" ${roles.length === 0 ? 'disabled' : ''}>
+                <option value="">${roles.length === 0 ? 'No roles available' : 'Select a role'}</option>
+                ${roles.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}
+              </select>
+            </div>
+            <button class="btn btn-primary" id="addAssignmentBtn" ${addingAssignment || roles.length === 0 ? 'disabled' : ''}>${addingAssignment ? 'Assigning...' : 'Assign role'}</button>
+          </div>
+        </div>
+      </div>` : ''}
+    </div>`;
+
+        wireTopbarSignOut();
+
+        if (canManageRate) {
+          const saveRateBtn = document.getElementById('saveRateBtn');
+          if (saveRateBtn) saveRateBtn.addEventListener('click', async () => {
+            const input = document.getElementById('ratePer10k');
+            const per10k = Number(input.value);
+            if (!(per10k >= 0)) { rateError = 'Enter a valid, non-negative number.'; rateSuccess = false; paint(); return; }
+            savingRate = true; rateError = null; rateSuccess = false; paint();
+            try {
+              await saveDevexRate(per10k / 10000);
+              savingRate = false; rateSuccess = true; paint();
+            } catch (err) {
+              savingRate = false;
+              rateError = (err && err.message) ? err.message : 'Could not save the rate. Check your connection and try again.';
+              paint();
+            }
+          });
+        }
+
+        if (canManageGames) {
+          const addGameBtn = document.getElementById('addGameBtn');
+          if (addGameBtn) addGameBtn.addEventListener('click', async () => {
+            const input = document.getElementById('newGameName');
+            const name = input.value.trim();
+            if (!name) { gameError = 'Enter a game name.'; paint(); return; }
+            addingGame = true; gameError = null; paint();
+            try {
+              await addGame(name);
+              addingGame = false; paint();
+            } catch (err) {
+              addingGame = false;
+              gameError = (err && err.message) ? err.message : 'Could not add that game, it may already exist.';
+              paint();
+            }
+          });
+
+          document.querySelectorAll('[data-del-game]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delGame;
+            if (!confirm('Remove this game from the list? Existing requests keep the game name they were logged with.')) return;
+            try {
+              await deleteGame(id);
+              paint();
+            } catch (err) {
+              alert('Could not remove that game. Check your connection and try again.');
+            }
+          }));
+        }
+
+        if (canManageRoles) {
+          const addRoleBtn = document.getElementById('addRoleBtn');
+          if (addRoleBtn) addRoleBtn.addEventListener('click', async () => {
+            const name = document.getElementById('newRoleName').value.trim();
+            const groupId = document.getElementById('newRoleGroupId').value;
+            const minRank = document.getElementById('newRoleMinRank').value;
+            const permissions = Array.from(document.querySelectorAll('.newRolePerm:checked')).map(el => el.value);
+            if (!name) { addRoleError = 'Enter a role name.'; paint(); return; }
+            addingRole = true; addRoleError = null; paint();
+            try {
+              await addRole({ name, robloxGroupId: groupId, minRank, permissions });
+              addingRole = false;
+              await loadRoles();
+            } catch (err) {
+              addingRole = false;
+              addRoleError = (err && err.message) ? err.message : 'Could not add that role.';
+              paint();
+            }
+          });
+
+          document.querySelectorAll('[data-del-role]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delRole;
+            if (!confirm('Remove this role? Anyone who only had access through it will lose access.')) return;
+            try {
+              await deleteRole(id);
+              await loadRoles();
+            } catch (err) {
+              alert('Could not remove that role. Check your connection and try again.');
+            }
+          }));
+
+          const addAssignmentBtn = document.getElementById('addAssignmentBtn');
+          if (addAssignmentBtn) addAssignmentBtn.addEventListener('click', async () => {
+            const userId = document.getElementById('newAssignmentUserId').value;
+            const roleId = document.getElementById('newAssignmentRoleId').value;
+            if (!userId || !roleId) { addAssignmentError = 'Enter a Roblox user ID and pick a role.'; paint(); return; }
+            addingAssignment = true; addAssignmentError = null; paint();
+            try {
+              await addRoleAssignment(roleId, userId);
+              addingAssignment = false;
+              await loadAssignments();
+            } catch (err) {
+              addingAssignment = false;
+              addAssignmentError = (err && err.message) ? err.message : 'Could not assign that role.';
+              paint();
+            }
+          });
+
+          document.querySelectorAll('[data-del-assignment]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delAssignment;
+            try {
+              await deleteRoleAssignment(id);
+              await loadAssignments();
+            } catch (err) {
+              alert('Could not remove that assignment. Check your connection and try again.');
+            }
+          }));
+        }
+      }
+
+      async function loadRoles() {
+        rolesLoading = true; rolesError = null; paint();
+        try {
+          roles = await listRoles();
+        } catch (err) {
+          rolesError = (err && err.message) ? err.message : 'Could not load roles.';
+        }
+        rolesLoading = false;
+        paint();
+      }
+
+      async function loadAssignments() {
+        try {
+          assignments = await listRoleAssignments();
+        } catch (err) {
+          assignments = [];
+        }
+        paint();
+      }
+
+      paint();
+      if (canManageRoles) {
+        loadRoles().then(loadAssignments);
+      }
+    }
+
+    function renderCreateView() {
+      let submitted = false;
+      let submitting = false;
+      let submitError = null;
+      let fieldErrors = {};
+
+      function currentData() {
+        const username = document.getElementById('f_username')?.value.trim() || '';
+        const task = document.getElementById('f_task')?.value.trim() || '';
+        const game = document.getElementById('f_game')?.value || '';
+        const workRaw = document.getElementById('f_work')?.value || '';
+        const timeWorked = document.getElementById('f_time')?.value.trim() || '';
+        const paymentRaw = document.getElementById('f_payment')?.value || '0';
+        const currency = document.getElementById('f_currency')?.value || 'ROBUX';
+        const requestedBy = document.getElementById('f_requester')?.value.trim() || '';
+        return {
+          id: genId(), robloxUsername: username, taskName: task, game, workRaw, timeWorked,
+          payment: Number(paymentRaw) || 0, currency, requestedBy, createdAt: Date.now(), paid: false, paidAt: null
+        };
+      }
+
+      function validate(data) {
+        const errs = {};
+        if (!data.robloxUsername) errs.f_username = 'Roblox username is required.';
+        if (!data.taskName) errs.f_task = 'Task name is required.';
+        if (!data.game) errs.f_game = 'Select which game this work was for.';
+        if (!data.payment || data.payment <= 0) errs.f_payment = 'Enter a payment amount greater than 0.';
+        return errs;
+      }
+
+      function paint() {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      <div class="heading-block">
+        <span class="eyebrow">Internal tool</span>
+        <h1>Submit a payment request</h1>
+        <p class="sub">Fill in the work you completed and send it straight to HR. No links to copy or send, it shows up on their dashboard automatically.</p>
+      </div>
+
+      ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
+
+      ${submitted ? `
+      <div class="confirm-box">
+        <div class="icon">&#10003;</div>
+        <div class="txt"><strong>Request submitted</strong><span>The HR team can see it now on their dashboard.</span></div>
+      </div>
+      <button class="btn btn-ghost" id="anotherBtn" style="margin-bottom:26px;">Submit another request</button>
+      ` : ''}
+
+      <div class="create-grid">
+        <div class="panel">
+          ${submitError ? `<div class="error-box"><span>${esc(submitError)}</span></div>` : ''}
+          <div class="field">
+            <label>Roblox Username</label>
+            <input type="text" id="f_username" placeholder="Builderman" class="${fieldErrors.f_username ? 'field-invalid' : ''}">
+            ${fieldErrors.f_username ? `<div class="err-hint">${esc(fieldErrors.f_username)}</div>` : ''}
+          </div>
+          <div class="field">
+            <label>Game</label>
+            <select id="f_game" class="${fieldErrors.f_game ? 'field-invalid' : ''}" ${!appDataReady || GAMES.length === 0 ? 'disabled' : ''}>
+              <option value="">${!appDataReady ? 'Loading games...' : (GAMES.length ? 'Select a game' : 'No games configured yet')}</option>
+              ${GAMES.map(g => `<option value="${esc(g.name)}">${esc(g.name)}</option>`).join('')}
+            </select>
+            ${fieldErrors.f_game ? `<div class="err-hint">${esc(fieldErrors.f_game)}</div>` : ''}
+            ${appDataReady && GAMES.length === 0 ? `<div class="err-hint" style="color:var(--muted);">Ask HR to add a game from the Manage panel first.</div>` : ''}
+          </div>
+          <div class="field">
+            <label>Task Name</label>
+            <input type="text" id="f_task" placeholder="Rebirth System" class="${fieldErrors.f_task ? 'field-invalid' : ''}">
+            ${fieldErrors.f_task ? `<div class="err-hint">${esc(fieldErrors.f_task)}</div>` : ''}
+          </div>
+          <div class="field">
+            <label>Work Completed <span class="hint">(one line per item)</span></label>
+            <textarea id="f_work" placeholder="Added stuff to the rebirth system"></textarea>
+          </div>
+          <div class="row3">
+            <div class="field"><label>Time Worked</label><input type="text" id="f_time" placeholder="2h 30m"></div>
+            <div class="field">
+              <label>Payment Amount</label>
+              <input type="number" id="f_payment" placeholder="1250" min="0" class="${fieldErrors.f_payment ? 'field-invalid' : ''}">
+              ${fieldErrors.f_payment ? `<div class="err-hint">${esc(fieldErrors.f_payment)}</div>` : ''}
+            </div>
+            <div class="field">
+              <label>Currency</label>
+              <select id="f_currency">
+                <option value="ROBUX">Robux</option>
+                <option value="USD">USD ($)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
+          <div class="field"><label>Requested by <span class="hint">(optional)</span></label><input type="text" id="f_requester" placeholder="Your name"></div>
+          <button class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
+        </div>
+
+        <div>
+          <div class="preview-label">Live preview</div>
+          <div id="previewSlot">${renderInvoice(currentData())}</div>
+        </div>
+      </div>
+    </div>`;
+
+        wireTopbarSignOut();
+
+        const ids = ['f_username', 'f_task', 'f_game', 'f_work', 'f_time', 'f_payment', 'f_currency', 'f_requester'];
+        ids.forEach(id => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.addEventListener('input', updatePreview);
+          el.addEventListener('change', updatePreview);
+        });
+
+        const submitBtn = document.getElementById('submitBtn');
+        if (submitBtn) submitBtn.addEventListener('click', handleSubmit);
+
+        const anotherBtn = document.getElementById('anotherBtn');
+        if (anotherBtn) anotherBtn.addEventListener('click', () => { submitted = false; submitError = null; fieldErrors = {}; paint(); });
+      }
+
+      function updatePreview() {
+        const slot = document.getElementById('previewSlot');
+        if (slot) slot.innerHTML = renderInvoice(currentData());
+      }
+
+      async function handleSubmit() {
+        const data = currentData();
+        const errs = validate(data);
+        if (Object.keys(errs).length) {
+          fieldErrors = errs;
+          submitError = 'Please fix the highlighted fields before submitting.';
+          paint();
+          return;
+        }
+        fieldErrors = {};
+        submitting = true; submitError = null; paint();
+        try {
+          await saveRequest(data);
+          submitting = false; submitted = true; paint();
+        } catch (err) {
+          submitting = false;
+          submitError = (err && err.message) ? err.message : 'Could not submit your request. Check your connection and try again.';
+          paint();
+        }
+      }
+
+      paint();
+    }
+  </script>
+</body>
+
+</html>
