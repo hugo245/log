@@ -873,6 +873,20 @@
       margin-top: 2px;
     }
 
+    table.req-table td.name-cell .method-note {
+      font-size: 11px;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    table.req-table td.name-cell .method-note.has-method {
+      color: var(--ok-text);
+    }
+
+    table.req-table td.name-cell .method-note.missing-method {
+      color: var(--warn-text);
+    }
+
     table.req-table td.task-cell {
       max-width: 240px;
     }
@@ -1359,7 +1373,7 @@
 
     const PAYMENT_METHODS = {
       PAYPAL: { label: 'PayPal', sub: 'Paid to your PayPal email address', fields: [{ key: 'paypalEmail', label: 'PayPal email', type: 'text', placeholder: 'you@example.com' }] },
-      DEVEX_ROBUX: { label: 'Robux', sub: 'Paid in Robux via the Roblox groups', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
+      DEVEX_ROBUX: { label: 'Robux', sub: 'Paid in Robux via the Roblox groups,', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
       VENMO: { label: 'Venmo', sub: 'Paid to your Venmo username', fields: [{ key: 'venmoUsername', label: 'Venmo username', type: 'text', placeholder: '@your-venmo' }] }
     };
 
@@ -1544,8 +1558,18 @@
         currency: row.currency || 'ROBUX',
         paid: !!row.paid,
         paidAt: row.paid_at ? new Date(row.paid_at).getTime() : null,
-        createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now()
+        createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+        paymentMethod: row.payment_method || null
       };
+    }
+
+    function methodDisplayLabel(pm) {
+      if (!pm) return null;
+      const def = PAYMENT_METHODS[pm.method];
+      if (!def) return null;
+      const key = def.fields[0].key;
+      const val = (pm.details || {})[key] || '';
+      return `${def.label}: ${val}`;
     }
 
     async function loadGames() {
@@ -2071,7 +2095,7 @@
             <tr>
               <td><button class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
               <td class="id-cell mono">${esc(r.id)}</td>
-              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${esc(r.robloxUsername || '-')}</span></td>
+              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${esc(r.robloxUsername || '-')}</span>${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}</div></td>
               <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
               <td>${esc(r.timeWorked || '-')}</td>
@@ -2904,12 +2928,13 @@
       function updateMethodWarning() {
         const slot = document.getElementById('methodWarningSlot');
         if (!slot) return;
-        const currency = document.getElementById('f_currency')?.value || 'ROBUX';
-        if (currency === 'USD' && myMethodLoaded && !myMethod) {
-          slot.innerHTML = `<div class="error-box" style="background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-text);"><span>You haven't set up a payment method yet, HR won't know how to pay you. <a href="#/my" style="color:inherit;font-weight:700;">Set one up on My payments</a>.</span></div>`;
+        if (myMethodLoaded && !myMethod) {
+          slot.innerHTML = `<div class="error-box" style="background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-text);"><span>You haven't set up a payment method yet, so you can't submit a request until you do. <a href="#/my" style="color:inherit;font-weight:700;">Set one up on My payments</a>.</span></div>`;
         } else {
           slot.innerHTML = '';
         }
+        const submitBtn = document.getElementById('submitBtn');
+        if (submitBtn) submitBtn.disabled = submitting || !!configError || (myMethodLoaded && !myMethod);
       }
 
       async function loadMyMethod() {
@@ -2923,6 +2948,11 @@
       }
 
       async function handleSubmit() {
+        if (myMethodLoaded && !myMethod) {
+          submitError = 'Set up a payment method on My payments before submitting a request.';
+          paint();
+          return;
+        }
         const data = currentData();
         const errs = validate(data);
         if (Object.keys(errs).length) {

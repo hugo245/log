@@ -142,11 +142,14 @@ async function computeGroupEligibility(robloxUserId) {
     if (!requiredGroups || requiredGroups.length === 0) return [];
 
     const memberships = await fetchRobloxGroupRoles(robloxUserId);
-    const groupIdsJoined = new Set(memberships.map(m => m.group.id));
+    // Compare as strings: Supabase can return bigint columns as either a
+    // JS number or string depending on size, and mixing types with Set.has()
+    // silently fails, which was showing real members as "not in the group".
+    const groupIdsJoined = new Set(memberships.map(m => String(m.group.id)));
 
     const results = [];
     for (const rg of requiredGroups) {
-        const isMember = groupIdsJoined.has(rg.roblox_group_id);
+        const isMember = groupIdsJoined.has(String(rg.roblox_group_id));
 
         results.push({
             id: rg.id,
@@ -395,7 +398,36 @@ app.post('/hr-data', async (req, res) => {
             .select('*')
             .order('created_at', { ascending: false });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        res.json({ ok: true, data });
+
+        const rows = data || [];
+        const userIds = [...new Set(rows.filter(r => r.roblox_user_id != null).map(r => r.roblox_user_id))];
+        const usernames = [...new Set(rows.filter(r => r.roblox_user_id == null && r.roblox_username).map(r => r.roblox_username))];
+
+        let methodRows = [];
+        if (userIds.length) {
+            const { data: byId } = await supabase.from('payment_methods').select('*').in('roblox_user_id', userIds);
+            methodRows = methodRows.concat(byId || []);
+        }
+        if (usernames.length) {
+            const { data: byUsername } = await supabase.from('payment_methods').select('*').in('roblox_username', usernames);
+            methodRows = methodRows.concat(byUsername || []);
+        }
+
+        const methodByUserId = {};
+        const methodByUsername = {};
+        methodRows.forEach(m => {
+            methodByUserId[m.roblox_user_id] = m;
+            if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m;
+        });
+
+        rows.forEach(r => {
+            const m = (r.roblox_user_id != null ? methodByUserId[r.roblox_user_id] : null)
+                || (r.roblox_username ? methodByUsername[r.roblox_username.toLowerCase()] : null)
+                || null;
+            r.payment_method = m ? { method: m.method, details: m.details || {} } : null;
+        });
+
+        res.json({ ok: true, data: rows });
         return;
     }
 
