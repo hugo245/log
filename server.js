@@ -36,8 +36,15 @@ const PERMISSIONS = [
     'dashboard.export',
     'settings.manage_games',
     'settings.manage_rate',
+    'settings.manage_groups',
     'roles.manage'
 ];
+
+const PAYMENT_METHOD_TYPES = {
+    PAYPAL: { fields: ['paypalEmail'] },
+    DEVEX_ROBUX: { fields: ['robloxUsername'] },
+    BANK_TRANSFER: { fields: ['iban', 'accountName'] }
+};
 
 const app = express();
 app.use(express.json());
@@ -76,6 +83,18 @@ async function fetchRobloxGroupRoles(robloxUserId) {
     return (json && json.data) || [];
 }
 
+async function resolveRobloxUserId(username) {
+    const res = await fetch('https://users.roblox.com/v1/usernames/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+    });
+    if (!res.ok) return null;
+    const json = await res.json().catch(() => null);
+    const match = json && json.data && json.data[0];
+    return match ? match.id : null;
+}
+
 async function computeAccess(robloxUserId) {
     const { data: roles, error: rolesErr } = await supabase.from('roles').select('*');
     if (rolesErr) throw rolesErr;
@@ -109,6 +128,44 @@ async function computeAccess(robloxUserId) {
         roleNames: matchedRoles.map(r => r.name),
         permissions: Array.from(permissionSet)
     };
+}
+
+// Checks a Roblox user against every configured required_groups row and
+// returns eligibility per group (membership only), caching the result in
+// group_eligibility_cache.
+async function computeGroupEligibility(robloxUserId) {
+    const { data: requiredGroups, error: groupsErr } = await supabase
+        .from('required_groups')
+        .select('*')
+        .order('name', { ascending: true });
+    if (groupsErr) throw groupsErr;
+    if (!requiredGroups || requiredGroups.length === 0) return [];
+
+    const memberships = await fetchRobloxGroupRoles(robloxUserId);
+    const groupIdsJoined = new Set(memberships.map(m => m.group.id));
+
+    const results = [];
+    for (const rg of requiredGroups) {
+        const isMember = groupIdsJoined.has(rg.roblox_group_id);
+
+        results.push({
+            id: rg.id,
+            robloxGroupId: rg.roblox_group_id,
+            name: rg.name,
+            isMember,
+            eligible: isMember
+        });
+
+        await supabase.from('group_eligibility_cache').upsert({
+            roblox_user_id: robloxUserId,
+            required_group_id: rg.id,
+            is_member: isMember,
+            eligible: isMember,
+            checked_at: new Date().toISOString()
+        }, { onConflict: 'roblox_user_id,required_group_id' });
+    }
+
+    return results;
 }
 
 function hasPermission(session, permission) {
@@ -342,6 +399,126 @@ app.post('/hr-data', async (req, res) => {
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
+        return;
+    }
+
+    // Any signed-in user can see how much is owed to them and their own history.
+    // Matching is done case-insensitively against the Roblox username the
+    // request was logged under, since that's the only link back to a person.
+    if (action === 'get_my_summary') {
+        const { data, error } = await supabase
+            .from('payment_requests')
+            .select('*')
+            .ilike('roblox_username', session.roblox_username)
+            .order('created_at', { ascending: false });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+
+        const totals = {};
+        (data || []).forEach(row => {
+            const cur = row.currency || 'ROBUX';
+            if (!totals[cur]) totals[cur] = { pending: 0, paid: 0 };
+            if (row.paid) totals[cur].paid += Number(row.payment) || 0;
+            else totals[cur].pending += Number(row.payment) || 0;
+        });
+
+        res.json({ ok: true, data, totals });
+        return;
+    }
+
+    if (action === 'get_payment_method') {
+        const { data, error } = await supabase
+            .from('payment_methods')
+            .select('*')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data ? { method: data.method, details: data.details || {} } : null });
+        return;
+    }
+
+    if (action === 'save_payment_method') {
+        const method = payload.method;
+        const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
+        const methodDef = PAYMENT_METHOD_TYPES[method];
+        if (!methodDef) { res.status(400).json({ ok: false, error: 'invalid_method' }); return; }
+        const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
+        if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
+
+        const cleanDetails = {};
+        methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim(); });
+
+        const { error } = await supabase.from('payment_methods').upsert({
+            roblox_user_id: session.roblox_user_id,
+            roblox_username: session.roblox_username,
+            method,
+            details: cleanDetails,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'roblox_user_id' });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_required_groups') {
+        // Readable by any signed-in user so they can see what's required of them.
+        const { data, error } = await supabase
+            .from('required_groups')
+            .select('*')
+            .order('name', { ascending: true });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data });
+        return;
+    }
+
+    if (action === 'add_required_group') {
+        if (!requirePermission(res, session, 'settings.manage_groups')) return;
+        const robloxGroupId = Number(payload.robloxGroupId);
+        const name = payload.name && String(payload.name).trim();
+        if (!robloxGroupId || !name) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        const { error } = await supabase.from('required_groups').insert({
+            roblox_group_id: robloxGroupId,
+            name
+        });
+        if (error?.code === '23505') {
+            return res.status(400).json({ ok: false, error: 'That group is already configured.' });
+        }
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_required_group') {
+        if (!requirePermission(res, session, 'settings.manage_groups')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('required_groups').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_my_eligibility') {
+        try {
+            const data = await computeGroupEligibility(session.roblox_user_id);
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'eligibility_check_failed' });
+        }
+        return;
+    }
+
+    if (action === 'get_user_eligibility') {
+        if (!requirePermission(res, session, 'dashboard.view')) return;
+        const robloxUsername = payload.robloxUsername && String(payload.robloxUsername).trim();
+        if (!robloxUsername) { res.status(400).json({ ok: false, error: 'missing_username' }); return; }
+        try {
+            const userId = await resolveRobloxUserId(robloxUsername);
+            if (!userId) { res.status(404).json({ ok: false, error: 'roblox_user_not_found' }); return; }
+            const data = await computeGroupEligibility(userId);
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'eligibility_check_failed' });
+        }
         return;
     }
 

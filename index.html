@@ -1138,6 +1138,195 @@
       border-bottom: none;
     }
 
+    .owed-hero {
+      background: linear-gradient(135deg, #171A21, #2A2E63);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      color: #fff;
+      margin-bottom: 24px;
+    }
+
+    .owed-hero .owed-label {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: rgba(255, 255, 255, .65);
+      margin-bottom: 10px;
+    }
+
+    .owed-hero .owed-amounts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 28px;
+      align-items: baseline;
+    }
+
+    .owed-hero .owed-amount {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .owed-hero .owed-amount .val {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -.4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .owed-hero .owed-amount .val img {
+      height: .82em;
+      width: .82em;
+      object-fit: contain;
+    }
+
+    .owed-hero .owed-amount .cur-label {
+      font-size: 12.5px;
+      color: rgba(255, 255, 255, .6);
+      font-weight: 600;
+    }
+
+    .owed-hero .owed-sub {
+      margin-top: 14px;
+      font-size: 12.5px;
+      color: rgba(255, 255, 255, .55);
+    }
+
+    .method-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .method-option input {
+      width: auto;
+    }
+
+    .method-option.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .method-option .mo-label {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--ink);
+    }
+
+    .method-option .mo-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+    }
+
+    .elig-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+    }
+
+    .elig-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .elig-check {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+      flex-shrink: 0;
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border: 1px solid var(--warn-line);
+    }
+
+    .elig-check.is-ok {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      border: 1px solid var(--ok-line);
+    }
+
+    .elig-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--ink);
+    }
+
+    .elig-meta {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .elig-summary {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin-bottom: 14px;
+      font-size: 13.5px;
+      font-weight: 600;
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border: 1px solid var(--warn-line);
+    }
+
+    .elig-summary.is-ok {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      border: 1px solid var(--ok-line);
+    }
+
+    .eligibility-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+      margin-top: 4px;
+    }
+
+    .eligibility-chip.eligible {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      border: 1px solid var(--ok-line);
+    }
+
+    .eligibility-chip.not-eligible {
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border: 1px solid var(--warn-line);
+    }
+
+    .eligibility-chip.unknown {
+      background: var(--bg);
+      color: var(--muted);
+      border: 1px solid var(--line);
+    }
+
     ::selection {
       background: var(--accent-soft);
     }
@@ -1163,9 +1352,16 @@
       'dashboard.export': 'Export / copy data',
       'settings.manage_games': 'Manage games',
       'settings.manage_rate': 'Manage DevEx rate',
+      'settings.manage_groups': 'Manage payout eligibility groups',
       'roles.manage': 'Manage roles and access'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
+
+    const PAYMENT_METHODS = {
+      PAYPAL: { label: 'PayPal', sub: 'Paid to your PayPal email address', fields: [{ key: 'paypalEmail', label: 'PayPal email', type: 'text', placeholder: 'you@example.com' }] },
+      DEVEX_ROBUX: { label: 'DevEx (Robux)', sub: 'Paid in Robux via the Roblox group, cashed out yourself via DevEx', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
+      BANK_TRANSFER: { label: 'Bank transfer', sub: 'Direct transfer to your bank account', fields: [{ key: 'iban', label: 'IBAN', type: 'text', placeholder: 'BE00 0000 0000 0000' }, { key: 'accountName', label: 'Account holder name', type: 'text', placeholder: 'Full name on the account' }] }
+    };
 
     let supabaseClient = null;
     let configError = null;
@@ -1514,6 +1710,46 @@
       await callHrData('delete_role_assignment', { id });
     }
 
+    async function getMySummary() {
+      const json = await callHrData('get_my_summary');
+      return {
+        requests: (json.data || []).map(rowToClient),
+        totals: json.totals || {}
+      };
+    }
+
+    async function getMyPaymentMethod() {
+      const json = await callHrData('get_payment_method');
+      return json.data || null;
+    }
+
+    async function savePaymentMethod(method, details) {
+      await callHrData('save_payment_method', { method, details });
+    }
+
+    async function listRequiredGroups() {
+      const json = await callHrData('list_required_groups');
+      return json.data || [];
+    }
+
+    async function addRequiredGroup(group) {
+      await callHrData('add_required_group', group);
+    }
+
+    async function deleteRequiredGroup(id) {
+      await callHrData('delete_required_group', { id });
+    }
+
+    async function getMyEligibility() {
+      const json = await callHrData('get_my_eligibility');
+      return json.data || [];
+    }
+
+    async function getUserEligibility(robloxUsername) {
+      const json = await callHrData('get_user_eligibility', { robloxUsername });
+      return json.data || [];
+    }
+
     function rowToTSV(d) {
       const items = parseWorkLines(d.workRaw || '');
       const work = items.map(i => i.rest ? `${i.lead} ${i.rest}` : i.lead).join(' | ');
@@ -1688,6 +1924,8 @@
         if (isHrAuthed) renderDashboard(); else renderHrGate();
       } else if (path === '#/manage') {
         if (isHrAuthed) renderManagePanel(); else renderHrGate();
+      } else if (path === '#/my') {
+        if (isHrAuthed) renderMyPayments(); else renderHrGate();
       } else {
         renderCreateView();
       }
@@ -1697,14 +1935,14 @@
 
     function topbar() {
       const canSeeDashboard = isHrAuthed && hasPermission('dashboard.view');
-      const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('roles.manage'));
+      const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage'));
       return `
     <div class="topbar">
       <a class="brand" href="#"><span class="dot"></span>HugoLabs<small>Payment Log</small></a>
       <div class="topbar-right">
         <a class="link" href="https://www.hugolabs.eu" target="_blank" rel="noopener">hugolabs.eu</a>
         ${isHrAuthed
-          ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span>${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
+          ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span><a class="hr-pill" href="#/my">My payments</a>${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
           : `<a class="hr-pill" href="#/hr">Sign in</a>`}
       </div>
     </div>`;
@@ -1751,12 +1989,14 @@
     }
 
     function renderDashboard() {
-      if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('roles.manage') ? '#/manage' : '#/'; return; }
+      if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage') ? '#/manage' : '#/'; return; }
       let allRequests = [];
       let filter = 'pending';
       let expanded = new Set();
       let loading = true;
       let loadError = null;
+      let eligibilityCache = {};
+      let eligibilityLoading = new Set();
 
       const canMarkPaid = hasPermission('dashboard.mark_paid');
       const canExport = hasPermission('dashboard.export');
@@ -1779,7 +2019,7 @@
           <p class="sub">All team members see the same dashboard, every change you will make will get saved instantly.</p>
         </div>
         <div class="dash-toolbar">
-          ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('roles.manage')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
+          ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
           <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
           ${canExport ? `<button class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
         </div>
@@ -1843,13 +2083,36 @@
                 ${canExport ? `<button class="btn btn-ghost btn-sm" data-copy="${esc(r.id)}">Copy row</button>` : ''}
               </td>
             </tr>`;
+          const cacheEntry = eligibilityCache[r.robloxUsername];
+          const isElLoading = eligibilityLoading.has(r.robloxUsername);
           const detailHtml = isOpen ? `
             <tr class="detail-row">
               <td colspan="10">
                 ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
+                <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
+                  <div style="font-size:10.5px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.6px;margin-bottom:8px;">Payout eligibility</div>
+                  ${cacheEntry ? renderEligibilityList(cacheEntry) : `<button class="btn btn-ghost btn-sm" data-check-elig="${esc(r.robloxUsername)}" ${isElLoading ? 'disabled' : ''}>${isElLoading ? 'Checking...' : 'Check eligibility'}</button>`}
+                </div>
               </td>
             </tr>` : '';
           return rowHtml + detailHtml;
+        }
+
+        function renderEligibilityList(list) {
+          if (!list.length) return `<div class="empty-note">No eligibility groups configured yet.</div>`;
+          const allEligible = list.every(g => g.eligible);
+          return `
+            <div class="elig-summary ${allEligible ? 'is-ok' : ''}">${allEligible ? 'Eligible' : 'Not yet eligible'}</div>
+            ${list.map(g => `
+              <div class="elig-row">
+                <div class="elig-left">
+                  <div class="elig-check ${g.eligible ? 'is-ok' : ''}">${g.eligible ? '&#10003;' : '&middot;'}</div>
+                  <div>
+                    <div class="elig-name">${esc(g.name)}</div>
+                    <div class="elig-meta">${g.isMember ? 'Member' : 'Not a member'}</div>
+                  </div>
+                </div>
+              </div>`).join('')}`;
         }
 
         document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.filter; paint(); }));
@@ -1894,6 +2157,20 @@
           if (r) copyText([TSV_HEADER, rowToTSV(r)].join('\n'), e.currentTarget, 'Copied!');
         }));
 
+        document.querySelectorAll('[data-check-elig]').forEach(b => b.addEventListener('click', async (e) => {
+          const username = b.dataset.checkElig;
+          eligibilityLoading.add(username);
+          paint();
+          try {
+            const data = await getUserEligibility(username);
+            eligibilityCache[username] = data;
+          } catch (err) {
+            eligibilityCache[username] = [];
+          }
+          eligibilityLoading.delete(username);
+          paint();
+        }));
+
         document.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async (e) => {
           const id = b.dataset.paid;
           const r = allRequests.find(x => x.id === id);
@@ -1927,18 +2204,221 @@
       load();
     }
 
+    function renderMyPayments() {
+      let summary = null;
+      let loading = true;
+      let loadError = null;
+
+      let method = null;
+      let methodLoading = true;
+      let selectedMethod = 'PAYPAL';
+      let methodDetails = {};
+      let savingMethod = false;
+      let methodError = null;
+      let methodSaved = false;
+
+      let eligibility = [];
+      let eligibilityLoading = true;
+      let eligibilityError = null;
+
+      function paint() {
+        const totals = (summary && summary.totals) || {};
+        const pendingRequests = summary ? summary.requests.filter(r => !r.paid) : [];
+        const paidRequests = summary ? summary.requests.filter(r => r.paid) : [];
+        const currencies = Object.keys(totals);
+
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      <div class="heading-block">
+        <span class="eyebrow">Your account</span>
+        <h1>My payments</h1>
+        <p class="sub">Everything you're owed, how you'd like to get paid, and whether you currently meet the requirements to be paid out.</p>
+      </div>
+
+      ${loading ? `<div class="dash-loading">Loading your payment info...</div>` : loadError ? `
+        <div class="error-box"><span>${esc(loadError)}</span></div>
+      ` : `
+        <div class="owed-hero">
+          <div class="owed-label">Total currently owed to you</div>
+          ${currencies.length === 0 ? `<div style="color:rgba(255,255,255,.7);font-size:14px;">No pending payment requests logged for you yet.</div>` : `
+          <div class="owed-amounts">
+            ${currencies.map(cur => `
+              <div class="owed-amount">
+                <span class="val">${cur === 'ROBUX' ? `<img src="${ROBUX_IMG}" alt="Robux">${Number(totals[cur].pending || 0).toLocaleString()}` : `$${Number(totals[cur].pending || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</span>
+                <span class="cur-label">${cur === 'ROBUX' ? 'Robux pending' : 'USD pending'}</span>
+              </div>`).join('')}
+          </div>`}
+          <div class="owed-sub">${pendingRequests.length} pending request${pendingRequests.length === 1 ? '' : 's'} &middot; ${paidRequests.length} paid to date &middot; ${devexLabel()}</div>
+        </div>
+      `}
+
+      <div class="manage-grid">
+        <div class="panel">
+          <div class="preview-label">Payout eligibility</div>
+          ${eligibilityLoading ? `<div class="dash-loading">Checking eligibility...</div>` : eligibilityError ? `<div class="error-box"><span>${esc(eligibilityError)}</span></div>` : eligibility.length === 0 ? `<div class="empty-note">No eligibility requirements have been configured. You're clear to be paid.</div>` : `
+            <div class="elig-summary ${eligibility.every(g => g.eligible) ? 'is-ok' : ''}">${eligibility.every(g => g.eligible) ? 'You meet the requirements to be paid' : 'You do not meet all requirements yet'}</div>
+            ${eligibility.map(g => `
+              <div class="elig-row">
+                <div class="elig-left">
+                  <div class="elig-check ${g.eligible ? 'is-ok' : ''}">${g.eligible ? '&#10003;' : '&middot;'}</div>
+                  <div>
+                    <div class="elig-name">${esc(g.name)}</div>
+                    <div class="elig-meta">${g.isMember ? 'You are a member' : 'Not a member yet'}</div>
+                  </div>
+                </div>
+                ${!g.isMember ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(g.robloxGroupId)}" target="_blank" rel="noopener">Join group</a>` : ''}
+              </div>`).join('')}
+          `}
+        </div>
+
+        <div class="panel">
+          <div class="preview-label">Payment method</div>
+          ${methodError ? `<div class="error-box"><span>${esc(methodError)}</span></div>` : ''}
+          ${methodSaved ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Payment method saved</strong><span>HR will use these details for your next payout.</span></div></div>` : ''}
+          ${methodLoading ? `<div class="dash-loading">Loading your saved details...</div>` : `
+            <div class="field">
+              <label>How would you like to be paid?</label>
+              ${Object.keys(PAYMENT_METHODS).map(key => `
+                <label class="method-option ${selectedMethod === key ? 'active' : ''}">
+                  <input type="radio" name="methodChoice" value="${key}" ${selectedMethod === key ? 'checked' : ''}>
+                  <div>
+                    <div class="mo-label">${esc(PAYMENT_METHODS[key].label)}</div>
+                    <div class="mo-sub">${esc(PAYMENT_METHODS[key].sub)}</div>
+                  </div>
+                </label>`).join('')}
+            </div>
+            <div id="methodFieldsSlot"></div>
+            <button class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
+          `}
+        </div>
+      </div>
+
+      ${!loading && !loadError ? `
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">History</span>
+        <h1>Your requests</h1>
+      </div>
+      <div class="table-wrap">
+        ${summary.requests.length === 0 ? `<div class="dash-empty"><h3>Nothing here yet</h3><p>Once a request is logged for you, it'll show up here.</p></div>` : `
+        <div class="table-scroll">
+          <table class="req-table">
+            <thead><tr><th>ID</th><th>Task</th><th>Game</th><th>Payment</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody>
+              ${summary.requests.map(r => `
+                <tr>
+                  <td class="id-cell mono">${esc(r.id)}</td>
+                  <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div></td>
+                  <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
+                  <td class="pay-cell">${fmtAmount(r)}</td>
+                  <td><span class="status-chip ${r.paid ? 'paid' : 'pending'}">${r.paid ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : 'Pending'}</span></td>
+                  <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+      </div>` : ''}
+    </div>`;
+
+        wireTopbarSignOut();
+        paintMethodFields();
+
+        document.querySelectorAll('input[name="methodChoice"]').forEach(el => el.addEventListener('change', () => {
+          selectedMethod = el.value;
+          methodDetails = {};
+          paint();
+        }));
+
+        const saveMethodBtn = document.getElementById('saveMethodBtn');
+        if (saveMethodBtn) saveMethodBtn.addEventListener('click', handleSaveMethod);
+      }
+
+      function paintMethodFields() {
+        const slot = document.getElementById('methodFieldsSlot');
+        if (!slot) return;
+        const def = PAYMENT_METHODS[selectedMethod];
+        slot.innerHTML = def.fields.map(f => `
+          <div class="field">
+            <label>${esc(f.label)}</label>
+            <input type="${f.type}" data-method-field="${f.key}" placeholder="${esc(f.placeholder || '')}" value="${esc(methodDetails[f.key] || '')}">
+          </div>`).join('');
+        slot.querySelectorAll('[data-method-field]').forEach(el => el.addEventListener('input', () => {
+          methodDetails[el.dataset.methodField] = el.value;
+        }));
+      }
+
+      async function handleSaveMethod() {
+        const def = PAYMENT_METHODS[selectedMethod];
+        const missing = def.fields.find(f => !String(methodDetails[f.key] || '').trim());
+        if (missing) { methodError = `Enter a value for "${missing.label}".`; methodSaved = false; paint(); return; }
+        savingMethod = true; methodError = null; methodSaved = false; paint();
+        try {
+          await savePaymentMethod(selectedMethod, methodDetails);
+          savingMethod = false; methodSaved = true; paint();
+        } catch (err) {
+          savingMethod = false;
+          methodError = (err && err.message) ? err.message : 'Could not save your payment method. Check your connection and try again.';
+          paint();
+        }
+      }
+
+      async function loadSummary() {
+        loading = true; loadError = null; paint();
+        try {
+          summary = await getMySummary();
+        } catch (err) {
+          loadError = (err && err.message) ? err.message : 'Could not load your payment summary.';
+        }
+        loading = false;
+        paint();
+      }
+
+      async function loadMethod() {
+        methodLoading = true; paint();
+        try {
+          method = await getMyPaymentMethod();
+          if (method) { selectedMethod = method.method; methodDetails = method.details || {}; }
+        } catch (err) { }
+        methodLoading = false;
+        paint();
+      }
+
+      async function loadEligibility() {
+        eligibilityLoading = true; eligibilityError = null; paint();
+        try {
+          eligibility = await getMyEligibility();
+        } catch (err) {
+          eligibilityError = (err && err.message) ? err.message : 'Could not check your group eligibility.';
+        }
+        eligibilityLoading = false;
+        paint();
+      }
+
+      paint();
+      loadSummary();
+      loadMethod();
+      loadEligibility();
+    }
+
     function renderManagePanel() {
       const canManageGames = hasPermission('settings.manage_games');
       const canManageRate = hasPermission('settings.manage_rate');
+      const canManageGroups = hasPermission('settings.manage_groups');
       const canManageRoles = hasPermission('roles.manage');
 
-      if (!canManageGames && !canManageRate && !canManageRoles) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+      if (!canManageGames && !canManageRate && !canManageGroups && !canManageRoles) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
 
       let savingRate = false;
       let rateError = null;
       let rateSuccess = false;
       let addingGame = false;
       let gameError = null;
+
+      let requiredGroups = [];
+      let groupsLoading = canManageGroups;
+      let groupsError = null;
+      let addingGroup = false;
+      let addGroupError = null;
 
       let roles = [];
       let assignments = [];
@@ -1993,6 +2473,36 @@
           <button class="btn btn-ok" id="addGameBtn" ${addingGame ? 'disabled' : ''}>${addingGame ? 'Adding...' : 'Add game'}</button>
         </div>` : ''}
       </div>
+
+      ${canManageGroups ? `
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">Payout requirements</span>
+        <h1>Eligibility groups</h1>
+        <p class="sub">People must be a member of every group listed here before they're marked eligible to be paid.</p>
+      </div>
+      <div class="panel" style="max-width:640px;">
+        ${groupsError ? `<div class="error-box"><span>${esc(groupsError)}</span></div>` : ''}
+        ${groupsLoading ? `<div class="dash-loading">Loading groups...</div>` : requiredGroups.length === 0 ? `<div class="empty-note">No eligibility groups configured yet, everyone is currently treated as eligible.</div>` : requiredGroups.map(g => `
+          <div class="role-row">
+            <div class="role-row-top">
+              <div>
+                <strong>${esc(g.name)}</strong>
+                <div class="role-meta">Group ID ${esc(g.roblox_group_id)}</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" data-del-group="${esc(g.id)}">Remove</button>
+            </div>
+          </div>`).join('')}
+
+        <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
+          <div class="preview-label">Add a required group</div>
+          ${addGroupError ? `<div class="error-box"><span>${esc(addGroupError)}</span></div>` : ''}
+          <div class="row2">
+            <div class="field"><label>Roblox group ID</label><input type="number" id="newGroupId" placeholder="e.g. 123456"></div>
+            <div class="field"><label>Display name</label><input type="text" id="newGroupName" placeholder="e.g. HugoLabs Studio"></div>
+          </div>
+          <button class="btn btn-ok" id="addGroupBtn" ${addingGroup ? 'disabled' : ''}>${addingGroup ? 'Adding...' : 'Add group'}</button>
+        </div>
+      </div>` : ''}
 
       ${canManageRoles ? `
       <div class="heading-block" style="margin-top:36px;">
@@ -2113,6 +2623,36 @@
           }));
         }
 
+        if (canManageGroups) {
+          const addGroupBtn = document.getElementById('addGroupBtn');
+          if (addGroupBtn) addGroupBtn.addEventListener('click', async () => {
+            const groupId = document.getElementById('newGroupId').value;
+            const name = document.getElementById('newGroupName').value.trim();
+            if (!groupId || !name) { addGroupError = 'Enter a group ID and a display name.'; paint(); return; }
+            addingGroup = true; addGroupError = null; paint();
+            try {
+              await addRequiredGroup({ robloxGroupId: groupId, name });
+              addingGroup = false;
+              await loadGroups();
+            } catch (err) {
+              addingGroup = false;
+              addGroupError = (err && err.message) ? err.message : 'Could not add that group.';
+              paint();
+            }
+          });
+
+          document.querySelectorAll('[data-del-group]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delGroup;
+            if (!confirm('Remove this eligibility requirement?')) return;
+            try {
+              await deleteRequiredGroup(id);
+              await loadGroups();
+            } catch (err) {
+              alert('Could not remove that group. Check your connection and try again.');
+            }
+          }));
+        }
+
         if (canManageRoles) {
           const addRoleBtn = document.getElementById('addRoleBtn');
           if (addRoleBtn) addRoleBtn.addEventListener('click', async () => {
@@ -2173,6 +2713,17 @@
         }
       }
 
+      async function loadGroups() {
+        groupsLoading = true; groupsError = null; paint();
+        try {
+          requiredGroups = await listRequiredGroups();
+        } catch (err) {
+          groupsError = (err && err.message) ? err.message : 'Could not load groups.';
+        }
+        groupsLoading = false;
+        paint();
+      }
+
       async function loadRoles() {
         rolesLoading = true; rolesError = null; paint();
         try {
@@ -2194,6 +2745,7 @@
       }
 
       paint();
+      if (canManageGroups) loadGroups();
       if (canManageRoles) {
         loadRoles().then(loadAssignments);
       }
