@@ -97,15 +97,6 @@ async function resolveRobloxUserId(username) {
     return match ? match.id : null;
 }
 
-// ---------------------------------------------------------------------------
-// Base access gate: a person must belong to a specific Roblox group, at or
-// above a minimum rank, before they are allowed to sign in at all. This is
-// separate from the fine-grained roles/permissions system below - it's a
-// blanket "are you even a developer" check. Configured via app_settings
-// (base_group_id / base_min_rank). If no group is configured, the gate is
-// open (everyone who can authenticate with Roblox is allowed through).
-// ---------------------------------------------------------------------------
-
 async function getBaseAccessConfig() {
     const { data, error } = await supabase
         .from('app_settings')

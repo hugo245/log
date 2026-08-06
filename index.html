@@ -2077,12 +2077,12 @@
       } else if (path === '#/my') {
         if (isHrAuthed) renderMyPayments(); else renderHrGate();
       } else if (path === '#/new') {
-        if (isHrAuthed) renderCreateView(); else renderHrGate();
+        if (isHrAuthed && canSubmitRequests()) renderCreateView(); else if (isHrAuthed) renderMyPayments(); else renderHrGate();
       } else {
         if (isHrAuthed) {
-          if (canSubmitRequests()) renderCreateView(); else renderMyPayments();
+          renderMyPayments();
         } else {
-          renderCreateView();
+          renderHrGate();
         }
       }
     }
@@ -2496,7 +2496,7 @@
                 <span class="cur-label">${cur === 'ROBUX' ? 'Robux pending' : 'USD pending'}</span>
               </div>`).join('')}
           </div>`}
-          <div class="owed-sub">${pendingRequests.length} pending request${pendingRequests.length === 1 ? '' : 's'} &middot; ${paidRequests.length} paid to date &middot; ${devexLabel()}</div>
+          <div class="owed-sub">${pendingRequests.length} pending request${pendingRequests.length === 1 ? '' : 's'}, ${paidRequests.length} paid to date, ${devexLabel()}</div>
         </div>
       `}
 
@@ -2697,7 +2697,7 @@
       <div class="heading-block">
         <span class="eyebrow">Sign-in access</span>
         <h1>Who can sign in</h1>
-        <p class="sub">Set the Roblox group and minimum rank someone needs before they're allowed to sign in at all. Anyone below this rank, or not in the group, is blocked at login &mdash; this is the "you have to at least be a developer" gate. Leave the group ID blank to allow any Roblox account to sign in.</p>
+        <p class="sub">Set the Roblox group and minimum rank someone needs before they're allowed to sign in at all. Anyone below this rank, or not in the group, is blocked at login, this is the "you have to at least be a developer" gate. Leave the group ID blank to allow any Roblox account to sign in.</p>
       </div>
       <div class="panel" style="max-width:520px;margin-bottom:36px;">
         ${baseAccessError ? `<div class="error-box"><span>${esc(baseAccessError)}</span></div>` : ''}
@@ -2780,7 +2780,7 @@
       <div class="heading-block" style="margin-top:36px;">
         <span class="eyebrow">Access control</span>
         <h1>Roles and permissions</h1>
-        <p class="sub">A role can be tied to a Roblox group and minimum rank, or assigned directly to individual accounts. A user gets the union of permissions from every role they qualify for. This is separate from the sign-in gate above &mdash; someone can sign in but still hold no roles, and see an empty tool until a role is granted.</p>
+        <p class="sub">A role can be tied to a Roblox group and minimum rank, or assigned directly to individual accounts. A user gets the union of permissions from every role they qualify for. Developers should only be given roles that grant them their own payments view, only roles that grant "Submit payment requests" should be used for producers or HR who log requests on a developer's behalf. This is separate from the sign-in gate above, someone can sign in but still hold no roles, and see an empty tool until a role is granted.</p>
       </div>
 
       <div class="manage-grid">
@@ -3123,7 +3123,7 @@
       <div class="heading-block">
         <span class="eyebrow">Producer tool</span>
         <h1>Log a payment for a developer</h1>
-        <p class="sub">Fill in the work a developer completed and send it to HR review. This is filled out on their behalf, they don't need to submit anything themselves &mdash; they'll see it appear under "My payments" automatically.</p>
+        <p class="sub">You're submitting this on behalf of a developer. Fill in the work they completed and send it to HR review. They don't submit anything themselves, they'll see it appear under "My payments" automatically once you log it here.</p>
       </div>
 
       ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
@@ -3179,7 +3179,7 @@
             </div>
           </div>
           <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
-          <div class="field"><label>Requested by (you)</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
+          <div class="field"><label>Submitted by (you)</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
           <button class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
         </div>
 
