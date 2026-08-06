@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HugoLabs Payment Log</title>
+  <title>PlayVerse Payment Log</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -1453,8 +1453,8 @@
     const EDGE_BASE = 'https://nobbiest-proboxing-corine.ngrok-free.dev';
     const GAMES_TABLE = 'games';
     const SETTINGS_TABLE = 'app_settings';
-    const SESSION_STORAGE_KEY = 'hl_hr_session_token';
-    const RETURN_HASH_KEY = 'hl_return_hash';
+    const SESSION_STORAGE_KEY = 'pv_hr_session_token';
+    const RETURN_HASH_KEY = 'pv_return_hash';
 
     const PERMISSION_LABELS = {
       'dashboard.view': 'View dashboard',
@@ -1610,7 +1610,7 @@
       return `
     <div class="invoice">
       <div class="invoice-top">
-        <div class="brand"><span class="dot"></span>HugoLabs</div>
+        <div class="brand"><span class="dot"></span>PlayVerse</div>
         <div class="doc-type">
           <div class="doc-label">Payment Request</div>
           <div class="doc-id mono">${esc(data.id)}</div>
@@ -1913,7 +1913,7 @@
 
     async function exportRequestsToXlsx(rows, sheetLabel) {
       const workbook = new ExcelJS.Workbook();
-      workbook.creator = 'HugoLabs Payment Log';
+      workbook.creator = 'PlayVerse Payment Log';
       workbook.created = new Date();
 
       const sheetName = (sheetLabel || 'Payments').slice(0, 31);
@@ -1934,7 +1934,7 @@
 
       sheet.mergeCells('A1:J3');
       const banner = sheet.getCell('A1');
-      banner.value = 'HugoLabs Payment Log';
+      banner.value = 'PlayVerse Payment Log';
       banner.font = { name: 'Arial', size: 20, bold: true, color: { argb: 'FFFFFFFF' } };
       banner.alignment = { vertical: 'middle', horizontal: 'left', indent: 2 };
       for (let r = 1; r <= 3; r++) {
@@ -1994,7 +1994,7 @@
       const a = document.createElement('a');
       const stamp = new Date().toISOString().slice(0, 10);
       a.href = url;
-      a.download = `hugolabs-payments-${(sheetLabel || 'all').toLowerCase()}-${stamp}.xlsx`;
+      a.download = `playverse-payments-${(sheetLabel || 'all').toLowerCase()}-${stamp}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -2094,9 +2094,9 @@
       const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage'));
       return `
     <div class="topbar">
-      <a class="brand" href="#"><span class="dot"></span>HugoLabs<small>Payment Log</small></a>
+      <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
-        <a class="link" href="https://www.hugolabs.eu" target="_blank" rel="noopener">hugolabs.eu</a>
+        <a class="link" href="https://www.playverse.gg" target="_blank" rel="noopener">playverse.gg</a>
         ${isHrAuthed
           ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span><a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
           : `<a class="hr-pill" href="#/hr">Sign in</a>`}
@@ -2132,13 +2132,13 @@
       <div class="gate-card">
         <div class="gate-icon">PV</div>
         <h2>Sign in</h2>
-        <p>Sign in with your Roblox account. You'll need to be a member of the studio group at the required rank, and your access level inside the tool is based on the role assigned to your Roblox group rank or account.</p>
+        <p>Sign in with your Roblox account. You'll need to be in the studio group at the required rank. What you can do here depends on the role tied to your rank or account.</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         ${message ? `<div class="error-box"><span>${esc(message)}</span></div>` : ''}
         <button class="btn btn-primary roblox-btn" id="robloxSignInBtn" ${configError ? 'disabled' : ''}>
           Sign in with Roblox
         </button>
-        <div class="gate-note">You need a Roblox account, and to be in the studio group at the required rank, to use this tool.</div>
+        <div class="gate-note">You need a Roblox account and studio group access at the required rank to use this tool.</div>
       </div>
     </div>`;
 
@@ -2187,7 +2187,7 @@
         <div>
           <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Payment requests</h1>
-          <p class="sub">All team members see the same dashboard, every change you make is saved instantly.</p>
+          <p class="sub">Everyone on the team sees the same list, updates save right away.</p>
         </div>
         <div class="dash-toolbar">
           ${canSubmitRequests() ? `<a class="btn btn-ghost btn-sm" href="#/new">New request</a>` : ''}
@@ -2480,7 +2480,7 @@
       <div class="heading-block">
         <span class="eyebrow">Your account</span>
         <h1>My payments</h1>
-        <p class="sub">Everything you're owed, how you'd like to get paid, and whether you currently meet the requirements to be paid out. Payment requests are logged by a producer on your behalf, you don't need to submit anything yourself.</p>
+        <p class="sub">What you're owed, how you get paid, and whether you meet the payout requirements. A producer logs requests for you, so there's nothing to submit yourself.</p>
       </div>
 
       ${loading ? `<div class="dash-loading">Loading your payment info...</div>` : loadError ? `
@@ -2690,14 +2690,14 @@
       <div class="heading-block">
         <span class="eyebrow">HR dashboard</span>
         <h1>Manage</h1>
-        <p class="sub">Manage the application here, every change is automatically saved for everyone.</p>
+        <p class="sub">Changes here save automatically and apply for everyone.</p>
       </div>
 
       ${canManageBaseAccess ? `
       <div class="heading-block">
         <span class="eyebrow">Sign-in access</span>
         <h1>Who can sign in</h1>
-        <p class="sub">Set the Roblox group and minimum rank someone needs before they're allowed to sign in at all. Anyone below this rank, or not in the group, is blocked at login, this is the "you have to at least be a developer" gate. Leave the group ID blank to allow any Roblox account to sign in.</p>
+        <p class="sub">Choose the Roblox group and minimum rank required to sign in. Anyone below that rank, or not in the group, gets blocked at login. Leave the group ID blank to let any Roblox account sign in.</p>
       </div>
       <div class="panel" style="max-width:520px;margin-bottom:36px;">
         ${baseAccessError ? `<div class="error-box"><span>${esc(baseAccessError)}</span></div>` : ''}
@@ -2750,7 +2750,7 @@
       <div class="heading-block" style="margin-top:36px;">
         <span class="eyebrow">Payout requirements</span>
         <h1>Eligibility groups</h1>
-        <p class="sub">People must be a member of every group listed here before they're marked eligible to be paid.</p>
+        <p class="sub">Someone must be in every group listed here to be marked eligible for payout.</p>
       </div>
       <div class="panel" style="max-width:640px;">
         ${groupsError ? `<div class="error-box"><span>${esc(groupsError)}</span></div>` : ''}
@@ -2770,7 +2770,7 @@
           ${addGroupError ? `<div class="error-box"><span>${esc(addGroupError)}</span></div>` : ''}
           <div class="row2">
             <div class="field"><label>Roblox group ID</label><input type="number" id="newGroupId" placeholder="e.g. 123456"></div>
-            <div class="field"><label>Display name</label><input type="text" id="newGroupName" placeholder="e.g. HugoLabs Studio"></div>
+            <div class="field"><label>Display name</label><input type="text" id="newGroupName" placeholder="e.g. PlayVerse Studio"></div>
           </div>
           <button class="btn btn-ok" id="addGroupBtn" ${addingGroup ? 'disabled' : ''}>${addingGroup ? 'Adding...' : 'Add group'}</button>
         </div>
@@ -2780,7 +2780,7 @@
       <div class="heading-block" style="margin-top:36px;">
         <span class="eyebrow">Access control</span>
         <h1>Roles and permissions</h1>
-        <p class="sub">A role can be tied to a Roblox group and minimum rank, or assigned directly to individual accounts. A user gets the union of permissions from every role they qualify for. Developers should only be given roles that grant them their own payments view, only roles that grant "Submit payment requests" should be used for producers or HR who log requests on a developer's behalf. This is separate from the sign-in gate above, someone can sign in but still hold no roles, and see an empty tool until a role is granted.</p>
+        <p class="sub">Roles can tie to a Roblox group and rank, or get assigned to a specific account. A user gets every permission from every role they qualify for. Give developers roles for their own payments view, and give "Submit payment requests" to producers or HR logging on behalf of others. This is separate from sign-in access above, someone can sign in but have no roles and see an empty tool until one is granted.</p>
       </div>
 
       <div class="manage-grid">
@@ -2822,7 +2822,7 @@
 
         <div class="panel">
           <div class="preview-label">Manual assignments</div>
-          <p class="sub" style="margin:0 0 14px;">Grant a role to a specific Roblox account regardless of group rank. Useful for one-off access.</p>
+          <p class="sub" style="margin:0 0 14px;">Give a role to one Roblox account, regardless of group rank.</p>
           ${assignments.length === 0 ? `<div class="empty-note">No manual assignments yet.</div>` : assignments.map(a => `
             <div class="assignment-row">
               <span>${esc(a.roblox_username || a.roblox_user_id)} &rarr; <strong>${esc((a.roles && a.roles.name) || 'Unknown role')}</strong></span>
@@ -3066,7 +3066,7 @@
       <div class="lock-card">
         <div class="gate-icon">PV</div>
         <h2>Sign in to continue</h2>
-        <p>You need to sign in with your Roblox account, and be in the studio group at the required rank, before you can log a payment request.</p>
+        <p>Sign in with your Roblox account and be in the studio group at the required rank to log a payment request.</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         <button class="btn btn-primary roblox-btn" id="lockSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
         <div class="lock-note">You can't log a request until you sign in.</div>
@@ -3123,7 +3123,7 @@
       <div class="heading-block">
         <span class="eyebrow">Producer tool</span>
         <h1>Log a payment for a developer</h1>
-        <p class="sub">You're submitting this on behalf of a developer. Fill in the work they completed and send it to HR review. They don't submit anything themselves, they'll see it appear under "My payments" automatically once you log it here.</p>
+        <p class="sub">Log this on behalf of a developer. Fill in what they completed and send it for HR review, it'll show up under their "My payments" once submitted.</p>
       </div>
 
       ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
@@ -3131,7 +3131,7 @@
       ${submitted ? `
       <div class="confirm-box">
         <div class="icon">&#10003;</div>
-        <div class="txt"><strong>Request submitted</strong><span>The HR team can see it now on their dashboard, and the developer will see it under their own payments.</span></div>
+        <div class="txt"><strong>Request submitted</strong><span>HR can see it on the dashboard now, and the developer will see it under their payments.</span></div>
       </div>
       <button class="btn btn-ghost" id="anotherBtn" style="margin-bottom:26px;">Log another request</button>
       ` : ''}
@@ -3254,7 +3254,7 @@
         if (targetMethodLoading) {
           slot.innerHTML = `<div class="hint" style="margin-left:0;display:block;margin-top:6px;">Checking payment method on file...</div>`;
         } else if (targetMethodLoaded && !targetMethod) {
-          slot.innerHTML = `<div class="warn-box" style="margin-top:10px;margin-bottom:0;"><span>This developer hasn't set up a payment method yet. You can still submit this request, but let them know to add one under "My payments" before it can be paid out.</span></div>`;
+          slot.innerHTML = `<div class="warn-box" style="margin-top:10px;margin-bottom:0;"><span>No payment method on file yet. You can still submit this, but they'll need to add one under "My payments" before it gets paid.</span></div>`;
         } else if (targetMethodLoaded && targetMethod) {
           slot.innerHTML = `<div class="hint" style="margin-left:0;display:block;margin-top:6px;color:var(--ok-text);">On file: ${esc(methodDisplayLabel(targetMethod))}</div>`;
         } else {
@@ -3293,18 +3293,18 @@
             paint();
             alert(
               'Request failed.\n\n' +
-              'The developer must be a member of every required payout group before a Robux request can be submitted for them. They are missing:\n\n' +
+              'The developer is missing:\n\n' +
               missingGroups.map(g => '- ' + g.name).join('\n') +
-              '\n\nHave them join the missing group(s), then try again.'
+              '\n\nHave them join, then try again.'
             );
             return;
           }
 
-          const beenInLongEnough = confirm('Has the developer been in all the required payout groups for over 2 weeks?');
+          const beenInLongEnough = confirm('Has the developer been in all required groups for over 2 weeks?');
           if (!beenInLongEnough) {
             const proceedAnyway = confirm(
-              'Since they may not have been in the group(s) for at least 2 weeks, this request might get rejected by HR.\n\n' +
-              'Submit it anyway for review?'
+              'HR may reject this if they haven\'t been in the group(s) for 2 weeks yet.\n\n' +
+              'Submit anyway?'
             );
             if (!proceedAnyway) {
               submitting = false;
