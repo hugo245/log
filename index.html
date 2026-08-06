@@ -639,6 +639,20 @@
       gap: 10px;
     }
 
+    .warn-box {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-line);
+      color: var(--warn-text);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
     .gate-shell {
       max-width: 400px;
       margin: 90px auto;
@@ -1446,9 +1460,11 @@
       'dashboard.view': 'View dashboard',
       'dashboard.mark_paid': 'Mark requests paid',
       'dashboard.export': 'Export / copy data',
+      'dashboard.submit_request': 'Submit payment requests (on behalf of a developer)',
       'settings.manage_games': 'Manage games',
       'settings.manage_rate': 'Manage DevEx rate',
       'settings.manage_groups': 'Manage payout eligibility groups',
+      'settings.manage_base_access': 'Manage sign-in access requirement',
       'roles.manage': 'Manage roles and access'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
@@ -1488,6 +1504,10 @@
 
     function hasPermission(permission) {
       return hrPermissions.includes(permission);
+    }
+
+    function canSubmitRequests() {
+      return isHrAuthed && hasPermission('dashboard.submit_request');
     }
 
     function devexLabel() {
@@ -1839,6 +1859,11 @@
       return json.data || null;
     }
 
+    async function getPaymentMethodForUser(robloxUsername) {
+      const json = await callHrData('get_payment_method_for_user', { robloxUsername });
+      return json.data || null;
+    }
+
     async function savePaymentMethod(method, details) {
       await callHrData('save_payment_method', { method, details });
     }
@@ -1864,6 +1889,15 @@
     async function getUserEligibility(robloxUsername) {
       const json = await callHrData('get_user_eligibility', { robloxUsername });
       return json.data || [];
+    }
+
+    async function getBaseAccess() {
+      const json = await callHrData('get_base_access');
+      return json.data || { groupId: null, minRank: null };
+    }
+
+    async function saveBaseAccess(groupId, minRank) {
+      await callHrData('save_base_access', { groupId, minRank });
     }
 
     function rowToTSV(d) {
@@ -2042,8 +2076,14 @@
         if (isHrAuthed) renderManagePanel(); else renderHrGate();
       } else if (path === '#/my') {
         if (isHrAuthed) renderMyPayments(); else renderHrGate();
+      } else if (path === '#/new') {
+        if (isHrAuthed) renderCreateView(); else renderHrGate();
       } else {
-        renderCreateView();
+        if (isHrAuthed) {
+          if (canSubmitRequests()) renderCreateView(); else renderMyPayments();
+        } else {
+          renderCreateView();
+        }
       }
     }
     window.addEventListener('hashchange', route);
@@ -2051,14 +2091,14 @@
 
     function topbar() {
       const canSeeDashboard = isHrAuthed && hasPermission('dashboard.view');
-      const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage'));
+      const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage'));
       return `
     <div class="topbar">
       <a class="brand" href="#"><span class="dot"></span>HugoLabs<small>Payment Log</small></a>
       <div class="topbar-right">
         <a class="link" href="https://www.hugolabs.eu" target="_blank" rel="noopener">hugolabs.eu</a>
         ${isHrAuthed
-          ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span><a class="hr-pill" href="#/my">My payments</a>${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
+          ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span><a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
           : `<a class="hr-pill" href="#/hr">Sign in</a>`}
       </div>
     </div>`;
@@ -2080,7 +2120,9 @@
         userinfo_failed: 'Could not read your Roblox profile, please try again.',
         hr_check_failed: 'Could not check your access, please try again.',
         session_create_failed: 'Could not start your session, please try again.',
-        session_invalid: 'Your sign-in could not be confirmed, please try again.'
+        session_invalid: 'Your sign-in could not be confirmed, please try again.',
+        base_access_check_failed: 'Could not verify your Roblox group membership, please try again.',
+        not_eligible: 'You need to be in the required Roblox group, at the right rank, to use this tool.'
       };
       const message = err ? (errorMessages[err] || 'Could not sign you in, please try again.') : null;
 
@@ -2090,13 +2132,13 @@
       <div class="gate-card">
         <div class="gate-icon">PV</div>
         <h2>Sign in</h2>
-        <p>Sign in with your Roblox account. Your access level is based on the role assigned to your Roblox group rank or account.</p>
+        <p>Sign in with your Roblox account. You'll need to be a member of the studio group at the required rank, and your access level inside the tool is based on the role assigned to your Roblox group rank or account.</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         ${message ? `<div class="error-box"><span>${esc(message)}</span></div>` : ''}
         <button class="btn btn-primary roblox-btn" id="robloxSignInBtn" ${configError ? 'disabled' : ''}>
           Sign in with Roblox
         </button>
-        <div class="gate-note">You need a Roblox account to use this tool.</div>
+        <div class="gate-note">You need a Roblox account, and to be in the studio group at the required rank, to use this tool.</div>
       </div>
     </div>`;
 
@@ -2105,7 +2147,7 @@
     }
 
     function renderDashboard() {
-      if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage') ? '#/manage' : '#/'; return; }
+      if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') ? '#/manage' : '#/'; return; }
       let allRequests = [];
       let filter = 'pending';
       let search = '';
@@ -2148,7 +2190,8 @@
           <p class="sub">All team members see the same dashboard, every change you make is saved instantly.</p>
         </div>
         <div class="dash-toolbar">
-          ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
+          ${canSubmitRequests() ? `<a class="btn btn-ghost btn-sm" href="#/new">New request</a>` : ''}
+          ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
           <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
           ${canExport ? `<button class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
         </div>
@@ -2248,7 +2291,7 @@
                 ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
                 <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
                   <div style="font-size:10.5px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.6px;margin-bottom:8px;">Payout eligibility</div>
-                  ${cacheEntry ? renderEligibilityList(cacheEntry) : `<button class="btn btn-ghost btn-sm" data-check-elig="${esc(r.robloxUsername)}" ${isElLoading ? 'disabled' : ''}>${isElLoading ? 'Checking...' : 'Check eligibility'}</button>`}
+                  ${cacheEntry ? renderEligibilityList(cacheEntry) : (canSubmitRequests() ? `<button class="btn btn-ghost btn-sm" data-check-elig="${esc(r.robloxUsername)}" ${isElLoading ? 'disabled' : ''}>${isElLoading ? 'Checking...' : 'Check eligibility'}</button>` : `<div class="empty-note">You don't have permission to check eligibility.</div>`)}
                 </div>
               </td>
             </tr>` : '';
@@ -2437,7 +2480,7 @@
       <div class="heading-block">
         <span class="eyebrow">Your account</span>
         <h1>My payments</h1>
-        <p class="sub">Everything you're owed, how you'd like to get paid, and whether you currently meet the requirements to be paid out.</p>
+        <p class="sub">Everything you're owed, how you'd like to get paid, and whether you currently meet the requirements to be paid out. Payment requests are logged by a producer on your behalf, you don't need to submit anything yourself.</p>
       </div>
 
       ${loading ? `<div class="dash-loading">Loading your payment info...</div>` : loadError ? `
@@ -2504,7 +2547,7 @@
         <h1>Your requests</h1>
       </div>
       <div class="table-wrap">
-        ${summary.requests.length === 0 ? `<div class="dash-empty"><h3>Nothing here yet</h3><p>Once a request is logged for you, it'll show up here.</p></div>` : `
+        ${summary.requests.length === 0 ? `<div class="dash-empty"><h3>Nothing here yet</h3><p>Once a producer logs a request for you, it'll show up here.</p></div>` : `
         <div class="table-scroll">
           <table class="req-table">
             <thead><tr><th>ID</th><th>Task</th><th>Game</th><th>Payment</th><th>Status</th><th>Date</th></tr></thead>
@@ -2608,9 +2651,10 @@
       const canManageGames = hasPermission('settings.manage_games');
       const canManageRate = hasPermission('settings.manage_rate');
       const canManageGroups = hasPermission('settings.manage_groups');
+      const canManageBaseAccess = hasPermission('settings.manage_base_access');
       const canManageRoles = hasPermission('roles.manage');
 
-      if (!canManageGames && !canManageRate && !canManageGroups && !canManageRoles) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+      if (!canManageGames && !canManageRate && !canManageGroups && !canManageBaseAccess && !canManageRoles) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
 
       let savingRate = false;
       let rateError = null;
@@ -2623,6 +2667,12 @@
       let groupsError = null;
       let addingGroup = false;
       let addGroupError = null;
+
+      let baseAccess = { groupId: null, minRank: null };
+      let baseAccessLoading = canManageBaseAccess;
+      let baseAccessError = null;
+      let savingBaseAccess = false;
+      let baseAccessSuccess = false;
 
       let roles = [];
       let assignments = [];
@@ -2642,6 +2692,24 @@
         <h1>Manage</h1>
         <p class="sub">Manage the application here, every change is automatically saved for everyone.</p>
       </div>
+
+      ${canManageBaseAccess ? `
+      <div class="heading-block">
+        <span class="eyebrow">Sign-in access</span>
+        <h1>Who can sign in</h1>
+        <p class="sub">Set the Roblox group and minimum rank someone needs before they're allowed to sign in at all. Anyone below this rank, or not in the group, is blocked at login &mdash; this is the "you have to at least be a developer" gate. Leave the group ID blank to allow any Roblox account to sign in.</p>
+      </div>
+      <div class="panel" style="max-width:520px;margin-bottom:36px;">
+        ${baseAccessError ? `<div class="error-box"><span>${esc(baseAccessError)}</span></div>` : ''}
+        ${baseAccessSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Sign-in requirement updated</strong><span>New sign-ins will be checked against this from now on.</span></div></div>` : ''}
+        ${baseAccessLoading ? `<div class="dash-loading">Loading current setting...</div>` : `
+          <div class="row2">
+            <div class="field"><label>Roblox group ID</label><input type="number" id="baseGroupId" placeholder="e.g. 123456" value="${baseAccess.groupId != null ? esc(baseAccess.groupId) : ''}"></div>
+            <div class="field"><label>Minimum rank <span class="hint">(optional, 0-255)</span></label><input type="number" id="baseMinRank" min="0" max="255" placeholder="e.g. 1" value="${baseAccess.minRank != null ? esc(baseAccess.minRank) : ''}"></div>
+          </div>
+          <button class="btn btn-primary" id="saveBaseAccessBtn" ${savingBaseAccess ? 'disabled' : ''}>${savingBaseAccess ? 'Saving...' : 'Save sign-in requirement'}</button>
+        `}
+      </div>` : ''}
 
       <div class="manage-grid">
         ${canManageRate ? `
@@ -2712,7 +2780,7 @@
       <div class="heading-block" style="margin-top:36px;">
         <span class="eyebrow">Access control</span>
         <h1>Roles and permissions</h1>
-        <p class="sub">A role can be tied to a Roblox group and minimum rank, or assigned directly to individual accounts. A user gets the union of permissions from every role they qualify for.</p>
+        <p class="sub">A role can be tied to a Roblox group and minimum rank, or assigned directly to individual accounts. A user gets the union of permissions from every role they qualify for. This is separate from the sign-in gate above &mdash; someone can sign in but still hold no roles, and see an empty tool until a role is granted.</p>
       </div>
 
       <div class="manage-grid">
@@ -2779,6 +2847,27 @@
     </div>`;
 
         wireTopbarSignOut();
+
+        if (canManageBaseAccess) {
+          const saveBaseAccessBtn = document.getElementById('saveBaseAccessBtn');
+          if (saveBaseAccessBtn) saveBaseAccessBtn.addEventListener('click', async () => {
+            const groupIdRaw = document.getElementById('baseGroupId').value;
+            const minRankRaw = document.getElementById('baseMinRank').value;
+            const groupId = groupIdRaw === '' ? null : Number(groupIdRaw);
+            const minRank = minRankRaw === '' ? null : Number(minRankRaw);
+            if (groupId != null && !(groupId > 0)) { baseAccessError = 'Enter a valid Roblox group ID, or leave it blank to allow anyone.'; baseAccessSuccess = false; paint(); return; }
+            savingBaseAccess = true; baseAccessError = null; baseAccessSuccess = false; paint();
+            try {
+              await saveBaseAccess(groupId, minRank);
+              baseAccess = { groupId, minRank };
+              savingBaseAccess = false; baseAccessSuccess = true; paint();
+            } catch (err) {
+              savingBaseAccess = false;
+              baseAccessError = (err && err.message) ? err.message : 'Could not save the sign-in requirement. Check your connection and try again.';
+              paint();
+            }
+          });
+        }
 
         if (canManageRate) {
           const saveRateBtn = document.getElementById('saveRateBtn');
@@ -2928,6 +3017,17 @@
         paint();
       }
 
+      async function loadBaseAccess() {
+        baseAccessLoading = true; baseAccessError = null; paint();
+        try {
+          baseAccess = await getBaseAccess();
+        } catch (err) {
+          baseAccessError = (err && err.message) ? err.message : 'Could not load the current sign-in requirement.';
+        }
+        baseAccessLoading = false;
+        paint();
+      }
+
       async function loadRoles() {
         rolesLoading = true; rolesError = null; paint();
         try {
@@ -2950,6 +3050,7 @@
 
       paint();
       if (canManageGroups) loadGroups();
+      if (canManageBaseAccess) loadBaseAccess();
       if (canManageRoles) {
         loadRoles().then(loadAssignments);
       }
@@ -2965,15 +3066,20 @@
       <div class="lock-card">
         <div class="gate-icon">PV</div>
         <h2>Sign in to continue</h2>
-        <p>You need to sign in with your Roblox account before you can submit a payment request. This lets HR verify who submitted each request.</p>
+        <p>You need to sign in with your Roblox account, and be in the studio group at the required rank, before you can log a payment request.</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         <button class="btn btn-primary roblox-btn" id="lockSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
-        <div class="lock-note">You can't submit a request until you sign in.</div>
+        <div class="lock-note">You can't log a request until you sign in.</div>
       </div>
     </div>`;
         wireTopbarSignOut();
         const btn = document.getElementById('lockSignInBtn');
-        if (btn) btn.addEventListener('click', () => beginLogin('#/'));
+        if (btn) btn.addEventListener('click', () => beginLogin('#/new'));
+        return;
+      }
+
+      if (!canSubmitRequests()) {
+        window.location.hash = '#/my';
         return;
       }
 
@@ -2981,8 +3087,11 @@
       let submitting = false;
       let submitError = null;
       let fieldErrors = {};
-      let myMethod = null;
-      let myMethodLoaded = false;
+      let targetMethod = null;
+      let targetMethodLoaded = false;
+      let targetMethodLoading = false;
+      let targetMethodLookupTimer = null;
+      let lastLookedUpUsername = '';
 
       function currentData() {
         const username = document.getElementById('f_username')?.value.trim() || '';
@@ -3000,7 +3109,7 @@
 
       function validate(data) {
         const errs = {};
-        if (!data.robloxUsername) errs.f_username = 'Roblox username is required.';
+        if (!data.robloxUsername) errs.f_username = "The developer's Roblox username is required.";
         if (!data.taskName) errs.f_task = 'Task name is required.';
         if (!data.game) errs.f_game = 'Select which game this work was for.';
         if (!data.payment || data.payment <= 0) errs.f_payment = 'Enter a payment amount greater than 0.';
@@ -3012,9 +3121,9 @@
     ${topbar()}
     <div class="shell">
       <div class="heading-block">
-        <span class="eyebrow">Internal tool</span>
-        <h1>Submit a payment request</h1>
-        <p class="sub">Fill in the work you completed and send it straight to HR. No links to copy or send, it shows up on their dashboard automatically.</p>
+        <span class="eyebrow">Producer tool</span>
+        <h1>Log a payment for a developer</h1>
+        <p class="sub">Fill in the work a developer completed and send it to HR review. This is filled out on their behalf, they don't need to submit anything themselves &mdash; they'll see it appear under "My payments" automatically.</p>
       </div>
 
       ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
@@ -3022,18 +3131,19 @@
       ${submitted ? `
       <div class="confirm-box">
         <div class="icon">&#10003;</div>
-        <div class="txt"><strong>Request submitted</strong><span>The HR team can see it now on their dashboard.</span></div>
+        <div class="txt"><strong>Request submitted</strong><span>The HR team can see it now on their dashboard, and the developer will see it under their own payments.</span></div>
       </div>
-      <button class="btn btn-ghost" id="anotherBtn" style="margin-bottom:26px;">Submit another request</button>
+      <button class="btn btn-ghost" id="anotherBtn" style="margin-bottom:26px;">Log another request</button>
       ` : ''}
 
       <div class="create-grid">
         <div class="panel">
           ${submitError ? `<div class="error-box"><span>${esc(submitError)}</span></div>` : ''}
           <div class="field">
-            <label>Roblox Username</label>
+            <label>Developer's Roblox Username</label>
             <input type="text" id="f_username" placeholder="Builderman" class="${fieldErrors.f_username ? 'field-invalid' : ''}">
             ${fieldErrors.f_username ? `<div class="err-hint">${esc(fieldErrors.f_username)}</div>` : ''}
+            <div id="methodWarningSlot"></div>
           </div>
           <div class="field">
             <label>Game</label>
@@ -3042,7 +3152,7 @@
               ${GAMES.map(g => `<option value="${esc(g.name)}">${esc(g.name)}</option>`).join('')}
             </select>
             ${fieldErrors.f_game ? `<div class="err-hint">${esc(fieldErrors.f_game)}</div>` : ''}
-            ${appDataReady && GAMES.length === 0 ? `<div class="err-hint" style="color:var(--muted);">Ask HR to add a game from the Manage panel first.</div>` : ''}
+            ${appDataReady && GAMES.length === 0 ? `<div class="err-hint" style="color:var(--muted);">Ask an admin to add a game from the Manage panel first.</div>` : ''}
           </div>
           <div class="field">
             <label>Task Name</label>
@@ -3068,9 +3178,8 @@
               </select>
             </div>
           </div>
-          <div id="methodWarningSlot"></div>
           <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
-          <div class="field"><label>Requested by</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
+          <div class="field"><label>Requested by (you)</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
           <button class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
         </div>
 
@@ -3090,14 +3199,23 @@
           el.addEventListener('input', updatePreview);
           el.addEventListener('change', updatePreview);
         });
-        document.getElementById('f_currency')?.addEventListener('change', updateMethodWarning);
-        updateMethodWarning();
+
+        const usernameInput = document.getElementById('f_username');
+        if (usernameInput) {
+          usernameInput.addEventListener('input', scheduleTargetMethodLookup);
+          usernameInput.addEventListener('blur', () => lookupTargetMethod(usernameInput.value.trim()));
+        }
+        renderMethodWarning();
 
         const submitBtn = document.getElementById('submitBtn');
         if (submitBtn) submitBtn.addEventListener('click', handleSubmit);
 
         const anotherBtn = document.getElementById('anotherBtn');
-        if (anotherBtn) anotherBtn.addEventListener('click', () => { submitted = false; submitError = null; fieldErrors = {}; paint(); });
+        if (anotherBtn) anotherBtn.addEventListener('click', () => {
+          submitted = false; submitError = null; fieldErrors = {};
+          targetMethod = null; targetMethodLoaded = false; lastLookedUpUsername = '';
+          paint();
+        });
       }
 
       function updatePreview() {
@@ -3105,34 +3223,46 @@
         if (slot) slot.innerHTML = renderInvoice(currentData());
       }
 
-      function updateMethodWarning() {
+      function scheduleTargetMethodLookup() {
+        const usernameInput = document.getElementById('f_username');
+        if (!usernameInput) return;
+        if (targetMethodLookupTimer) clearTimeout(targetMethodLookupTimer);
+        targetMethodLookupTimer = setTimeout(() => {
+          lookupTargetMethod(usernameInput.value.trim());
+        }, 500);
+      }
+
+      async function lookupTargetMethod(username) {
+        if (!username || username === lastLookedUpUsername) return;
+        lastLookedUpUsername = username;
+        targetMethodLoading = true;
+        targetMethodLoaded = false;
+        renderMethodWarning();
+        try {
+          targetMethod = await getPaymentMethodForUser(username);
+        } catch (err) {
+          targetMethod = null;
+        }
+        targetMethodLoading = false;
+        targetMethodLoaded = true;
+        renderMethodWarning();
+      }
+
+      function renderMethodWarning() {
         const slot = document.getElementById('methodWarningSlot');
         if (!slot) return;
-        if (myMethodLoaded && !myMethod) {
-          slot.innerHTML = `<div class="error-box" style="background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-text);"><span>You haven't set up a payment method yet, so you can't submit a request until you do. <a href="#/my" style="color:inherit;font-weight:700;">Set one up on My payments</a>.</span></div>`;
+        if (targetMethodLoading) {
+          slot.innerHTML = `<div class="hint" style="margin-left:0;display:block;margin-top:6px;">Checking payment method on file...</div>`;
+        } else if (targetMethodLoaded && !targetMethod) {
+          slot.innerHTML = `<div class="warn-box" style="margin-top:10px;margin-bottom:0;"><span>This developer hasn't set up a payment method yet. You can still submit this request, but let them know to add one under "My payments" before it can be paid out.</span></div>`;
+        } else if (targetMethodLoaded && targetMethod) {
+          slot.innerHTML = `<div class="hint" style="margin-left:0;display:block;margin-top:6px;color:var(--ok-text);">On file: ${esc(methodDisplayLabel(targetMethod))}</div>`;
         } else {
           slot.innerHTML = '';
         }
-        const submitBtn = document.getElementById('submitBtn');
-        if (submitBtn) submitBtn.disabled = submitting || !!configError || (myMethodLoaded && !myMethod);
-      }
-
-      async function loadMyMethod() {
-        try {
-          myMethod = await getMyPaymentMethod();
-        } catch (e) {
-          myMethod = null;
-        }
-        myMethodLoaded = true;
-        updateMethodWarning();
       }
 
       async function handleSubmit() {
-        if (myMethodLoaded && !myMethod) {
-          submitError = 'Set up a payment method on My payments before submitting a request.';
-          paint();
-          return;
-        }
         const data = currentData();
         const errs = validate(data);
         if (Object.keys(errs).length) {
@@ -3148,10 +3278,10 @@
 
           let eligibility = [];
           try {
-            eligibility = await getMyEligibility();
+            eligibility = await getUserEligibility(data.robloxUsername);
           } catch (err) {
             submitting = false;
-            submitError = 'Could not verify your payout group membership. Check your connection and try again.';
+            submitError = "Could not verify the developer's payout group membership. Check your connection and try again.";
             paint();
             return;
           }
@@ -3159,21 +3289,21 @@
           const missingGroups = eligibility.filter(g => !g.eligible);
           if (missingGroups.length > 0) {
             submitting = false;
-            submitError = 'Request failed: you are not a member of all required payout groups.';
+            submitError = 'Request failed: the developer is not a member of all required payout groups.';
             paint();
             alert(
               'Request failed.\n\n' +
-              'You must be a member of every required payout group before submitting a Robux request. You are missing:\n\n' +
+              'The developer must be a member of every required payout group before a Robux request can be submitted for them. They are missing:\n\n' +
               missingGroups.map(g => '- ' + g.name).join('\n') +
-              '\n\nJoin the missing group(s), then try again.'
+              '\n\nHave them join the missing group(s), then try again.'
             );
             return;
           }
 
-          const beenInLongEnough = confirm('Have you been in all the required payout groups for over 2 weeks?');
+          const beenInLongEnough = confirm('Has the developer been in all the required payout groups for over 2 weeks?');
           if (!beenInLongEnough) {
             const proceedAnyway = confirm(
-              'Since you may not have been in the group(s) for at least 2 weeks, this request might get rejected by HR.\n\n' +
+              'Since they may not have been in the group(s) for at least 2 weeks, this request might get rejected by HR.\n\n' +
               'Submit it anyway for review?'
             );
             if (!proceedAnyway) {
@@ -3190,13 +3320,12 @@
           submitting = false; submitted = true; paint();
         } catch (err) {
           submitting = false;
-          submitError = (err && err.message) ? err.message : 'Could not submit your request. Check your connection and try again.';
+          submitError = (err && err.message) ? err.message : 'Could not submit this request. Check your connection and try again.';
           paint();
         }
       }
 
       paint();
-      loadMyMethod();
     }
   </script>
 </body>

@@ -34,9 +34,11 @@ const PERMISSIONS = [
     'dashboard.view',
     'dashboard.mark_paid',
     'dashboard.export',
+    'dashboard.submit_request',
     'settings.manage_games',
     'settings.manage_rate',
     'settings.manage_groups',
+    'settings.manage_base_access',
     'roles.manage'
 ];
 
@@ -93,6 +95,39 @@ async function resolveRobloxUserId(username) {
     const json = await res.json().catch(() => null);
     const match = json && json.data && json.data[0];
     return match ? match.id : null;
+}
+
+// ---------------------------------------------------------------------------
+// Base access gate: a person must belong to a specific Roblox group, at or
+// above a minimum rank, before they are allowed to sign in at all. This is
+// separate from the fine-grained roles/permissions system below - it's a
+// blanket "are you even a developer" check. Configured via app_settings
+// (base_group_id / base_min_rank). If no group is configured, the gate is
+// open (everyone who can authenticate with Roblox is allowed through).
+// ---------------------------------------------------------------------------
+
+async function getBaseAccessConfig() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('base_group_id, base_min_rank')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return {
+        groupId: data && data.base_group_id != null ? Number(data.base_group_id) : null,
+        minRank: data && data.base_min_rank != null ? Number(data.base_min_rank) : null
+    };
+}
+
+async function checkBaseAccess(robloxUserId) {
+    const base = await getBaseAccessConfig();
+    if (!base.groupId) return { allowed: true, base };
+
+    const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
+    const membership = groupRoles.find(g => g.group && g.group.id === base.groupId);
+    if (!membership) return { allowed: false, base };
+    if (base.minRank != null && membership.role.rank < base.minRank) return { allowed: false, base };
+    return { allowed: true, base };
 }
 
 async function computeAccess(robloxUserId) {
@@ -192,6 +227,12 @@ async function getSession(req) {
     const lastSynced = data.last_synced_at ? new Date(data.last_synced_at).getTime() : 0;
     if (Date.now() - lastSynced > ACCESS_SYNC_INTERVAL_MS) {
         try {
+            const baseCheck = await checkBaseAccess(data.roblox_user_id);
+            if (!baseCheck.allowed) {
+                await supabase.from('hr_sessions').delete().eq('token', token);
+                return null;
+            }
+
             const access = await computeAccess(data.roblox_user_id);
             const updated = {
                 ...data,
@@ -288,6 +329,15 @@ app.get('/roblox-auth-callback', async (req, res) => {
 
     if (!robloxUserId) { fail('userinfo_failed'); return; }
 
+    let baseCheck;
+    try {
+        baseCheck = await checkBaseAccess(robloxUserId);
+    } catch (e) {
+        fail('base_access_check_failed');
+        return;
+    }
+    if (!baseCheck.allowed) { fail('not_eligible'); return; }
+
     let access;
     try {
         access = await computeAccess(robloxUserId);
@@ -340,6 +390,8 @@ app.post('/hr-data', async (req, res) => {
     const payload = (req.body && req.body.payload) || {};
 
     if (action === 'submit_request') {
+        if (!requirePermission(res, session, 'dashboard.submit_request')) return;
+
         const robloxUsername = payload.robloxUsername && String(payload.robloxUsername).trim();
         const taskName = payload.taskName && String(payload.taskName).trim();
         const game = payload.game && String(payload.game).trim();
@@ -357,6 +409,11 @@ app.post('/hr-data', async (req, res) => {
         try {
             recipientUserId = await resolveRobloxUserId(robloxUsername);
         } catch (e) { }
+
+        if (!recipientUserId) {
+            res.status(400).json({ ok: false, error: 'That Roblox username could not be found.' });
+            return;
+        }
 
         const id = generateRequestId();
 
@@ -496,6 +553,20 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'get_payment_method_for_user') {
+        if (!requirePermission(res, session, 'dashboard.submit_request')) return;
+        const robloxUsername = payload.robloxUsername && String(payload.robloxUsername).trim();
+        if (!robloxUsername) { res.status(400).json({ ok: false, error: 'missing_username' }); return; }
+        const { data, error } = await supabase
+            .from('payment_methods')
+            .select('*')
+            .ilike('roblox_username', robloxUsername)
+            .maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data ? { method: data.method, details: data.details || {} } : null });
+        return;
+    }
+
     if (action === 'save_payment_method') {
         const method = payload.method;
         const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
@@ -567,7 +638,7 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'get_user_eligibility') {
-        if (!requirePermission(res, session, 'dashboard.view')) return;
+        if (!requirePermission(res, session, 'dashboard.submit_request')) return;
         const robloxUsername = payload.robloxUsername && String(payload.robloxUsername).trim();
         if (!robloxUsername) { res.status(400).json({ ok: false, error: 'missing_username' }); return; }
         try {
@@ -611,6 +682,29 @@ app.post('/hr-data', async (req, res) => {
         const { error } = await supabase
             .from('app_settings')
             .upsert({ id: 1, devex_rate: rate, updated_at: new Date().toISOString() });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_base_access') {
+        try {
+            const base = await getBaseAccessConfig();
+            res.json({ ok: true, data: base });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load the sign-in access requirement.' });
+        }
+        return;
+    }
+
+    if (action === 'save_base_access') {
+        if (!requirePermission(res, session, 'settings.manage_base_access')) return;
+        const groupId = payload.groupId === '' || payload.groupId == null ? null : Number(payload.groupId);
+        const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
+        if (groupId != null && !(groupId > 0)) { res.status(400).json({ ok: false, error: 'invalid_group_id' }); return; }
+        const { error } = await supabase
+            .from('app_settings')
+            .upsert({ id: 1, base_group_id: groupId, base_min_rank: minRank, updated_at: new Date().toISOString() });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;
