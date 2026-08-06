@@ -554,7 +554,7 @@
       align-items: center;
       padding: 22px 32px;
       border-top: 1px solid var(--line);
-      background: linear-gradient(180deg, #FAFAFB, #F5F6F8);
+      background: var(--bg);
     }
 
     .total-label {
@@ -1153,26 +1153,26 @@
     }
 
     .owed-hero {
-      background: linear-gradient(135deg, #171A21, #2A2E63);
+      background: var(--surface);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
-      padding: 28px 32px;
-      color: #fff;
+      padding: 26px 32px;
       margin-bottom: 24px;
     }
 
     .owed-hero .owed-label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: .8px;
-      color: rgba(255, 255, 255, .65);
-      margin-bottom: 10px;
+      color: var(--muted);
+      margin-bottom: 12px;
     }
 
     .owed-hero .owed-amounts {
       display: flex;
       flex-wrap: wrap;
-      gap: 28px;
+      gap: 32px;
       align-items: baseline;
     }
 
@@ -1183,9 +1183,10 @@
     }
 
     .owed-hero .owed-amount .val {
-      font-size: 30px;
+      font-size: 28px;
       font-weight: 800;
       letter-spacing: -.4px;
+      color: var(--ink);
       display: inline-flex;
       align-items: center;
       gap: 6px;
@@ -1199,14 +1200,95 @@
 
     .owed-hero .owed-amount .cur-label {
       font-size: 12.5px;
-      color: rgba(255, 255, 255, .6);
+      color: var(--muted);
       font-weight: 600;
     }
 
     .owed-hero .owed-sub {
-      margin-top: 14px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
       font-size: 12.5px;
-      color: rgba(255, 255, 255, .55);
+      color: var(--muted);
+    }
+
+    .stat-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+
+    @media (max-width:900px) {
+      .stat-strip {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .stat-strip .strip-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px;
+    }
+
+    .stat-strip .strip-label {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .stat-strip .strip-value {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--ink);
+      letter-spacing: -.3px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-strip .strip-value img {
+      height: .8em;
+      width: .8em;
+      object-fit: contain;
+    }
+
+    .search-input-wrap {
+      position: relative;
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .search-input-wrap input {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      background: var(--surface);
+    }
+
+    .search-input-wrap input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    .status-chip.rejected {
+      background: var(--err-bg);
+      color: var(--err-text);
+      border: 1px solid var(--err-line);
+    }
+
+    .status-note {
+      font-size: 11.5px;
+      color: var(--err-text);
+      margin-top: 4px;
     }
 
     .method-option {
@@ -1373,7 +1455,7 @@
 
     const PAYMENT_METHODS = {
       PAYPAL: { label: 'PayPal', sub: 'Paid to your PayPal email address', fields: [{ key: 'paypalEmail', label: 'PayPal email', type: 'text', placeholder: 'you@example.com' }] },
-      DEVEX_ROBUX: { label: 'Robux', sub: 'Paid in Robux via the Roblox groups,', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
+      DEVEX_ROBUX: { label: 'Robux', sub: 'Paid in Robux via the Roblox group(s)', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
       VENMO: { label: 'Venmo', sub: 'Paid to your Venmo username', fields: [{ key: 'venmoUsername', label: 'Venmo username', type: 'text', placeholder: '@your-venmo' }] }
     };
 
@@ -1557,6 +1639,8 @@
         payment: row.payment,
         currency: row.currency || 'ROBUX',
         paid: !!row.paid,
+        status: row.status || (row.paid ? 'paid' : 'pending'),
+        statusNote: row.status_note || '',
         paidAt: row.paid_at ? new Date(row.paid_at).getTime() : null,
         createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
         paymentMethod: row.payment_method || null
@@ -1674,6 +1758,14 @@
     async function updateRequest(data) {
       await callHrData('mark_paid', { id: data.id });
       return true;
+    }
+
+    async function rejectRequest(id, note) {
+      await callHrData('reject_request', { id, note });
+    }
+
+    async function reopenRequest(id) {
+      await callHrData('reopen_request', { id });
     }
 
     async function saveRequest(data) {
@@ -2016,6 +2108,7 @@
       if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage') ? '#/manage' : '#/'; return; }
       let allRequests = [];
       let filter = 'pending';
+      let search = '';
       let expanded = new Set();
       let loading = true;
       let loadError = null;
@@ -2028,10 +2121,22 @@
       function paint() {
         const counts = {
           all: allRequests.length,
-          pending: allRequests.filter(r => !r.paid).length,
-          paid: allRequests.filter(r => r.paid).length
+          pending: allRequests.filter(r => r.status === 'pending').length,
+          paid: allRequests.filter(r => r.status === 'paid').length,
+          rejected: allRequests.filter(r => r.status === 'rejected').length
         };
-        const rows = allRequests.filter(r => filter === 'all' ? true : filter === 'pending' ? !r.paid : r.paid);
+        const pendingRows = allRequests.filter(r => r.status === 'pending');
+        const missingMethodCount = pendingRows.filter(r => !r.paymentMethod).length;
+        const pendingRobux = pendingRows.filter(r => r.currency === 'ROBUX').reduce((sum, r) => sum + (Number(r.payment) || 0), 0);
+        const pendingUsd = pendingRows.filter(r => r.currency === 'USD').reduce((sum, r) => sum + (Number(r.payment) || 0), 0);
+        const now = new Date();
+        const paidThisMonth = allRequests.filter(r => r.status === 'paid' && r.paidAt && new Date(r.paidAt).getMonth() === now.getMonth() && new Date(r.paidAt).getFullYear() === now.getFullYear()).length;
+
+        let rows = allRequests.filter(r => filter === 'all' ? true : r.status === filter);
+        if (search.trim()) {
+          const q = search.trim().toLowerCase();
+          rows = rows.filter(r => (r.robloxUsername || '').toLowerCase().includes(q) || (r.taskName || '').toLowerCase().includes(q) || (r.game || '').toLowerCase().includes(q) || (r.requestedBy || '').toLowerCase().includes(q));
+        }
 
         app.innerHTML = `
     ${topbar()}
@@ -2040,7 +2145,7 @@
         <div>
           <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Payment requests</h1>
-          <p class="sub">All team members see the same dashboard, every change you will make will get saved instantly.</p>
+          <p class="sub">All team members see the same dashboard, every change you make is saved instantly.</p>
         </div>
         <div class="dash-toolbar">
           ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('roles.manage')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
@@ -2049,17 +2154,42 @@
         </div>
       </div>
 
-      <div class="tabs" style="margin-bottom:16px;">
-        <button class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (${counts.all})</button>
-        <button class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (${counts.pending})</button>
-        <button class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (${counts.paid})</button>
+      <div class="stat-strip">
+        <div class="strip-card">
+          <div class="strip-label">Pending Robux</div>
+          <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${pendingRobux.toLocaleString()}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Pending USD</div>
+          <div class="strip-value">$${pendingUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Paid this month</div>
+          <div class="strip-value">${paidThisMonth}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Missing payment method</div>
+          <div class="strip-value" style="${missingMethodCount > 0 ? 'color:var(--warn-text);' : ''}">${missingMethodCount}</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center;">
+        <div class="tabs">
+          <button class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (${counts.all})</button>
+          <button class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (${counts.pending})</button>
+          <button class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (${counts.paid})</button>
+          <button class="tab-btn ${filter === 'rejected' ? 'active' : ''}" data-filter="rejected">Rejected (${counts.rejected})</button>
+        </div>
+        <div class="search-input-wrap">
+          <input type="text" id="searchInput" placeholder="Search by username, task, or game" value="${esc(search)}">
+        </div>
       </div>
 
       <div class="table-wrap">
         ${loading ? `<div class="dash-loading">Loading payment requests...</div>` : loadError ? `
           <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>
         ` : rows.length === 0 ? `
-          <div class="dash-empty"><h3>Nothing here</h3><p>No ${filter === 'all' ? '' : filter + ' '}payment requests yet.</p></div>
+          <div class="dash-empty"><h3>Nothing here</h3><p>No matching payment requests.</p></div>
         ` : `
         <div class="table-scroll">
           <table class="req-table">
@@ -2091,6 +2221,7 @@
         function renderRow(r) {
           const items = parseWorkLines(r.workRaw || '');
           const isOpen = expanded.has(r.id);
+          const statusLabel = r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending';
           const rowHtml = `
             <tr>
               <td><button class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
@@ -2100,10 +2231,12 @@
               <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
               <td>${esc(r.timeWorked || '-')}</td>
               <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
-              <td><span class="status-chip ${r.paid ? 'paid' : 'pending'}">${r.paid ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : 'Pending'}</span></td>
+              <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
               <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
               <td class="actions-cell">
-                ${!r.paid && canMarkPaid ? `<button class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
+                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
+                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
+                ${r.status !== 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
                 ${canExport ? `<button class="btn btn-ghost btn-sm" data-copy="${esc(r.id)}">Copy row</button>` : ''}
               </td>
             </tr>`;
@@ -2140,6 +2273,11 @@
         }
 
         document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.filter; paint(); }));
+
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+          searchInput.addEventListener('input', () => { search = searchInput.value; paint(); searchInput.focus(); searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length; });
+        }
 
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) refreshBtn.addEventListener('click', () => { load(); });
@@ -2203,12 +2341,54 @@
           e.currentTarget.textContent = 'Saving...';
           try {
             r.paid = true;
+            r.status = 'paid';
             r.paidAt = Date.now();
             await updateRequest(r);
             paint();
           } catch (err) {
             e.currentTarget.disabled = false;
             e.currentTarget.textContent = 'Mark paid';
+            alert('Could not save. Check your connection and try again.');
+          }
+        }));
+
+        document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', async (e) => {
+          const id = b.dataset.reject;
+          const r = allRequests.find(x => x.id === id);
+          if (!r) return;
+          const note = prompt('Reason for rejecting this request (optional):', '') || '';
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = 'Saving...';
+          try {
+            r.status = 'rejected';
+            r.statusNote = note;
+            r.paid = false;
+            r.paidAt = null;
+            await rejectRequest(id, note);
+            paint();
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = 'Reject';
+            alert('Could not save. Check your connection and try again.');
+          }
+        }));
+
+        document.querySelectorAll('[data-reopen]').forEach(b => b.addEventListener('click', async (e) => {
+          const id = b.dataset.reopen;
+          const r = allRequests.find(x => x.id === id);
+          if (!r) return;
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = 'Saving...';
+          try {
+            r.status = 'pending';
+            r.statusNote = '';
+            r.paid = false;
+            r.paidAt = null;
+            await reopenRequest(id);
+            paint();
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = 'Reopen';
             alert('Could not save. Check your connection and try again.');
           }
         }));
@@ -2247,8 +2427,8 @@
 
       function paint() {
         const totals = (summary && summary.totals) || {};
-        const pendingRequests = summary ? summary.requests.filter(r => !r.paid) : [];
-        const paidRequests = summary ? summary.requests.filter(r => r.paid) : [];
+        const pendingRequests = summary ? summary.requests.filter(r => r.status === 'pending') : [];
+        const paidRequests = summary ? summary.requests.filter(r => r.status === 'paid') : [];
         const currencies = Object.keys(totals);
 
         app.innerHTML = `
@@ -2265,7 +2445,7 @@
       ` : `
         <div class="owed-hero">
           <div class="owed-label">Total currently owed to you</div>
-          ${currencies.length === 0 ? `<div style="color:rgba(255,255,255,.7);font-size:14px;">No pending payment requests logged for you yet.</div>` : `
+          ${currencies.length === 0 ? `<div style="color:var(--ink-soft);font-size:14px;">No pending payment requests logged for you yet.</div>` : `
           <div class="owed-amounts">
             ${currencies.map(cur => `
               <div class="owed-amount">
@@ -2335,7 +2515,7 @@
                   <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div></td>
                   <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
                   <td class="pay-cell">${fmtAmount(r)}</td>
-                  <td><span class="status-chip ${r.paid ? 'paid' : 'pending'}">${r.paid ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : 'Pending'}</span></td>
+                  <td><span class="status-chip ${r.status}">${r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending'}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
                   <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
                 </tr>`).join('')}
             </tbody>

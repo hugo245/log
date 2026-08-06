@@ -130,9 +130,6 @@ async function computeAccess(robloxUserId) {
     };
 }
 
-// Checks a Roblox user against every configured required_groups row and
-// returns eligibility per group (membership only), caching the result in
-// group_eligibility_cache.
 async function computeGroupEligibility(robloxUserId) {
     const { data: requiredGroups, error: groupsErr } = await supabase
         .from('required_groups')
@@ -142,9 +139,6 @@ async function computeGroupEligibility(robloxUserId) {
     if (!requiredGroups || requiredGroups.length === 0) return [];
 
     const memberships = await fetchRobloxGroupRoles(robloxUserId);
-    // Compare as strings: Supabase can return bigint columns as either a
-    // JS number or string depending on size, and mixing types with Set.has()
-    // silently fails, which was showing real members as "not in the group".
     const groupIdsJoined = new Set(memberships.map(m => String(m.group.id)));
 
     const results = [];
@@ -359,10 +353,6 @@ app.post('/hr-data', async (req, res) => {
             return;
         }
 
-        // Resolve the recipient's Roblox user ID so "My payments" can match
-        // reliably later, instead of relying on exact-text username matches.
-        // If the lookup fails for any reason, we still save the request —
-        // it'll just fall back to the (case-insensitive) username match.
         let recipientUserId = null;
         try {
             recipientUserId = await resolveRobloxUserId(robloxUsername);
@@ -437,17 +427,40 @@ app.post('/hr-data', async (req, res) => {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase
             .from('payment_requests')
-            .update({ paid: true, paid_at: new Date().toISOString() })
+            .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;
     }
 
-    // Any signed-in user can see how much is owed to them and their own history.
-    // Matched primarily by Roblox user ID (reliable); rows saved before that
-    // column existed, or where the lookup failed at submit time, fall back to
-    // a case-insensitive username match.
+    if (action === 'reject_request') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const id = payload.id;
+        const note = payload.note ? String(payload.note).trim() : '';
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase
+            .from('payment_requests')
+            .update({ paid: false, paid_at: null, status: 'rejected', status_note: note || null })
+            .eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'reopen_request') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase
+            .from('payment_requests')
+            .update({ paid: false, paid_at: null, status: 'pending', status_note: null })
+            .eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
     if (action === 'get_my_summary') {
         const [byId, byUsername] = await Promise.all([
             supabase.from('payment_requests').select('*').eq('roblox_user_id', session.roblox_user_id),
@@ -465,7 +478,7 @@ app.post('/hr-data', async (req, res) => {
             const cur = row.currency || 'ROBUX';
             if (!totals[cur]) totals[cur] = { pending: 0, paid: 0 };
             if (row.paid) totals[cur].paid += Number(row.payment) || 0;
-            else totals[cur].pending += Number(row.payment) || 0;
+            else if ((row.status || 'pending') === 'pending') totals[cur].pending += Number(row.payment) || 0;
         });
 
         res.json({ ok: true, data, totals });
@@ -507,7 +520,6 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'list_required_groups') {
-        // Readable by any signed-in user so they can see what's required of them.
         const { data, error } = await supabase
             .from('required_groups')
             .select('*')
