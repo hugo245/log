@@ -3142,6 +3142,48 @@
           return;
         }
         fieldErrors = {};
+
+        if (data.currency === 'ROBUX') {
+          submitting = true; submitError = null; paint();
+
+          let eligibility = [];
+          try {
+            eligibility = await getMyEligibility();
+          } catch (err) {
+            submitting = false;
+            submitError = 'Could not verify your payout group membership. Check your connection and try again.';
+            paint();
+            return;
+          }
+
+          const missingGroups = eligibility.filter(g => !g.eligible);
+          if (missingGroups.length > 0) {
+            submitting = false;
+            submitError = 'Request failed: you are not a member of all required payout groups.';
+            paint();
+            alert(
+              'Request failed.\n\n' +
+              'You must be a member of every required payout group before submitting a Robux request. You are missing:\n\n' +
+              missingGroups.map(g => '- ' + g.name).join('\n') +
+              '\n\nJoin the missing group(s), then try again.'
+            );
+            return;
+          }
+
+          const beenInLongEnough = confirm('Have you been in all the required payout groups for over 2 weeks?');
+          if (!beenInLongEnough) {
+            const proceedAnyway = confirm(
+              'Since you may not have been in the group(s) for at least 2 weeks, this request might get rejected by HR.\n\n' +
+              'Submit it anyway for review?'
+            );
+            if (!proceedAnyway) {
+              submitting = false;
+              paint();
+              return;
+            }
+          }
+        }
+
         submitting = true; submitError = null; paint();
         try {
           await saveRequest(data);
