@@ -1359,8 +1359,8 @@
 
     const PAYMENT_METHODS = {
       PAYPAL: { label: 'PayPal', sub: 'Paid to your PayPal email address', fields: [{ key: 'paypalEmail', label: 'PayPal email', type: 'text', placeholder: 'you@example.com' }] },
-      DEVEX_ROBUX: { label: 'DevEx (Robux)', sub: 'Paid in Robux via the Roblox group, cashed out yourself via DevEx', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
-      BANK_TRANSFER: { label: 'Bank transfer', sub: 'Direct transfer to your bank account', fields: [{ key: 'iban', label: 'IBAN', type: 'text', placeholder: 'BE00 0000 0000 0000' }, { key: 'accountName', label: 'Account holder name', type: 'text', placeholder: 'Full name on the account' }] }
+      DEVEX_ROBUX: { label: 'Robux', sub: 'Paid in Robux via the Roblox groups', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
+      VENMO: { label: 'Venmo', sub: 'Paid to your Venmo username', fields: [{ key: 'venmoUsername', label: 'Venmo username', type: 'text', placeholder: '@your-venmo' }] }
     };
 
     let supabaseClient = null;
@@ -2777,6 +2777,8 @@
       let submitting = false;
       let submitError = null;
       let fieldErrors = {};
+      let myMethod = null;
+      let myMethodLoaded = false;
 
       function currentData() {
         const username = document.getElementById('f_username')?.value.trim() || '';
@@ -2862,6 +2864,7 @@
               </select>
             </div>
           </div>
+          <div id="methodWarningSlot"></div>
           <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
           <div class="field"><label>Requested by</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
           <button class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
@@ -2883,6 +2886,8 @@
           el.addEventListener('input', updatePreview);
           el.addEventListener('change', updatePreview);
         });
+        document.getElementById('f_currency')?.addEventListener('change', updateMethodWarning);
+        updateMethodWarning();
 
         const submitBtn = document.getElementById('submitBtn');
         if (submitBtn) submitBtn.addEventListener('click', handleSubmit);
@@ -2894,6 +2899,27 @@
       function updatePreview() {
         const slot = document.getElementById('previewSlot');
         if (slot) slot.innerHTML = renderInvoice(currentData());
+      }
+
+      function updateMethodWarning() {
+        const slot = document.getElementById('methodWarningSlot');
+        if (!slot) return;
+        const currency = document.getElementById('f_currency')?.value || 'ROBUX';
+        if (currency === 'USD' && myMethodLoaded && !myMethod) {
+          slot.innerHTML = `<div class="error-box" style="background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn-text);"><span>You haven't set up a payment method yet, HR won't know how to pay you. <a href="#/my" style="color:inherit;font-weight:700;">Set one up on My payments</a>.</span></div>`;
+        } else {
+          slot.innerHTML = '';
+        }
+      }
+
+      async function loadMyMethod() {
+        try {
+          myMethod = await getMyPaymentMethod();
+        } catch (e) {
+          myMethod = null;
+        }
+        myMethodLoaded = true;
+        updateMethodWarning();
       }
 
       async function handleSubmit() {
@@ -2918,6 +2944,7 @@
       }
 
       paint();
+      loadMyMethod();
     }
   </script>
 </body>

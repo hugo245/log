@@ -43,7 +43,7 @@ const PERMISSIONS = [
 const PAYMENT_METHOD_TYPES = {
     PAYPAL: { fields: ['paypalEmail'] },
     DEVEX_ROBUX: { fields: ['robloxUsername'] },
-    BANK_TRANSFER: { fields: ['iban', 'accountName'] }
+    VENMO: { fields: ['venmoUsername'] }
 };
 
 const app = express();
@@ -356,12 +356,22 @@ app.post('/hr-data', async (req, res) => {
             return;
         }
 
+        // Resolve the recipient's Roblox user ID so "My payments" can match
+        // reliably later, instead of relying on exact-text username matches.
+        // If the lookup fails for any reason, we still save the request —
+        // it'll just fall back to the (case-insensitive) username match.
+        let recipientUserId = null;
+        try {
+            recipientUserId = await resolveRobloxUserId(robloxUsername);
+        } catch (e) { }
+
         const id = generateRequestId();
 
         const { error } = await supabase.from('payment_requests').insert({
             id,
             requested_by: session.roblox_username,
             roblox_username: robloxUsername,
+            roblox_user_id: recipientUserId,
             task_name: taskName,
             game,
             work_raw: workRaw,
@@ -403,18 +413,23 @@ app.post('/hr-data', async (req, res) => {
     }
 
     // Any signed-in user can see how much is owed to them and their own history.
-    // Matching is done case-insensitively against the Roblox username the
-    // request was logged under, since that's the only link back to a person.
+    // Matched primarily by Roblox user ID (reliable); rows saved before that
+    // column existed, or where the lookup failed at submit time, fall back to
+    // a case-insensitive username match.
     if (action === 'get_my_summary') {
-        const { data, error } = await supabase
-            .from('payment_requests')
-            .select('*')
-            .ilike('roblox_username', session.roblox_username)
-            .order('created_at', { ascending: false });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const [byId, byUsername] = await Promise.all([
+            supabase.from('payment_requests').select('*').eq('roblox_user_id', session.roblox_user_id),
+            supabase.from('payment_requests').select('*').is('roblox_user_id', null).ilike('roblox_username', session.roblox_username)
+        ]);
+
+        if (byId.error) { res.status(500).json({ ok: false, error: byId.error.message }); return; }
+        if (byUsername.error) { res.status(500).json({ ok: false, error: byUsername.error.message }); return; }
+
+        const data = [...(byId.data || []), ...(byUsername.data || [])]
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
         const totals = {};
-        (data || []).forEach(row => {
+        data.forEach(row => {
             const cur = row.currency || 'ROBUX';
             if (!totals[cur]) totals[cur] = { pending: 0, paid: 0 };
             if (row.paid) totals[cur].paid += Number(row.payment) || 0;
