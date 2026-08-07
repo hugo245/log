@@ -261,35 +261,73 @@ async function computeAccess(robloxUserId) {
 }
 
 async function computeGroupEligibility(robloxUserId) {
+    const results = [];
+
+    // Onboarding must be fully completed - this includes accepting the
+    // Terms of Service and Acceptable Use Policy, which are required steps.
+    const requiredStepIds = ONBOARDING_STEPS.filter(s => s.required).map(s => s.id);
+    const { data: progress, error: progErr } = await supabase
+        .from('staff_onboarding_progress')
+        .select('step_id, completed_at')
+        .eq('roblox_user_id', robloxUserId);
+    if (progErr) throw progErr;
+    const completedStepIds = new Set((progress || []).filter(p => p.completed_at).map(p => p.step_id));
+    const onboardingComplete = requiredStepIds.every(id => completedStepIds.has(id));
+
+    results.push({
+        id: 'onboarding_complete',
+        name: 'Completed onboarding (incl. Terms of Service)',
+        isMember: onboardingComplete,
+        eligible: onboardingComplete,
+        metaLabel: onboardingComplete ? 'Onboarding complete' : 'Onboarding not completed'
+    });
+
+    // A payment method must be on file so a payout can actually be sent.
+    const { data: paymentMethod, error: pmErr } = await supabase
+        .from('payment_methods')
+        .select('roblox_user_id')
+        .eq('roblox_user_id', robloxUserId)
+        .maybeSingle();
+    if (pmErr) throw pmErr;
+    const hasPaymentMethod = !!paymentMethod;
+
+    results.push({
+        id: 'payment_method',
+        name: 'Payment method on file',
+        isMember: hasPaymentMethod,
+        eligible: hasPaymentMethod,
+        metaLabel: hasPaymentMethod ? 'Payment method saved' : 'No payment method saved'
+    });
+
     const { data: requiredGroups, error: groupsErr } = await supabase
         .from('required_groups')
         .select('*')
         .order('name', { ascending: true });
     if (groupsErr) throw groupsErr;
-    if (!requiredGroups || requiredGroups.length === 0) return [];
 
-    const memberships = await fetchRobloxGroupRoles(robloxUserId);
-    const groupIdsJoined = new Set(memberships.map(m => String(m.group.id)));
+    if (requiredGroups && requiredGroups.length > 0) {
+        const memberships = await fetchRobloxGroupRoles(robloxUserId);
+        const groupIdsJoined = new Set(memberships.map(m => String(m.group.id)));
 
-    const results = [];
-    for (const rg of requiredGroups) {
-        const isMember = groupIdsJoined.has(String(rg.roblox_group_id));
+        for (const rg of requiredGroups) {
+            const isMember = groupIdsJoined.has(String(rg.roblox_group_id));
 
-        results.push({
-            id: rg.id,
-            robloxGroupId: rg.roblox_group_id,
-            name: rg.name,
-            isMember,
-            eligible: isMember
-        });
+            results.push({
+                id: rg.id,
+                robloxGroupId: rg.roblox_group_id,
+                name: rg.name,
+                isMember,
+                eligible: isMember
+            });
 
-        await supabase.from('group_eligibility_cache').upsert({
-            roblox_user_id: robloxUserId,
-            required_group_id: rg.id,
-            is_member: isMember,
-            eligible: isMember,
-            checked_at: new Date().toISOString()
-        }, { onConflict: 'roblox_user_id,required_group_id' });
+            await supabase.from('group_eligibility_cache').upsert({
+                roblox_user_id: robloxUserId,
+                required_group_id: rg.id,
+                is_member: isMember,
+                eligible: isMember,
+                checked_at: new Date().toISOString()
+            }, { onConflict: 'roblox_user_id,required_group_id' });
+        }
     }
 
     return results;

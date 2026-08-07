@@ -2577,7 +2577,7 @@
                   <div class="elig-check ${g.eligible ? 'is-ok' : ''}">${g.eligible ? '&#10003;' : '&middot;'}</div>
                   <div>
                     <div class="elig-name">${esc(g.name)}</div>
-                    <div class="elig-meta">${g.isMember ? 'Member' : 'Not a member'}</div>
+                    <div class="elig-meta">${g.metaLabel ? esc(g.metaLabel) : (g.isMember ? 'Member' : 'Not a member')}</div>
                   </div>
                 </div>
               </div>`).join('')}`;
@@ -2919,10 +2919,10 @@
                   <div class="elig-check ${g.eligible ? 'is-ok' : ''}">${g.eligible ? '&#10003;' : '&middot;'}</div>
                   <div>
                     <div class="elig-name">${esc(g.name)}</div>
-                    <div class="elig-meta">${g.isMember ? 'You are a member' : 'Not a member yet'}</div>
+                    <div class="elig-meta">${g.metaLabel ? esc(g.metaLabel) : (g.isMember ? 'You are a member' : 'Not a member yet')}</div>
                   </div>
                 </div>
-                ${!g.isMember ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(g.robloxGroupId)}" target="_blank" rel="noopener">Join group</a>` : ''}
+                ${!g.isMember && g.robloxGroupId != null ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(g.robloxGroupId)}" target="_blank" rel="noopener">Join group</a>` : (!g.isMember && g.id === 'payment_method' ? `<a class="btn btn-ghost btn-sm" href="#/my">Add payment method</a>` : '')}
               </div>`).join('')}
           `}
         </div>
@@ -4390,7 +4390,7 @@
           const missingGroups = eligibility.filter(g => !g.eligible);
           if (missingGroups.length > 0) {
             submitting = false;
-            submitError = 'Request failed: the developer is not a member of all required payout groups.';
+            submitError = 'Request failed: the developer does not meet all payout requirements.';
             paint();
             alert(
               'Request failed.\n\n' +
