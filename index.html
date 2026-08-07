@@ -1911,7 +1911,8 @@
       'settings.manage_base_access': 'Manage sign-in access requirement',
       'settings.manage_onboarding': 'Manage teams, skillsets & invite links',
       'roles.manage': 'Manage roles and access',
-      'staff.view_database': 'View staff database'
+      'staff.view_database': 'View staff database',
+      'staff.moderate': 'Warn and ban staff'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
 
@@ -2428,9 +2429,23 @@
       const json = await callHrData('list_onboarding_links');
       return json.data || [];
     }
-    async function createOnboardingLink(teamId, skillsetId, label) {
-      const json = await callHrData('create_onboarding_link', { teamId, skillsetId, label });
+    async function createOnboardingLink(teamId, skillsetId, roleId, label) {
+      const json = await callHrData('create_onboarding_link', { teamId, skillsetId, roleId, label });
       return json;
+    }
+    async function assignUserTeamSkillset(robloxUserId, robloxUsername, teamId, skillsetId) {
+      await callHrData('assign_user_team_skillset', { robloxUserId, robloxUsername, teamId, skillsetId });
+    }
+    async function listUserWarnings(robloxUserId) {
+      const json = await callHrData('list_user_warnings', { robloxUserId });
+      return json;
+    }
+    async function addUserWarning(robloxUserId, robloxUsername, reason) {
+      const json = await callHrData('add_user_warning', { robloxUserId, robloxUsername, reason });
+      return json;
+    }
+    async function unbanUser(robloxUserId) {
+      await callHrData('unban_user', { robloxUserId });
     }
     async function deleteOnboardingLink(token) {
       await callHrData('delete_onboarding_link', { token });
@@ -2713,7 +2728,8 @@
         session_create_failed: 'Could not start your session, please try again.',
         session_invalid: 'Your sign-in could not be confirmed, please try again.',
         base_access_check_failed: 'Could not verify your Roblox group membership, please try again.',
-        not_eligible: 'You need to be in the required Roblox group, at the right rank, to use this tool.'
+        not_eligible: 'You need to be in the required Roblox group, at the right rank, to use this tool.',
+        account_banned: 'This account has been banned from the tool and cannot sign in again.'
       };
       const message = err ? (errorMessages[err] || 'Could not sign you in, please try again.') : null;
 
@@ -3690,7 +3706,7 @@
       <div class="heading-block" style="margin-top:36px;">
         <span class="eyebrow">Invite links</span>
         <h1>Onboarding links</h1>
-        <p class="sub">Pick a team and skillset, generate a link, and send it to whoever you're onboarding. When they sign in through it, they'll be assigned automatically.</p>
+        <p class="sub">Pick a team, skillset, and optional role, generate a link, and send it to whoever you're onboarding. When they sign in through it, they'll be assigned automatically.</p>
       </div>
       <div class="panel" style="max-width:760px;">
         ${teamsLoading ? `<div class="dash-loading">Loading links...</div>` : onboardingLinks.length === 0 ? `<div class="empty-note">No invite links yet. Create one below.</div>` : onboardingLinks.map(l => `
@@ -3698,7 +3714,7 @@
             <div class="role-row-top">
               <div>
                 <strong>${esc(l.label || 'Untitled link')}</strong>
-                <div class="role-meta">${l.teamName ? esc(l.teamName) : 'No team'}${l.skillsetName ? ' &middot; ' + esc(l.skillsetName) : ''} &middot; used ${esc(l.uses || 0)} time${(l.uses || 0) === 1 ? '' : 's'}</div>
+                <div class="role-meta">${l.teamName ? esc(l.teamName) : 'No team'}${l.skillsetName ? ' &middot; ' + esc(l.skillsetName) : ''}${l.roleName ? ' &middot; role: ' + esc(l.roleName) : ''} &middot; used ${esc(l.uses || 0)} time${(l.uses || 0) === 1 ? '' : 's'}</div>
                 <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:4px;word-break:break-all;">${esc(l.url)}</div>
               </div>
               <div style="display:flex;gap:6px;">
@@ -3727,8 +3743,15 @@
                 ${skillsets.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}
               </select>
             </div>
-            <div class="field"><label>Label <span class="hint">(optional)</span></label><input type="text" id="newLinkLabel" placeholder="e.g. August builders batch"></div>
+            <div class="field">
+              <label>Role <span class="hint">(optional)</span></label>
+              <select id="newLinkRole">
+                <option value="">No role</option>
+                ${roles.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}
+              </select>
+            </div>
           </div>
+          <div class="field"><label>Label <span class="hint">(optional)</span></label><input type="text" id="newLinkLabel" placeholder="e.g. August builders batch"></div>
           <button class="btn btn-primary" id="createLinkBtn" ${addingLink ? 'disabled' : ''}>${addingLink ? 'Creating...' : 'Create link'}</button>
         </div>
       </div>` : ''}
@@ -3998,10 +4021,11 @@
           if (createLinkBtn) createLinkBtn.addEventListener('click', async () => {
             const teamId = document.getElementById('newLinkTeam').value || null;
             const skillsetId = document.getElementById('newLinkSkillset').value || null;
+            const roleId = document.getElementById('newLinkRole') ? (document.getElementById('newLinkRole').value || null) : null;
             const label = document.getElementById('newLinkLabel').value.trim();
             addingLink = true; addLinkError = null; lastCreatedLink = null; paint();
             try {
-              const result = await createOnboardingLink(teamId, skillsetId, label);
+              const result = await createOnboardingLink(teamId, skillsetId, roleId, label);
               addingLink = false;
               lastCreatedLink = result.url;
               await loadLinksData();
@@ -4084,6 +4108,8 @@
       if (canManageBaseAccess) loadBaseAccess();
       if (canManageRoles) {
         loadRoles().then(loadAssignments);
+      } else if (canManageOnboarding) {
+        loadRoles();
       }
       if (canManageOnboarding) loadTeamsData();
     }
@@ -4300,26 +4326,32 @@
       let loadError = null;
       let search = '';
       let activeProfile = null;
+      let modalMode = 'view';
+      let teamsList = [];
+      let skillsetsList = [];
+      let configTeamId = '';
+      let configSkillsetId = '';
+      let configBusy = false;
+      let configMsg = null;
+      let warnings = [];
+      let bannedInfo = null;
+      let warnBusy = false;
+      let warnError = null;
+      let warnReason = '';
 
-
-
-
-
-
+      const canAssign = hasPermission('settings.manage_onboarding');
+      const canModerate = hasPermission('staff.moderate');
 
       async function avatarUrl(s) {
         if (!s?.robloxUserId) {
           return fallbackAvatar();
         }
-
         try {
           const res = await fetch(
             `${EDGE_BASE}/api/roblox/avatar/${s.robloxUserId}`,
             { headers: { 'ngrok-skip-browser-warning': 'true' } }
           );
-
           const json = await res.json();
-
           return json.data?.[0]?.imageUrl || fallbackAvatar();
         } catch (err) {
           console.error("Avatar error:", err);
@@ -4336,7 +4368,6 @@
   `);
       }
 
-
       function getRows() {
         let rows = staff;
         if (search.trim()) {
@@ -4347,22 +4378,18 @@
       }
 
       function paidTotalsHtml(s, stacked) {
-        if (!Object.keys(s.paidTotals || {}).length) return '&mdash;';
+        if (!Object.keys(s.paidTotals || {}).length) return '-';
         return Object.entries(s.paidTotals).map(([cur, amt]) => cur === 'ROBUX'
           ? `<span style="white-space:nowrap;"><img class="robux-icon" src="${ROBUX_IMG}" alt="Robux">${Number(amt).toLocaleString()}</span>`
           : `${CURRENCY_SYMBOL[cur] || ''}${Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`
         ).join(stacked ? '<br>' : ', ');
       }
 
-
-
       async function cardsHtml() {
         const rows = getRows();
-
         if (loading) {
           return `<div class="dash-loading">Loading staff database...</div>`;
         }
-
         if (loadError) {
           return `
       <div class="dash-empty">
@@ -4372,7 +4399,6 @@
       </div>
     `;
         }
-
         if (rows.length === 0) {
           return `
       <div class="dash-empty">
@@ -4381,49 +4407,39 @@
       </div>
     `;
         }
-
         const cards = await Promise.all(rows.map(async (s, i) => {
           const avatar = await avatarUrl(s);
-
           return `
       <div class="staff-card" data-staff-idx="${i}">
-        ${s.pendingCount ? `<span class="pending-badge">${esc(s.pendingCount)} pending</span>` : ''}
-
+        ${s.isBanned ? `<span class="pending-badge" style="background:var(--err-bg);border-color:var(--err-line);color:var(--err-text);">Banned</span>` : (s.warnCount ? `<span class="pending-badge">${esc(s.warnCount)}/3 warns</span>` : (s.pendingCount ? `<span class="pending-badge">${esc(s.pendingCount)} pending</span>` : ''))}
         <div class="avatar-wrap">
           <img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}" loading="lazy">
         </div>
-
         <div class="staff-name">${esc(s.robloxUsername || 'Unknown')}</div>
-
         ${s.robloxUserId ? `<div class="staff-id mono">ID ${esc(s.robloxUserId)}</div>` : ''}
-
         <div class="staff-roles">
           ${(s.roles || []).length
               ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('')
               : `<span class="hint">No roles</span>`
             }
         </div>
-
         <div class="staff-stats-row">
           <div class="staff-stat">
             <b>${esc(s.requestCount || 0)}</b>
             <span>Requests</span>
           </div>
-
           <div class="staff-stat">
-            <b>${s.onboardingRequired ? `${esc(s.onboardingCompleted)}/${esc(s.onboardingRequired)}` : '&mdash;'}</b>
+            <b>${s.onboardingRequired ? `${esc(s.onboardingCompleted)}/${esc(s.onboardingRequired)}` : '-'}</b>
             <span>Onboard</span>
           </div>
-
           <div class="staff-stat">
-            <b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b>
+            <b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '-'}</b>
             <span>Active</span>
           </div>
         </div>
       </div>
     `;
         }));
-
         return `
     <div class="staff-grid">
       ${cards.join('')}
@@ -4431,88 +4447,158 @@
   `;
       }
 
-
-
       async function modalHtml() {
         if (!activeProfile) return '';
-
         const s = activeProfile;
         const avatar = await avatarUrl(s);
-
         const pct = s.onboardingRequired
           ? Math.round((s.onboardingCompleted / s.onboardingRequired) * 100)
           : 0;
+
+        if (modalMode === 'config') {
+          return `
+    <div class="modal-scrim" id="staffModalScrim">
+      <div class="modal-card">
+        <button class="modal-close" id="staffModalClose">&times;</button>
+        <div class="modal-header">
+          <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
+          <h2>Configure ${esc(s.robloxUsername || 'Unknown')}</h2>
+          ${s.robloxUserId ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>` : ''}
+        </div>
+        <div class="modal-body">
+          <div class="modal-section">
+            <div class="modal-section-title">Team & skillset</div>
+            ${configMsg ? `<div class="${configMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(configMsg.text)}</span></div>` : ''}
+            <div class="field">
+              <label>Team</label>
+              <select id="cfgTeam">
+                <option value="">No team</option>
+                ${teamsList.map(t => `<option value="${esc(t.id)}" ${String(configTeamId) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Skillset</label>
+              <select id="cfgSkillset">
+                <option value="">No skillset</option>
+                ${skillsetsList.map(sk => `<option value="${esc(sk.id)}" ${String(configSkillsetId) === String(sk.id) ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId ? 'disabled' : ''}>${configBusy ? 'Saving...' : 'Save assignment'}</button>
+              <button class="btn btn-ghost btn-sm btn-equal" id="cfgBackBtn">Back</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+        }
+
+        if (modalMode === 'moderate') {
+          return `
+    <div class="modal-scrim" id="staffModalScrim">
+      <div class="modal-card">
+        <button class="modal-close" id="staffModalClose">&times;</button>
+        <div class="modal-header">
+          <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
+          <h2>Moderation</h2>
+          <div class="modal-id">${esc(s.robloxUsername || 'Unknown')}${s.robloxUserId ? ' · ID ' + esc(s.robloxUserId) : ''}</div>
+          <div style="margin-top:8px;">
+            <span class="status-chip ${s.isBanned || bannedInfo ? 'paid' : (s.warnCount || warnings.length) >= 3 ? 'pending' : 'pending'}" style="${(s.isBanned || bannedInfo) ? 'background:var(--err-bg);color:var(--err-text);border-color:var(--err-line);' : ''}">
+              ${(s.isBanned || bannedInfo) ? 'Banned' : (warnings.length || s.warnCount || 0) + ' / 3 warnings'}
+            </span>
+          </div>
+        </div>
+        <div class="modal-body">
+          ${(s.isBanned || bannedInfo) ? `
+          <div class="error-box" style="margin-bottom:14px;">
+            <span>This account is banned and cannot sign in again. ${bannedInfo && bannedInfo.reason ? esc(bannedInfo.reason) : 'Reached 3 warnings.'}</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="unbanBtn" ${warnBusy ? 'disabled' : ''}>Lift ban</button>
+          ` : `
+          <div class="modal-section">
+            <div class="modal-section-title">Issue a warning</div>
+            <p class="sub" style="margin:0 0 10px;">Three warnings permanently ban the account. They will not be able to sign in again.</p>
+            ${warnError ? `<div class="error-box"><span>${esc(warnError)}</span></div>` : ''}
+            <div class="field">
+              <label>Reason</label>
+              <textarea id="warnReasonInput" placeholder="Describe the issue" rows="3">${esc(warnReason)}</textarea>
+            </div>
+            <button class="btn btn-primary btn-sm" id="issueWarnBtn" ${warnBusy || !s.robloxUserId ? 'disabled' : ''}>${warnBusy ? 'Saving...' : 'Issue warning'}</button>
+          </div>
+          `}
+          <div class="modal-section" style="margin-top:18px;">
+            <div class="modal-section-title">Warning history</div>
+            ${warnings.length === 0 ? `<div class="hint">No warnings on record.</div>` : warnings.map(w => `
+              <div class="modal-info-row">
+                <span class="label">${esc(fmtDate(w.created_at))}${w.warned_by ? ' by ' + esc(w.warned_by) : ''}</span>
+                <span class="value" style="max-width:60%;text-align:right;">${esc(w.reason || '')}</span>
+              </div>
+            `).join('')}
+          </div>
+          <button class="btn btn-ghost btn-sm" id="modBackBtn" style="margin-top:12px;">Back</button>
+        </div>
+      </div>
+    </div>`;
+        }
 
         return `
     <div class="modal-scrim" id="staffModalScrim">
       <div class="modal-card">
         <button class="modal-close" id="staffModalClose">&times;</button>
-
         <div class="modal-header">
           <div class="avatar-wrap">
             <img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}">
           </div>
-
           <h2>${esc(s.robloxUsername || 'Unknown')}</h2>
-
-          ${s.robloxUserId
-            ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>`
-            : ''
-          }
-
+          ${s.robloxUserId ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>` : ''}
           <div class="staff-roles">
             ${(s.roles || []).length
             ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('')
             : `<span class="hint">No roles assigned</span>`
           }
           </div>
+          ${s.isBanned ? `<span class="status-chip" style="margin-top:6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);">Banned</span>` : (s.warnCount ? `<span class="status-chip pending" style="margin-top:6px;">${esc(s.warnCount)}/3 warns</span>` : '')}
         </div>
-
         <div class="modal-body">
+          <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+            ${canAssign && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openConfigBtn">Configure</button>` : ''}
+            ${canModerate && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openModBtn">Moderation</button>` : ''}
+          </div>
           <div class="modal-section">
             <div class="modal-section-title">Activity</div>
-
             <div class="modal-stat-grid">
               <div class="modal-stat-box">
                 <b>${esc(s.requestCount || 0)}</b>
                 <span>Requests</span>
               </div>
-
               <div class="modal-stat-box">
                 <b>${esc(s.pendingCount || 0)}</b>
                 <span>Pending</span>
               </div>
-
               <div class="modal-stat-box">
-                <b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b>
+                <b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '-'}</b>
                 <span>Last active</span>
               </div>
             </div>
           </div>
-
           <div class="modal-section">
             <div class="modal-section-title">Assignment</div>
-
             <div class="modal-info-row">
               <span class="label">Team</span>
-              <span class="value">${s.team ? esc(s.team) : '&mdash;'}</span>
+              <span class="value">${s.team ? esc(s.team) : '-'}</span>
             </div>
-
             <div class="modal-info-row">
               <span class="label">Skillset</span>
-              <span class="value">${s.skillset ? esc(s.skillset) : '&mdash;'}</span>
+              <span class="value">${s.skillset ? esc(s.skillset) : '-'}</span>
             </div>
           </div>
-
           <div class="modal-section">
             <div class="modal-section-title">Onboarding</div>
-
             ${s.onboardingRequired ? `
               <div class="modal-info-row">
                 <span class="label">Steps completed</span>
                 <span class="value">${esc(s.onboardingCompleted)} / ${esc(s.onboardingRequired)}</span>
               </div>
-
               <div class="onboard-bar-track">
                 <div class="onboard-bar-fill" style="width:${pct}%"></div>
               </div>
@@ -4520,10 +4606,8 @@
               <div class="hint">No onboarding steps configured.</div>
             `}
           </div>
-
           <div class="modal-section">
             <div class="modal-section-title">Payments</div>
-
             <div class="modal-info-row">
               <span class="label">Paid total</span>
               <span class="value">${paidTotalsHtml(s, false)}</span>
@@ -4534,14 +4618,61 @@
     </div>
   `;
       }
+
       function openProfile(idx) {
         const rows = getRows();
         activeProfile = rows[idx] || null;
+        modalMode = 'view';
+        configMsg = null;
+        warnError = null;
+        warnReason = '';
+        warnings = [];
+        bannedInfo = null;
         paintModal();
       }
 
       function closeProfile() {
         activeProfile = null;
+        modalMode = 'view';
+        paintModal();
+      }
+
+      async function openConfig() {
+        modalMode = 'config';
+        configMsg = null;
+        configBusy = false;
+        try {
+          const [t, sk] = await Promise.all([listTeams(), listSkillsets()]);
+          teamsList = t;
+          skillsetsList = sk;
+        } catch (e) {
+          teamsList = [];
+          skillsetsList = [];
+        }
+        const matchTeam = teamsList.find(t => t.name === activeProfile.team);
+        const matchSk = skillsetsList.find(sk => sk.name === activeProfile.skillset);
+        configTeamId = matchTeam ? matchTeam.id : '';
+        configSkillsetId = matchSk ? matchSk.id : '';
+        paintModal();
+      }
+
+      async function openModerate() {
+        modalMode = 'moderate';
+        warnError = null;
+        warnReason = '';
+        warnBusy = false;
+        try {
+          const res = await listUserWarnings(activeProfile.robloxUserId);
+          warnings = res.data || [];
+          bannedInfo = res.banned || null;
+          if (activeProfile) {
+            activeProfile.warnCount = res.warnCount != null ? res.warnCount : warnings.length;
+            activeProfile.isBanned = !!bannedInfo;
+          }
+        } catch (e) {
+          warnings = [];
+          bannedInfo = null;
+        }
         paintModal();
       }
 
@@ -4556,6 +4687,96 @@
         const closeBtn = document.getElementById('staffModalClose');
         if (scrim) scrim.addEventListener('click', (e) => { if (e.target === scrim) closeProfile(); });
         if (closeBtn) closeBtn.addEventListener('click', closeProfile);
+
+        const openConfigBtn = document.getElementById('openConfigBtn');
+        if (openConfigBtn) openConfigBtn.addEventListener('click', openConfig);
+        const openModBtn = document.getElementById('openModBtn');
+        if (openModBtn) openModBtn.addEventListener('click', openModerate);
+
+        const cfgBackBtn = document.getElementById('cfgBackBtn');
+        if (cfgBackBtn) cfgBackBtn.addEventListener('click', () => { modalMode = 'view'; paintModal(); });
+        const modBackBtn = document.getElementById('modBackBtn');
+        if (modBackBtn) modBackBtn.addEventListener('click', () => { modalMode = 'view'; paintModal(); });
+
+        const cfgSaveBtn = document.getElementById('cfgSaveBtn');
+        if (cfgSaveBtn) cfgSaveBtn.addEventListener('click', async () => {
+          const teamEl = document.getElementById('cfgTeam');
+          const skEl = document.getElementById('cfgSkillset');
+          configTeamId = teamEl ? teamEl.value : '';
+          configSkillsetId = skEl ? skEl.value : '';
+          configBusy = true; configMsg = null; paintModal();
+          try {
+            await assignUserTeamSkillset(
+              activeProfile.robloxUserId,
+              activeProfile.robloxUsername,
+              configTeamId || null,
+              configSkillsetId || null
+            );
+            const tName = teamsList.find(t => String(t.id) === String(configTeamId));
+            const sName = skillsetsList.find(sk => String(sk.id) === String(configSkillsetId));
+            activeProfile.team = tName ? tName.name : null;
+            activeProfile.skillset = sName ? sName.name : null;
+            const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
+            if (idx >= 0) {
+              staff[idx].team = activeProfile.team;
+              staff[idx].skillset = activeProfile.skillset;
+            }
+            configBusy = false;
+            configMsg = { ok: true, text: 'Assignment saved.' };
+            paintModal();
+            paintTable();
+          } catch (err) {
+            configBusy = false;
+            configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not save assignment.' };
+            paintModal();
+          }
+        });
+
+        const issueWarnBtn = document.getElementById('issueWarnBtn');
+        if (issueWarnBtn) issueWarnBtn.addEventListener('click', async () => {
+          const input = document.getElementById('warnReasonInput');
+          warnReason = input ? input.value.trim() : '';
+          if (!warnReason) { warnError = 'Enter a reason for the warning.'; paintModal(); return; }
+          warnBusy = true; warnError = null; paintModal();
+          try {
+            const res = await addUserWarning(activeProfile.robloxUserId, activeProfile.robloxUsername, warnReason);
+            activeProfile.warnCount = res.warnCount || 0;
+            if (res.banned) activeProfile.isBanned = true;
+            const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
+            if (idx >= 0) {
+              staff[idx].warnCount = activeProfile.warnCount;
+              staff[idx].isBanned = activeProfile.isBanned;
+            }
+            warnReason = '';
+            warnBusy = false;
+            await openModerate();
+            paintTable();
+          } catch (err) {
+            warnBusy = false;
+            warnError = (err && err.message) ? err.message : 'Could not issue warning.';
+            paintModal();
+          }
+        });
+
+        const unbanBtn = document.getElementById('unbanBtn');
+        if (unbanBtn) unbanBtn.addEventListener('click', async () => {
+          if (!confirm('Lift the ban for this account? They will be able to sign in again. Existing warnings stay on record.')) return;
+          warnBusy = true; paintModal();
+          try {
+            await unbanUser(activeProfile.robloxUserId);
+            activeProfile.isBanned = false;
+            bannedInfo = null;
+            const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
+            if (idx >= 0) staff[idx].isBanned = false;
+            warnBusy = false;
+            await openModerate();
+            paintTable();
+          } catch (err) {
+            warnBusy = false;
+            warnError = (err && err.message) ? err.message : 'Could not lift the ban.';
+            paintModal();
+          }
+        });
       }
 
       function wireTableEvents() {
@@ -4587,13 +4808,11 @@
           <button class="btn btn-ghost btn-sm" id="refreshStaffBtn">Refresh</button>
         </div>
       </div>
-
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center;">
         <div class="search-input-wrap">
           <input type="text" id="staffSearchInput" placeholder="Search by username or role" value="${esc(search)}">
         </div>
       </div>
-
       <div class="table-wrap" id="staffTableArea"></div>
       <div class="footer-note">Combines sign-ins, role assignments, and payment history for everyone the system has seen.</div>
     </div>

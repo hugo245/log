@@ -41,7 +41,8 @@ const PERMISSIONS = [
     'settings.manage_base_access',
     'settings.manage_onboarding',
     'roles.manage',
-    'staff.view_database'
+    'staff.view_database',
+    'staff.moderate'
 ];
 
 const TOS_CONTENT = `Last updated: August 2026
@@ -361,8 +362,30 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
         source_link_token: link.token,
         assigned_at: new Date().toISOString()
     }, { onConflict: 'roblox_user_id' });
+    if (link.role_id) {
+        const { error: roleAssignErr } = await supabase.from('user_role_assignments').insert({
+            roblox_user_id: robloxUserId,
+            role_id: link.role_id,
+            roblox_username: robloxUsername
+        });
+        if (roleAssignErr && roleAssignErr.code !== '23505') throw roleAssignErr;
+    }
     await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
     return link;
+}
+
+async function isUserBanned(robloxUserId) {
+    const { data } = await supabase.from('banned_users').select('roblox_user_id').eq('roblox_user_id', robloxUserId).maybeSingle();
+    return !!data;
+}
+
+async function getWarnCount(robloxUserId) {
+    const { count, error } = await supabase
+        .from('staff_warnings')
+        .select('*', { count: 'exact', head: true })
+        .eq('roblox_user_id', robloxUserId);
+    if (error) return 0;
+    return count || 0;
 }
 
 function hasPermission(session, permission) {
@@ -388,6 +411,13 @@ async function getSession(req) {
         await supabase.from('hr_sessions').delete().eq('token', token);
         return null;
     }
+
+    try {
+        if (await isUserBanned(data.roblox_user_id)) {
+            await supabase.from('hr_sessions').delete().eq('token', token);
+            return null;
+        }
+    } catch (e) {}
 
     const lastSynced = data.last_synced_at ? new Date(data.last_synced_at).getTime() : 0;
     if (Date.now() - lastSynced > ACCESS_SYNC_INTERVAL_MS) {
@@ -495,6 +525,13 @@ app.get('/roblox-auth-callback', async (req, res) => {
     const robloxUsername = userInfo.preferred_username || userInfo.nickname || String(robloxUserId);
 
     if (!robloxUserId) { fail('userinfo_failed'); return; }
+
+    try {
+        if (await isUserBanned(robloxUserId)) { fail('account_banned'); return; }
+    } catch (e) {
+        fail('ban_check_failed');
+        return;
+    }
 
     let baseCheck;
     try {
@@ -1085,12 +1122,14 @@ app.post('/hr-data', async (req, res) => {
     if (action === 'list_staff_database') {
         if (!requirePermission(res, session, 'staff.view_database')) return;
         try {
-            const [sessionsRes, requestsRes, assignmentsRes, progressRes, teamAssignRes] = await Promise.all([
+            const [sessionsRes, requestsRes, assignmentsRes, progressRes, teamAssignRes, warningsRes, bansRes] = await Promise.all([
                 supabase.from('hr_sessions').select('roblox_user_id, roblox_username, roles, last_synced_at, expires_at'),
                 supabase.from('payment_requests').select('roblox_user_id, roblox_username, payment, currency, paid, status'),
                 supabase.from('user_role_assignments').select('roblox_user_id, roblox_username, roles(name)'),
                 supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id'),
-                supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id')
+                supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id'),
+                supabase.from('staff_warnings').select('roblox_user_id'),
+                supabase.from('banned_users').select('roblox_user_id')
             ]);
             if (sessionsRes.error) throw sessionsRes.error;
             if (requestsRes.error) throw requestsRes.error;
@@ -1131,7 +1170,9 @@ app.post('/hr-data', async (req, res) => {
                         paidTotals: {},
                         onboardingCompleted: 0,
                         team: null,
-                        skillset: null
+                        skillset: null,
+                        warnCount: 0,
+                        isBanned: false
                     });
                 }
                 const row = byKey.get(key);
@@ -1179,6 +1220,20 @@ app.post('/hr-data', async (req, res) => {
                 if (ta) {
                     row.team = ta.team_id != null ? (teamNameById[ta.team_id] || null) : null;
                     row.skillset = ta.skillset_id != null ? (skillsetNameById[ta.skillset_id] || null) : null;
+                }
+            });
+
+            const warnCountByUser = {};
+            (warningsRes.data || []).forEach(w => {
+                if (w.roblox_user_id != null) {
+                    warnCountByUser[w.roblox_user_id] = (warnCountByUser[w.roblox_user_id] || 0) + 1;
+                }
+            });
+            const bannedSet = new Set((bansRes.data || []).map(b => b.roblox_user_id));
+            byKey.forEach((row) => {
+                if (row.robloxUserId != null) {
+                    row.warnCount = warnCountByUser[row.robloxUserId] || 0;
+                    row.isBanned = bannedSet.has(row.robloxUserId);
                 }
             });
 
@@ -1314,16 +1369,20 @@ app.post('/hr-data', async (req, res) => {
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         const teamIds = [...new Set((data || []).filter(l => l.team_id != null).map(l => l.team_id))];
         const skillsetIds = [...new Set((data || []).filter(l => l.skillset_id != null).map(l => l.skillset_id))];
-        const [teamsRes, skillsetsRes] = await Promise.all([
+        const roleIds = [...new Set((data || []).filter(l => l.role_id != null).map(l => l.role_id))];
+        const [teamsRes, skillsetsRes, rolesRes] = await Promise.all([
             teamIds.length ? supabase.from('teams').select('id,name').in('id', teamIds) : { data: [] },
-            skillsetIds.length ? supabase.from('skillsets').select('id,name').in('id', skillsetIds) : { data: [] }
+            skillsetIds.length ? supabase.from('skillsets').select('id,name').in('id', skillsetIds) : { data: [] },
+            roleIds.length ? supabase.from('roles').select('id,name').in('id', roleIds) : { data: [] }
         ]);
         const teamNameById = {}; (teamsRes.data || []).forEach(t => { teamNameById[t.id] = t.name; });
         const skillsetNameById = {}; (skillsetsRes.data || []).forEach(s => { skillsetNameById[s.id] = s.name; });
+        const roleNameById = {}; (rolesRes.data || []).forEach(r => { roleNameById[r.id] = r.name; });
         const out = (data || []).map(l => ({
             ...l,
             teamName: l.team_id != null ? (teamNameById[l.team_id] || null) : null,
             skillsetName: l.skillset_id != null ? (skillsetNameById[l.skillset_id] || null) : null,
+            roleName: l.role_id != null ? (roleNameById[l.role_id] || null) : null,
             url: `${APP_ORIGIN}/#/join/${l.token}`
         }));
         res.json({ ok: true, data: out });
@@ -1334,12 +1393,14 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         const teamId = payload.teamId ? Number(payload.teamId) : null;
         const skillsetId = payload.skillsetId ? Number(payload.skillsetId) : null;
+        const roleId = payload.roleId ? Number(payload.roleId) : null;
         const label = payload.label ? String(payload.label).trim() : null;
         const token = generateLinkToken();
         const { error } = await supabase.from('onboarding_links').insert({
             token,
             team_id: teamId,
             skillset_id: skillsetId,
+            role_id: roleId,
             label,
             created_by: session.roblox_username,
             uses: 0
@@ -1365,10 +1426,11 @@ app.post('/hr-data', async (req, res) => {
         const { data: link, error } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
-        let team = null, skillset = null;
+        let team = null, skillset = null, role = null;
         if (link.team_id) { const { data } = await supabase.from('teams').select('*').eq('id', link.team_id).maybeSingle(); team = data || null; }
         if (link.skillset_id) { const { data } = await supabase.from('skillsets').select('*').eq('id', link.skillset_id).maybeSingle(); skillset = data || null; }
-        res.json({ ok: true, data: { team, skillset, label: link.label } });
+        if (link.role_id) { const { data } = await supabase.from('roles').select('id,name').eq('id', link.role_id).maybeSingle(); role = data || null; }
+        res.json({ ok: true, data: { team, skillset, role, label: link.label } });
         return;
     }
 
@@ -1415,6 +1477,94 @@ app.post('/hr-data', async (req, res) => {
         } catch (e) {
             res.status(500).json({ ok: false, error: 'search_failed' });
         }
+        return;
+    }
+
+
+    if (action === 'assign_user_team_skillset') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        const teamId = payload.teamId === '' || payload.teamId == null ? null : Number(payload.teamId);
+        const skillsetId = payload.skillsetId === '' || payload.skillsetId == null ? null : Number(payload.skillsetId);
+        let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        if (!username) {
+            const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
+            if (lookupRes.ok) username = (await lookupRes.json()).name;
+        }
+        const { error } = await supabase.from('user_assignments').upsert({
+            roblox_user_id: robloxUserId,
+            roblox_username: username,
+            team_id: teamId,
+            skillset_id: skillsetId,
+            assigned_at: new Date().toISOString()
+        }, { onConflict: 'roblox_user_id' });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_user_warnings') {
+        if (!hasPermission(session, 'staff.moderate') && !hasPermission(session, 'staff.view_database')) {
+            res.status(403).json({ ok: false, error: 'missing_permission' });
+            return;
+        }
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        const { data, error } = await supabase
+            .from('staff_warnings')
+            .select('*')
+            .eq('roblox_user_id', robloxUserId)
+            .order('created_at', { ascending: false });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const { data: ban } = await supabase.from('banned_users').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
+        res.json({ ok: true, data: data || [], banned: ban || null, warnCount: (data || []).length });
+        return;
+    }
+
+    if (action === 'add_user_warning') {
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        const reason = payload.reason ? String(payload.reason).trim() : '';
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
+        let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        if (!username) {
+            const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
+            if (lookupRes.ok) username = (await lookupRes.json()).name;
+        }
+        const { error } = await supabase.from('staff_warnings').insert({
+            roblox_user_id: robloxUserId,
+            roblox_username: username,
+            reason,
+            warned_by: session.roblox_username,
+            created_at: new Date().toISOString()
+        });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+
+        const count = await getWarnCount(robloxUserId);
+        let banned = false;
+        if (count >= 3) {
+            await supabase.from('banned_users').upsert({
+                roblox_user_id: robloxUserId,
+                roblox_username: username,
+                reason: 'Reached 3 warnings',
+                banned_by: session.roblox_username,
+                banned_at: new Date().toISOString()
+            }, { onConflict: 'roblox_user_id' });
+            await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+            banned = true;
+        }
+        res.json({ ok: true, warnCount: count, banned });
+        return;
+    }
+
+    if (action === 'unban_user') {
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        await supabase.from('banned_users').delete().eq('roblox_user_id', robloxUserId);
+        res.json({ ok: true });
         return;
     }
 
