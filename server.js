@@ -39,6 +39,7 @@ const PERMISSIONS = [
     'settings.manage_rate',
     'settings.manage_groups',
     'settings.manage_base_access',
+    'settings.manage_onboarding',
     'roles.manage',
     'staff.view_database'
 ];
@@ -115,6 +116,14 @@ That's the basics, take a look around once you're through this checklist.`,
         required: true
     },
     {
+        id: 'team_info',
+        type: 'team_info',
+        title: 'Your team & skillset',
+        description: 'Where you fit in at PlayVerse.',
+        content: '',
+        required: false
+    },
+    {
         id: 'tos',
         type: 'tos',
         title: 'Terms of Service',
@@ -161,6 +170,10 @@ function base64url(buffer) {
 function getBearerToken(req) {
     const auth = req.headers.authorization || '';
     return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+}
+
+function generateLinkToken() {
+    return randomToken(9);
 }
 
 function generateRequestId() {
@@ -282,6 +295,22 @@ async function computeGroupEligibility(robloxUserId) {
     return results;
 }
 
+async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
+    if (!token) return null;
+    const { data: link } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
+    if (!link) return null;
+    await supabase.from('user_assignments').upsert({
+        roblox_user_id: robloxUserId,
+        roblox_username: robloxUsername,
+        team_id: link.team_id,
+        skillset_id: link.skillset_id,
+        source_link_token: link.token,
+        assigned_at: new Date().toISOString()
+    }, { onConflict: 'roblox_user_id' });
+    await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
+    return link;
+}
+
 function hasPermission(session, permission) {
     return !!session && Array.isArray(session.permissions) && session.permissions.includes(permission);
 }
@@ -340,10 +369,12 @@ app.get('/roblox-auth-start', async (req, res) => {
     const state = randomToken(16);
     const codeVerifier = randomToken(32);
     const codeChallenge = base64url(crypto.createHash('sha256').update(codeVerifier).digest());
+    const refToken = req.query.ref ? String(req.query.ref).trim().slice(0, 64) : null;
 
     const { error } = await supabase.from('oauth_states').insert({
         state,
-        code_verifier: codeVerifier
+        code_verifier: codeVerifier,
+        ref_token: refToken || null
     });
 
     if (error) {
@@ -443,7 +474,23 @@ app.get('/roblox-auth-callback', async (req, res) => {
 
     if (sessionErr) { fail('session_create_failed'); return; }
 
+    if (stateRow.ref_token) {
+        try { await claimOnboardingLink(robloxUserId, robloxUsername, stateRow.ref_token); } catch (e) { }
+    }
+
     res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
+});
+
+app.get('/onboarding-link-preview', async (req, res) => {
+    const token = req.query.token ? String(req.query.token).trim() : '';
+    if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
+    const { data: link, error } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
+    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+    if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
+    let team = null, skillset = null;
+    if (link.team_id) { const { data } = await supabase.from('teams').select('name, color, info').eq('id', link.team_id).maybeSingle(); team = data || null; }
+    if (link.skillset_id) { const { data } = await supabase.from('skillsets').select('name, color, description').eq('id', link.skillset_id).maybeSingle(); skillset = data || null; }
+    res.json({ ok: true, data: { team, skillset, label: link.label } });
 });
 
 app.get('/hr-session', async (req, res) => {
@@ -549,11 +596,40 @@ app.post('/hr-data', async (req, res) => {
             if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m;
         });
 
+        let rolesByUserId = {};
+        let assignByUserId = {};
+        let teamNameById = {};
+        let skillsetNameById = {};
+        if (userIds.length) {
+            const [sessionRolesRes, assignmentsRes] = await Promise.all([
+                supabase.from('hr_sessions').select('roblox_user_id, roles').in('roblox_user_id', userIds),
+                supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id').in('roblox_user_id', userIds)
+            ]);
+            (sessionRolesRes.data || []).forEach(s => { rolesByUserId[s.roblox_user_id] = s.roles || []; });
+            (assignmentsRes.data || []).forEach(a => { assignByUserId[a.roblox_user_id] = a; });
+
+            const teamIds = [...new Set((assignmentsRes.data || []).filter(a => a.team_id != null).map(a => a.team_id))];
+            const skillsetIds = [...new Set((assignmentsRes.data || []).filter(a => a.skillset_id != null).map(a => a.skillset_id))];
+            if (teamIds.length) {
+                const { data } = await supabase.from('teams').select('id,name').in('id', teamIds);
+                (data || []).forEach(t => { teamNameById[t.id] = t.name; });
+            }
+            if (skillsetIds.length) {
+                const { data } = await supabase.from('skillsets').select('id,name').in('id', skillsetIds);
+                (data || []).forEach(s => { skillsetNameById[s.id] = s.name; });
+            }
+        }
+
         rows.forEach(r => {
             const m = (r.roblox_user_id != null ? methodByUserId[r.roblox_user_id] : null)
                 || (r.roblox_username ? methodByUsername[r.roblox_username.toLowerCase()] : null)
                 || null;
             r.payment_method = m ? { method: m.method, details: m.details || {} } : null;
+
+            r.requester_roles = r.roblox_user_id != null ? (rolesByUserId[r.roblox_user_id] || []) : [];
+            const assign = r.roblox_user_id != null ? assignByUserId[r.roblox_user_id] : null;
+            r.requester_team = assign && assign.team_id != null ? (teamNameById[assign.team_id] || null) : null;
+            r.requester_skillset = assign && assign.skillset_id != null ? (skillsetNameById[assign.skillset_id] || null) : null;
         });
 
         res.json({ ok: true, data: rows });
@@ -954,16 +1030,28 @@ app.post('/hr-data', async (req, res) => {
     if (action === 'list_staff_database') {
         if (!requirePermission(res, session, 'staff.view_database')) return;
         try {
-            const [sessionsRes, requestsRes, assignmentsRes, progressRes] = await Promise.all([
+            const [sessionsRes, requestsRes, assignmentsRes, progressRes, teamAssignRes] = await Promise.all([
                 supabase.from('hr_sessions').select('roblox_user_id, roblox_username, roles, last_synced_at, expires_at'),
                 supabase.from('payment_requests').select('roblox_user_id, roblox_username, payment, currency, paid, status'),
                 supabase.from('user_role_assignments').select('roblox_user_id, roblox_username, roles(name)'),
-                supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id')
+                supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id'),
+                supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id')
             ]);
             if (sessionsRes.error) throw sessionsRes.error;
             if (requestsRes.error) throw requestsRes.error;
             if (assignmentsRes.error) throw assignmentsRes.error;
             if (progressRes.error) throw progressRes.error;
+            if (teamAssignRes.error) throw teamAssignRes.error;
+
+            const teamIds = [...new Set((teamAssignRes.data || []).filter(a => a.team_id != null).map(a => a.team_id))];
+            const skillsetIds = [...new Set((teamAssignRes.data || []).filter(a => a.skillset_id != null).map(a => a.skillset_id))];
+            const [teamsLookupRes, skillsetsLookupRes] = await Promise.all([
+                teamIds.length ? supabase.from('teams').select('id,name').in('id', teamIds) : Promise.resolve({ data: [] }),
+                skillsetIds.length ? supabase.from('skillsets').select('id,name').in('id', skillsetIds) : Promise.resolve({ data: [] })
+            ]);
+            const teamNameById = {}; (teamsLookupRes.data || []).forEach(t => { teamNameById[t.id] = t.name; });
+            const skillsetNameById = {}; (skillsetsLookupRes.data || []).forEach(s => { skillsetNameById[s.id] = s.name; });
+            const teamAssignByUserId = {}; (teamAssignRes.data || []).forEach(a => { teamAssignByUserId[a.roblox_user_id] = a; });
 
             const totalRequiredSteps = ONBOARDING_STEPS.filter(s => s.required).length;
             const requiredStepIds = new Set(ONBOARDING_STEPS.filter(s => s.required).map(s => s.id));
@@ -986,7 +1074,9 @@ app.post('/hr-data', async (req, res) => {
                         requestCount: 0,
                         pendingCount: 0,
                         paidTotals: {},
-                        onboardingCompleted: 0
+                        onboardingCompleted: 0,
+                        team: null,
+                        skillset: null
                     });
                 }
                 const row = byKey.get(key);
@@ -1030,12 +1120,245 @@ app.post('/hr-data', async (req, res) => {
             byKey.forEach((row, key) => {
                 row.onboardingCompleted = progressByUser.get(key) || 0;
                 row.onboardingRequired = totalRequiredSteps;
+                const ta = row.robloxUserId != null ? teamAssignByUserId[row.robloxUserId] : null;
+                if (ta) {
+                    row.team = ta.team_id != null ? (teamNameById[ta.team_id] || null) : null;
+                    row.skillset = ta.skillset_id != null ? (skillsetNameById[ta.skillset_id] || null) : null;
+                }
             });
 
             const data = Array.from(byKey.values()).filter(r => r.robloxUserId != null || r.robloxUsername);
             res.json({ ok: true, data });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not load the staff database.' });
+        }
+        return;
+    }
+
+    // ---- Teams & skillsets (onboarding customization) ----
+
+    if (action === 'list_teams') {
+        const { data, error } = await supabase.from('teams').select('*').order('name', { ascending: true });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const { data: links, error: linkErr } = await supabase.from('team_skillsets').select('team_id, skillset_id');
+        if (linkErr) { res.status(500).json({ ok: false, error: linkErr.message }); return; }
+        const skillsetIdsByTeam = {};
+        (links || []).forEach(l => {
+            if (!skillsetIdsByTeam[l.team_id]) skillsetIdsByTeam[l.team_id] = [];
+            skillsetIdsByTeam[l.team_id].push(l.skillset_id);
+        });
+        const out = (data || []).map(t => ({ ...t, skillsetIds: skillsetIdsByTeam[t.id] || [] }));
+        res.json({ ok: true, data: out });
+        return;
+    }
+
+    if (action === 'add_team') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const name = payload.name && String(payload.name).trim();
+        if (!name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
+        const { data, error } = await supabase.from('teams').insert({
+            name,
+            color: payload.color ? String(payload.color).trim() : null,
+            discord_url: payload.discordUrl ? String(payload.discordUrl).trim() : null,
+            roblox_group_url: payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null,
+            roblox_group_id: payload.robloxGroupId ? Number(payload.robloxGroupId) : null,
+            info: payload.info ? String(payload.info) : null
+        }).select().maybeSingle();
+        if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A team with that name already exists.' }); return; }
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const skillsetIds = Array.isArray(payload.skillsetIds) ? payload.skillsetIds : [];
+        if (data && skillsetIds.length) {
+            await supabase.from('team_skillsets').insert(skillsetIds.map(sid => ({ team_id: data.id, skillset_id: sid })));
+        }
+        res.json({ ok: true, data });
+        return;
+    }
+
+    if (action === 'update_team') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const update = {};
+        if (payload.name != null) update.name = String(payload.name).trim();
+        if (payload.color !== undefined) update.color = payload.color ? String(payload.color).trim() : null;
+        if (payload.discordUrl !== undefined) update.discord_url = payload.discordUrl ? String(payload.discordUrl).trim() : null;
+        if (payload.robloxGroupUrl !== undefined) update.roblox_group_url = payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null;
+        if (payload.robloxGroupId !== undefined) update.roblox_group_id = payload.robloxGroupId ? Number(payload.robloxGroupId) : null;
+        if (payload.info !== undefined) update.info = payload.info ? String(payload.info) : null;
+        const { error } = await supabase.from('teams').update(update).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (Array.isArray(payload.skillsetIds)) {
+            await supabase.from('team_skillsets').delete().eq('team_id', id);
+            if (payload.skillsetIds.length) {
+                await supabase.from('team_skillsets').insert(payload.skillsetIds.map(sid => ({ team_id: id, skillset_id: sid })));
+            }
+        }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_team') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('teams').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_skillsets') {
+        const { data, error } = await supabase.from('skillsets').select('*').order('name', { ascending: true });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data });
+        return;
+    }
+
+    if (action === 'add_skillset') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const name = payload.name && String(payload.name).trim();
+        if (!name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
+        const { error } = await supabase.from('skillsets').insert({
+            name,
+            color: payload.color ? String(payload.color).trim() : null,
+            description: payload.description ? String(payload.description).trim() : null
+        });
+        if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A skillset with that name already exists.' }); return; }
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'update_skillset') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const update = {};
+        if (payload.name != null) update.name = String(payload.name).trim();
+        if (payload.color !== undefined) update.color = payload.color ? String(payload.color).trim() : null;
+        if (payload.description !== undefined) update.description = payload.description ? String(payload.description).trim() : null;
+        const { error } = await supabase.from('skillsets').update(update).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_skillset') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('skillsets').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_onboarding_links') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const { data, error } = await supabase.from('onboarding_links').select('*').order('created_at', { ascending: false });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const teamIds = [...new Set((data || []).filter(l => l.team_id != null).map(l => l.team_id))];
+        const skillsetIds = [...new Set((data || []).filter(l => l.skillset_id != null).map(l => l.skillset_id))];
+        const [teamsRes, skillsetsRes] = await Promise.all([
+            teamIds.length ? supabase.from('teams').select('id,name').in('id', teamIds) : { data: [] },
+            skillsetIds.length ? supabase.from('skillsets').select('id,name').in('id', skillsetIds) : { data: [] }
+        ]);
+        const teamNameById = {}; (teamsRes.data || []).forEach(t => { teamNameById[t.id] = t.name; });
+        const skillsetNameById = {}; (skillsetsRes.data || []).forEach(s => { skillsetNameById[s.id] = s.name; });
+        const out = (data || []).map(l => ({
+            ...l,
+            teamName: l.team_id != null ? (teamNameById[l.team_id] || null) : null,
+            skillsetName: l.skillset_id != null ? (skillsetNameById[l.skillset_id] || null) : null,
+            url: `${APP_ORIGIN}/#/join/${l.token}`
+        }));
+        res.json({ ok: true, data: out });
+        return;
+    }
+
+    if (action === 'create_onboarding_link') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const teamId = payload.teamId ? Number(payload.teamId) : null;
+        const skillsetId = payload.skillsetId ? Number(payload.skillsetId) : null;
+        const label = payload.label ? String(payload.label).trim() : null;
+        const token = generateLinkToken();
+        const { error } = await supabase.from('onboarding_links').insert({
+            token,
+            team_id: teamId,
+            skillset_id: skillsetId,
+            label,
+            created_by: session.roblox_username,
+            uses: 0
+        });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, token, url: `${APP_ORIGIN}/#/join/${token}` });
+        return;
+    }
+
+    if (action === 'delete_onboarding_link') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const token = payload.token;
+        if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
+        const { error } = await supabase.from('onboarding_links').delete().eq('token', token);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_onboarding_link_info') {
+        const token = payload.token && String(payload.token).trim();
+        if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
+        const { data: link, error } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
+        let team = null, skillset = null;
+        if (link.team_id) { const { data } = await supabase.from('teams').select('*').eq('id', link.team_id).maybeSingle(); team = data || null; }
+        if (link.skillset_id) { const { data } = await supabase.from('skillsets').select('*').eq('id', link.skillset_id).maybeSingle(); skillset = data || null; }
+        res.json({ ok: true, data: { team, skillset, label: link.label } });
+        return;
+    }
+
+    if (action === 'claim_onboarding_link') {
+        const token = payload.token && String(payload.token).trim();
+        if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
+        try {
+            const link = await claimOnboardingLink(session.roblox_user_id, session.roblox_username, token);
+            if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not apply that invite link.' });
+        }
+        return;
+    }
+
+    if (action === 'get_my_assignment') {
+        try {
+            const { data: ua } = await supabase.from('user_assignments').select('*').eq('roblox_user_id', session.roblox_user_id).maybeSingle();
+            if (!ua) { res.json({ ok: true, data: null }); return; }
+            let team = null, skillset = null;
+            if (ua.team_id) { const { data } = await supabase.from('teams').select('*').eq('id', ua.team_id).maybeSingle(); team = data || null; }
+            if (ua.skillset_id) { const { data } = await supabase.from('skillsets').select('*').eq('id', ua.skillset_id).maybeSingle(); skillset = data || null; }
+            res.json({ ok: true, data: { team, skillset } });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load your team assignment.' });
+        }
+        return;
+    }
+
+    if (action === 'search_roblox_usernames') {
+        if (!requirePermission(res, session, 'dashboard.submit_request')) return;
+        const q = payload.query ? String(payload.query).trim() : '';
+        if (q.length < 2) { res.json({ ok: true, data: [] }); return; }
+        try {
+            const [sessionsRes, methodsRes, assignmentsRes] = await Promise.all([
+                supabase.from('hr_sessions').select('roblox_username').ilike('roblox_username', `%${q}%`).limit(8),
+                supabase.from('payment_methods').select('roblox_username').ilike('roblox_username', `%${q}%`).limit(8),
+                supabase.from('user_assignments').select('roblox_username').ilike('roblox_username', `%${q}%`).limit(8)
+            ]);
+            const names = new Set();
+            [sessionsRes, methodsRes, assignmentsRes].forEach(r => (r.data || []).forEach(row => { if (row.roblox_username) names.add(row.roblox_username); }));
+            res.json({ ok: true, data: Array.from(names).slice(0, 8) });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'search_failed' });
         }
         return;
     }
