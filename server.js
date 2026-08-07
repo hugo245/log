@@ -39,8 +39,99 @@ const PERMISSIONS = [
     'settings.manage_rate',
     'settings.manage_groups',
     'settings.manage_base_access',
-    'roles.manage'
+    'roles.manage',
+    'staff.view_database'
 ];
+
+const TOS_CONTENT = `Last updated: August 2026
+
+1. Who this applies to
+These Terms of Service apply to anyone signing in to the PlayVerse HR & Payment tool ("the Tool") using their Roblox account, including staff, developers, and contributors of PlayVerse (playverse.cc).
+
+2. Your account
+You sign in with your own Roblox account through Roblox OAuth. You're responsible for keeping that account secure. Access to the Tool can be granted or revoked at any time based on your role or group standing within PlayVerse.
+
+3. What the Tool is for
+The Tool is used to log completed work, submit and review payment requests, track DevEx/Robux and cash payouts, and manage staff access and roles. It is an internal tool, not a public product, and it is not affiliated with or endorsed by Roblox Corporation.
+
+4. Accuracy of information
+Any payment request, task log, or work summary you submit must be accurate and represent work you actually completed. Submitting false, inflated, or duplicated work entries is a violation of these Terms and may result in the request being rejected, access being revoked, and, in serious cases, referral to group leadership for further action.
+
+5. Payments
+Payment amounts, currencies, and DevEx rates shown in the Tool are set by PlayVerse and may change at any time. Being able to submit a request does not guarantee payment; requests are reviewed and approved at PlayVerse's discretion. It's your responsibility to keep your payout details (PayPal, Venmo, or Roblox username for DevEx) accurate and up to date.
+
+6. No warranty
+The Tool is provided "as is." PlayVerse makes reasonable efforts to keep it available and your data accurate, but does not guarantee uninterrupted access or that the Tool will be free of errors.
+
+7. Changes
+These Terms may be updated from time to time. Continued use of the Tool after an update means you accept the revised Terms. Material changes will be reflected here with an updated date.
+
+8. Contact
+Questions about these Terms can be directed to PlayVerse leadership through your usual staff channels.`;
+
+const AUP_CONTENT = `Last updated: August 2026
+
+This Acceptable Use Policy explains what is and isn't okay when using the PlayVerse HR & Payment tool ("the Tool"). It applies to everyone with access, regardless of role.
+
+1. Use the Tool for its intended purpose
+Only submit payment requests and work logs for work you actually did. Only use the accounts, groups, and permissions you've been given for the purpose they were given to you.
+
+2. Don't misuse access
+Do not attempt to access data, requests, or settings you have not been granted permission to view or edit. Do not share your session, login link, or account access with anyone else. Do not attempt to bypass, disable, or trick the Tool's permission or eligibility checks.
+
+3. Respect other staff
+Treat other staff, developers, and contributors with respect when interacting through or about the Tool. Harassment, discrimination, or abusive behavior toward other members of the team is not tolerated and may result in removal from all PlayVerse groups and revocation of Tool access.
+
+4. Financial integrity
+Do not submit duplicate, inflated, or fraudulent payment requests. Do not mark your own requests as paid, approve your own submissions, or otherwise use elevated access for your own benefit. If you're granted a role with financial permissions, that access is for processing the team's requests, not your own.
+
+5. Data handling
+Information in the Tool, including payment history, personal payout details, and staff roles, is internal and confidential. Do not export, screenshot, or share this data outside of PlayVerse without authorization.
+
+6. Required groups and access
+Some access to the Tool is tied to membership in specific Roblox groups. Do not attempt to join required groups, achieve a rank, or gain access under false pretenses (for example, using an alternate account to bypass a restriction placed on your main account).
+
+7. Consequences
+Violating this policy may result in a rejected or reversed payment request, loss of specific permissions, removal from PlayVerse groups, and loss of access to the Tool, depending on the severity of the violation.
+
+8. Reporting concerns
+If you see something that looks like a violation of this policy, report it to PlayVerse leadership through your usual staff channels.`;
+
+const ONBOARDING_STEPS = [
+    {
+        id: 'welcome',
+        type: 'intro',
+        title: 'Welcome to the PlayVerse HR tool',
+        description: 'A quick tour before you get started.',
+        content: `This tool is how PlayVerse staff log completed work, submit and track payment requests, and see what's been paid.
+
+If you can submit requests: use "New request" to log a task, the game it was for, time worked, and the payout amount. Add a payout method under "My payments" first so it's ready to go.
+
+If you have dashboard access: the Dashboard shows every request from the team. You can review, mark things paid, or reject a request with a note.
+
+Everyone can check "My payments" any time to see their own history and running totals.
+
+That's the basics, take a look around once you're through this checklist.`,
+        required: true
+    },
+    {
+        id: 'tos',
+        type: 'tos',
+        title: 'Terms of Service',
+        description: 'Please read and accept before continuing.',
+        content: TOS_CONTENT,
+        required: true
+    },
+    {
+        id: 'aup',
+        type: 'aup',
+        title: 'Acceptable Use Policy',
+        description: 'Please read and accept before continuing.',
+        content: AUP_CONTENT,
+        required: true
+    }
+];
+const ONBOARDING_STEP_IDS = new Set(ONBOARDING_STEPS.map(s => s.id));
 
 const PAYMENT_METHOD_TYPES = {
     PAYPAL: { fields: ['paypalEmail'] },
@@ -811,6 +902,140 @@ app.post('/hr-data', async (req, res) => {
             res.json({ ok: true, roles: access.roleNames, permissions: access.permissions });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'refresh_failed' });
+        }
+        return;
+    }
+
+    if (action === 'list_onboarding_steps') {
+        res.json({ ok: true, data: ONBOARDING_STEPS });
+        return;
+    }
+
+    if (action === 'get_my_onboarding') {
+        try {
+            const { data: progress, error: progErr } = await supabase
+                .from('staff_onboarding_progress')
+                .select('step_id, completed_at')
+                .eq('roblox_user_id', session.roblox_user_id);
+            if (progErr) throw progErr;
+            const completedByStep = {};
+            (progress || []).forEach(p => { completedByStep[p.step_id] = p.completed_at; });
+
+            const data = ONBOARDING_STEPS.map(s => ({
+                ...s,
+                completedAt: completedByStep[s.id] || null
+            }));
+
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load your onboarding status.' });
+        }
+        return;
+    }
+
+    if (action === 'complete_onboarding_step') {
+        const stepId = payload.stepId;
+        if (!stepId || !ONBOARDING_STEP_IDS.has(stepId)) { res.status(400).json({ ok: false, error: 'missing_step_id' }); return; }
+        try {
+            const { error } = await supabase.from('staff_onboarding_progress').upsert({
+                roblox_user_id: session.roblox_user_id,
+                roblox_username: session.roblox_username,
+                step_id: stepId,
+                completed_at: new Date().toISOString()
+            }, { onConflict: 'roblox_user_id,step_id' });
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not save that step. Try again.' });
+        }
+        return;
+    }
+
+    if (action === 'list_staff_database') {
+        if (!requirePermission(res, session, 'staff.view_database')) return;
+        try {
+            const [sessionsRes, requestsRes, assignmentsRes, progressRes] = await Promise.all([
+                supabase.from('hr_sessions').select('roblox_user_id, roblox_username, roles, last_synced_at, expires_at'),
+                supabase.from('payment_requests').select('roblox_user_id, roblox_username, payment, currency, paid, status'),
+                supabase.from('user_role_assignments').select('roblox_user_id, roblox_username, roles(name)'),
+                supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id')
+            ]);
+            if (sessionsRes.error) throw sessionsRes.error;
+            if (requestsRes.error) throw requestsRes.error;
+            if (assignmentsRes.error) throw assignmentsRes.error;
+            if (progressRes.error) throw progressRes.error;
+
+            const totalRequiredSteps = ONBOARDING_STEPS.filter(s => s.required).length;
+            const requiredStepIds = new Set(ONBOARDING_STEPS.filter(s => s.required).map(s => s.id));
+
+            const byKey = new Map();
+            function keyFor(userId, username) {
+                if (userId != null) return `id:${userId}`;
+                if (username) return `un:${String(username).toLowerCase()}`;
+                return null;
+            }
+            function ensure(userId, username) {
+                const key = keyFor(userId, username);
+                if (!key) return null;
+                if (!byKey.has(key)) {
+                    byKey.set(key, {
+                        robloxUserId: userId != null ? userId : null,
+                        robloxUsername: username || null,
+                        roles: [],
+                        lastActive: null,
+                        requestCount: 0,
+                        pendingCount: 0,
+                        paidTotals: {},
+                        onboardingCompleted: 0
+                    });
+                }
+                const row = byKey.get(key);
+                if (userId != null && row.robloxUserId == null) row.robloxUserId = userId;
+                if (username && !row.robloxUsername) row.robloxUsername = username;
+                return row;
+            }
+
+            (sessionsRes.data || []).forEach(s => {
+                const row = ensure(s.roblox_user_id, s.roblox_username);
+                if (!row) return;
+                row.roles = Array.from(new Set([...row.roles, ...(s.roles || [])]));
+                const seen = s.last_synced_at || null;
+                if (seen && (!row.lastActive || new Date(seen) > new Date(row.lastActive))) row.lastActive = seen;
+            });
+
+            (assignmentsRes.data || []).forEach(a => {
+                const row = ensure(a.roblox_user_id, a.roblox_username);
+                if (!row) return;
+                const roleName = a.roles && a.roles.name;
+                if (roleName && !row.roles.includes(roleName)) row.roles.push(roleName);
+            });
+
+            (requestsRes.data || []).forEach(r => {
+                const row = ensure(r.roblox_user_id, r.roblox_username);
+                if (!row) return;
+                row.requestCount += 1;
+                if (!r.paid && (r.status || 'pending') === 'pending') row.pendingCount += 1;
+                if (r.paid) {
+                    const cur = r.currency || 'ROBUX';
+                    row.paidTotals[cur] = (row.paidTotals[cur] || 0) + (Number(r.payment) || 0);
+                }
+            });
+
+            const progressByUser = new Map();
+            (progressRes.data || []).forEach(p => {
+                if (!requiredStepIds.has(p.step_id)) return;
+                const key = `id:${p.roblox_user_id}`;
+                progressByUser.set(key, (progressByUser.get(key) || 0) + 1);
+            });
+            byKey.forEach((row, key) => {
+                row.onboardingCompleted = progressByUser.get(key) || 0;
+                row.onboardingRequired = totalRequiredSteps;
+            });
+
+            const data = Array.from(byKey.values()).filter(r => r.robloxUserId != null || r.robloxUsername);
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load the staff database.' });
         }
         return;
     }

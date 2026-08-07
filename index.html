@@ -108,6 +108,72 @@
       color: var(--ink);
     }
 
+    .acct-menu {
+      position: relative;
+    }
+
+    .acct-menu summary {
+      list-style: none;
+      cursor: pointer;
+    }
+
+    .acct-menu summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .acct-menu-list {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 6px;
+      min-width: 170px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .08);
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .acct-menu-list a,
+    .acct-menu-list button {
+      display: block;
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink);
+      text-decoration: none;
+      text-align: left;
+      background: none;
+      border: none;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .acct-menu-list a:hover,
+    .acct-menu-list button:hover {
+      background: var(--bg);
+    }
+
+    .acct-menu-list .acct-menu-divider {
+      height: 1px;
+      background: var(--line);
+      margin: 4px 2px;
+    }
+
+    .acct-menu-list .acct-menu-label {
+      padding: 6px 10px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+
     .hr-pill {
       appearance: none;
       border: 1px solid var(--line);
@@ -210,6 +276,12 @@
       font-weight: 400;
       color: #9BA1AC;
       margin-left: 6px;
+    }
+
+    .hint {
+      font-weight: 400;
+      color: #9BA1AC;
+      font-size: 12.5px;
     }
 
     .field .err-hint {
@@ -575,12 +647,13 @@
       letter-spacing: -.3px;
     }
 
-    .total-value .robux-icon {
+    .robux-icon {
       height: 1em;
       width: 1em;
       display: inline-block;
       object-fit: contain;
       flex-shrink: 0;
+      vertical-align: -0.15em;
     }
 
     .invoice-foot {
@@ -1465,9 +1538,16 @@
       'settings.manage_rate': 'Manage DevEx rate',
       'settings.manage_groups': 'Manage payout eligibility groups',
       'settings.manage_base_access': 'Manage sign-in access requirement',
-      'roles.manage': 'Manage roles and access'
+      'roles.manage': 'Manage roles and access',
+      'staff.view_database': 'View staff database'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
+
+    const ONBOARDING_TYPE_LABELS = {
+      intro: 'Getting started',
+      tos: 'Terms of Service',
+      aup: 'Acceptable Use Policy'
+    };
 
     const PAYMENT_METHODS = {
       PAYPAL: { label: 'PayPal', sub: 'Paid to your PayPal email address', fields: [{ key: 'paypalEmail', label: 'PayPal email', type: 'text', placeholder: 'you@example.com' }] },
@@ -1501,6 +1581,7 @@
     let hrPermissions = [];
     let authReady = false;
     let appDataReady = false;
+    let needsOnboarding = false;
 
     function hasPermission(permission) {
       return hrPermissions.includes(permission);
@@ -1736,11 +1817,13 @@
           hrUsername = json.robloxUsername || '';
           hrRoles = json.roles || [];
           hrPermissions = json.permissions || [];
+          await refreshOnboardingNeed();
         } else {
           isHrAuthed = false;
           hrUsername = '';
           hrRoles = [];
           hrPermissions = [];
+          needsOnboarding = false;
           clearToken();
         }
       } catch (e) {
@@ -1748,6 +1831,16 @@
         hrUsername = '';
         hrRoles = [];
         hrPermissions = [];
+        needsOnboarding = false;
+      }
+    }
+
+    async function refreshOnboardingNeed() {
+      try {
+        const steps = await loadMyOnboarding();
+        needsOnboarding = steps.some(s => s.required && !s.completedAt);
+      } catch (e) {
+        needsOnboarding = false;
       }
     }
 
@@ -1799,6 +1892,20 @@
         currency: data.currency
       });
       return json;
+    }
+
+    async function loadMyOnboarding() {
+      const json = await callHrData('get_my_onboarding');
+      return json.data || [];
+    }
+
+    async function completeOnboardingStep(stepId) {
+      await callHrData('complete_onboarding_step', { stepId });
+    }
+
+    async function loadStaffDatabase() {
+      const json = await callHrData('list_staff_database');
+      return json.data || [];
     }
 
     async function addGame(name) {
@@ -2070,7 +2177,17 @@
       if (!authReady) return;
       const path = window.location.hash.split('?')[0];
       if (path === '#/auth-callback') { handleAuthCallback(); return; }
-      if (path === '#/hr' || path === '#/dashboard') {
+
+      if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
+        window.location.hash = '#/onboarding';
+        return;
+      }
+
+      if (path === '#/tos') {
+        if (isHrAuthed) renderPolicyPage('tos'); else renderHrGate();
+      } else if (path === '#/aup') {
+        if (isHrAuthed) renderPolicyPage('aup'); else renderHrGate();
+      } else if (path === '#/hr' || path === '#/dashboard') {
         if (isHrAuthed) renderDashboard(); else renderHrGate();
       } else if (path === '#/manage') {
         if (isHrAuthed) renderManagePanel(); else renderHrGate();
@@ -2078,6 +2195,10 @@
         if (isHrAuthed) renderMyPayments(); else renderHrGate();
       } else if (path === '#/new') {
         if (isHrAuthed && canSubmitRequests()) renderCreateView(); else if (isHrAuthed) renderMyPayments(); else renderHrGate();
+      } else if (path === '#/onboarding') {
+        if (isHrAuthed) renderOnboarding(); else renderHrGate();
+      } else if (path === '#/staff') {
+        if (isHrAuthed) renderStaffDatabase(); else renderHrGate();
       } else {
         if (isHrAuthed) {
           renderMyPayments();
@@ -2096,10 +2217,20 @@
     <div class="topbar">
       <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
-        <a class="link" href="https://www.playverse.gg" target="_blank" rel="noopener">playverse.gg</a>
         ${isHrAuthed
-          ? `<span class="link mono" style="font-size:11.5px;">${esc(hrUsername)}</span><a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeManage ? `<a class="hr-pill" href="#/manage">Manage</a>` : ''}<button class="hr-pill" id="signOutBtn">Sign out</button>`
-          : `<a class="hr-pill" href="#/hr">Sign in</a>`}
+          ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}
+             <details class="acct-menu">
+               <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
+               <div class="acct-menu-list">
+                 ${canSeeManage ? `<a href="#/manage">Manage</a><div class="acct-menu-divider"></div>` : ''}
+                 <a href="#/tos">Terms of Service</a>
+                 <a href="#/aup">Acceptable Use Policy</a>
+                 <a href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a>
+                 <div class="acct-menu-divider"></div>
+                 <button id="signOutBtn">Sign out</button>
+               </div>
+             </details>`
+          : `<a class="link" href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a><a class="hr-pill" href="#/hr">Sign in</a>`}
       </div>
     </div>`;
     }
@@ -2160,7 +2291,197 @@
       const canMarkPaid = hasPermission('dashboard.mark_paid');
       const canExport = hasPermission('dashboard.export');
 
-      function paint() {
+      function getRows() {
+        let rows = allRequests.filter(r => filter === 'all' ? true : r.status === filter);
+        if (search.trim()) {
+          const q = search.trim().toLowerCase();
+          rows = rows.filter(r => (r.robloxUsername || '').toLowerCase().includes(q) || (r.taskName || '').toLowerCase().includes(q) || (r.game || '').toLowerCase().includes(q) || (r.requestedBy || '').toLowerCase().includes(q));
+        }
+        return rows;
+      }
+
+      function renderRow(r) {
+        const items = parseWorkLines(r.workRaw || '');
+        const isOpen = expanded.has(r.id);
+        const statusLabel = r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending';
+        const rowHtml = `
+            <tr>
+              <td><button class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
+              <td class="id-cell mono">${esc(r.id)}</td>
+              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${esc(r.robloxUsername || '-')}</span>${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}</div></td>
+              <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
+              <td>${esc(r.timeWorked || '-')}</td>
+              <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
+              <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
+              <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
+              <td class="actions-cell">
+                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
+                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
+                ${r.status !== 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
+                ${canExport ? `<button class="btn btn-ghost btn-sm" data-copy="${esc(r.id)}">Copy row</button>` : ''}
+              </td>
+            </tr>`;
+        const cacheEntry = eligibilityCache[r.robloxUsername];
+        const isElLoading = eligibilityLoading.has(r.robloxUsername);
+        const detailHtml = isOpen ? `
+            <tr class="detail-row">
+              <td colspan="10">
+                ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
+                <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
+                  <div style="font-size:10.5px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.6px;margin-bottom:8px;">Payout eligibility</div>
+                  ${cacheEntry ? renderEligibilityList(cacheEntry) : (canSubmitRequests() ? `<button class="btn btn-ghost btn-sm" data-check-elig="${esc(r.robloxUsername)}" ${isElLoading ? 'disabled' : ''}>${isElLoading ? 'Checking...' : 'Check eligibility'}</button>` : `<div class="empty-note">You don't have permission to check eligibility.</div>`)}
+                </div>
+              </td>
+            </tr>` : '';
+        return rowHtml + detailHtml;
+      }
+
+      function renderEligibilityList(list) {
+        if (!list.length) return `<div class="empty-note">No eligibility groups configured yet.</div>`;
+        const allEligible = list.every(g => g.eligible);
+        return `
+            <div class="elig-summary ${allEligible ? 'is-ok' : ''}">${allEligible ? 'Eligible' : 'Not yet eligible'}</div>
+            ${list.map(g => `
+              <div class="elig-row">
+                <div class="elig-left">
+                  <div class="elig-check ${g.eligible ? 'is-ok' : ''}">${g.eligible ? '&#10003;' : '&middot;'}</div>
+                  <div>
+                    <div class="elig-name">${esc(g.name)}</div>
+                    <div class="elig-meta">${g.isMember ? 'Member' : 'Not a member'}</div>
+                  </div>
+                </div>
+              </div>`).join('')}`;
+      }
+
+      function tableHtml() {
+        const rows = getRows();
+        return loading ? `<div class="dash-loading">Loading payment requests...</div>` : loadError ? `
+          <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>
+        ` : rows.length === 0 ? `
+          <div class="dash-empty"><h3>Nothing here</h3><p>No matching payment requests.</p></div>
+        ` : `
+        <div class="table-scroll">
+          <table class="req-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>ID</th>
+                <th>Requested by</th>
+                <th>Task</th>
+                <th>Game</th>
+                <th>Time worked</th>
+                <th>Payment</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => renderRow(r)).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      }
+
+      function wireTableEvents() {
+        const retryBtn = document.getElementById('retryBtn');
+        if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
+
+        document.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => {
+          const id = b.dataset.toggle;
+          if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+          paintTable();
+        }));
+
+        document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', (e) => {
+          const id = b.dataset.copy;
+          const r = allRequests.find(x => x.id === id);
+          if (r) copyText([TSV_HEADER, rowToTSV(r)].join('\n'), e.currentTarget, 'Copied!');
+        }));
+
+        document.querySelectorAll('[data-check-elig]').forEach(b => b.addEventListener('click', async (e) => {
+          const username = b.dataset.checkElig;
+          eligibilityLoading.add(username);
+          paintTable();
+          try {
+            const data = await getUserEligibility(username);
+            eligibilityCache[username] = data;
+          } catch (err) {
+            eligibilityCache[username] = [];
+          }
+          eligibilityLoading.delete(username);
+          paintTable();
+        }));
+
+        document.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async (e) => {
+          const id = b.dataset.paid;
+          const r = allRequests.find(x => x.id === id);
+          if (!r) return;
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = 'Saving...';
+          try {
+            r.paid = true;
+            r.status = 'paid';
+            r.paidAt = Date.now();
+            await updateRequest(r);
+            paintShell();
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = 'Mark paid';
+            alert('Could not save. Check your connection and try again.');
+          }
+        }));
+
+        document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', async (e) => {
+          const id = b.dataset.reject;
+          const r = allRequests.find(x => x.id === id);
+          if (!r) return;
+          const note = prompt('Reason for rejecting this request (optional):', '') || '';
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = 'Saving...';
+          try {
+            r.status = 'rejected';
+            r.statusNote = note;
+            r.paid = false;
+            r.paidAt = null;
+            await rejectRequest(id, note);
+            paintShell();
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = 'Reject';
+            alert('Could not save. Check your connection and try again.');
+          }
+        }));
+
+        document.querySelectorAll('[data-reopen]').forEach(b => b.addEventListener('click', async (e) => {
+          const id = b.dataset.reopen;
+          const r = allRequests.find(x => x.id === id);
+          if (!r) return;
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = 'Saving...';
+          try {
+            r.status = 'pending';
+            r.statusNote = '';
+            r.paid = false;
+            r.paidAt = null;
+            await reopenRequest(id);
+            paintShell();
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = 'Reopen';
+            alert('Could not save. Check your connection and try again.');
+          }
+        }));
+      }
+
+      function paintTable() {
+        const area = document.getElementById('reqTableArea');
+        if (area) area.innerHTML = tableHtml();
+        wireTableEvents();
+      }
+
+      function paintShell() {
         const counts = {
           all: allRequests.length,
           pending: allRequests.filter(r => r.status === 'pending').length,
@@ -2174,12 +2495,6 @@
         const now = new Date();
         const paidThisMonth = allRequests.filter(r => r.status === 'paid' && r.paidAt && new Date(r.paidAt).getMonth() === now.getMonth() && new Date(r.paidAt).getFullYear() === now.getFullYear()).length;
 
-        let rows = allRequests.filter(r => filter === 'all' ? true : r.status === filter);
-        if (search.trim()) {
-          const q = search.trim().toLowerCase();
-          rows = rows.filter(r => (r.robloxUsername || '').toLowerCase().includes(q) || (r.taskName || '').toLowerCase().includes(q) || (r.game || '').toLowerCase().includes(q) || (r.requestedBy || '').toLowerCase().includes(q));
-        }
-
         app.innerHTML = `
     ${topbar()}
     <div class="dash-shell">
@@ -2191,6 +2506,7 @@
         </div>
         <div class="dash-toolbar">
           ${canSubmitRequests() ? `<a class="btn btn-ghost btn-sm" href="#/new">New request</a>` : ''}
+          ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
           ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
           <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
           ${canExport ? `<button class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
@@ -2228,109 +2544,26 @@
         </div>
       </div>
 
-      <div class="table-wrap">
-        ${loading ? `<div class="dash-loading">Loading payment requests...</div>` : loadError ? `
-          <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>
-        ` : rows.length === 0 ? `
-          <div class="dash-empty"><h3>Nothing here</h3><p>No matching payment requests.</p></div>
-        ` : `
-        <div class="table-scroll">
-          <table class="req-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>ID</th>
-                <th>Requested by</th>
-                <th>Task</th>
-                <th>Game</th>
-                <th>Time worked</th>
-                <th>Payment</th>
-                <th>Status</th>
-                <th>Date</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(r => renderRow(r)).join('')}
-            </tbody>
-          </table>
-        </div>`}
-      </div>
+      <div class="table-wrap" id="reqTableArea">${tableHtml()}</div>
       <div class="footer-note">Data is stored in a database and shared across everyone using this tool.</div>
     </div>`;
 
         wireTopbarSignOut();
+        wireTableEvents();
 
-        function renderRow(r) {
-          const items = parseWorkLines(r.workRaw || '');
-          const isOpen = expanded.has(r.id);
-          const statusLabel = r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending';
-          const rowHtml = `
-            <tr>
-              <td><button class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="id-cell mono">${esc(r.id)}</td>
-              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${esc(r.robloxUsername || '-')}</span>${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
-              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}</div></td>
-              <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
-              <td>${esc(r.timeWorked || '-')}</td>
-              <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
-              <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
-              <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
-              <td class="actions-cell">
-                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
-                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
-                ${r.status !== 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
-                ${canExport ? `<button class="btn btn-ghost btn-sm" data-copy="${esc(r.id)}">Copy row</button>` : ''}
-              </td>
-            </tr>`;
-          const cacheEntry = eligibilityCache[r.robloxUsername];
-          const isElLoading = eligibilityLoading.has(r.robloxUsername);
-          const detailHtml = isOpen ? `
-            <tr class="detail-row">
-              <td colspan="10">
-                ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
-                <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
-                  <div style="font-size:10.5px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.6px;margin-bottom:8px;">Payout eligibility</div>
-                  ${cacheEntry ? renderEligibilityList(cacheEntry) : (canSubmitRequests() ? `<button class="btn btn-ghost btn-sm" data-check-elig="${esc(r.robloxUsername)}" ${isElLoading ? 'disabled' : ''}>${isElLoading ? 'Checking...' : 'Check eligibility'}</button>` : `<div class="empty-note">You don't have permission to check eligibility.</div>`)}
-                </div>
-              </td>
-            </tr>` : '';
-          return rowHtml + detailHtml;
-        }
-
-        function renderEligibilityList(list) {
-          if (!list.length) return `<div class="empty-note">No eligibility groups configured yet.</div>`;
-          const allEligible = list.every(g => g.eligible);
-          return `
-            <div class="elig-summary ${allEligible ? 'is-ok' : ''}">${allEligible ? 'Eligible' : 'Not yet eligible'}</div>
-            ${list.map(g => `
-              <div class="elig-row">
-                <div class="elig-left">
-                  <div class="elig-check ${g.eligible ? 'is-ok' : ''}">${g.eligible ? '&#10003;' : '&middot;'}</div>
-                  <div>
-                    <div class="elig-name">${esc(g.name)}</div>
-                    <div class="elig-meta">${g.isMember ? 'Member' : 'Not a member'}</div>
-                  </div>
-                </div>
-              </div>`).join('')}`;
-        }
-
-        document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.filter; paint(); }));
+        document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.filter; paintShell(); }));
 
         const searchInput = document.getElementById('searchInput');
         if (searchInput) {
-          searchInput.addEventListener('input', () => { search = searchInput.value; paint(); searchInput.focus(); searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length; });
+          searchInput.addEventListener('input', () => { search = searchInput.value; paintTable(); });
         }
 
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) refreshBtn.addEventListener('click', () => { load(); });
 
-        const retryBtn = document.getElementById('retryBtn');
-        if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
-
         const copyAllBtn = document.getElementById('copyAllBtn');
         if (copyAllBtn) copyAllBtn.addEventListener('click', (e) => {
-          const tsv = [TSV_HEADER, ...rows.map(rowToTSV)].join('\n');
+          const tsv = [TSV_HEADER, ...getRows().map(rowToTSV)].join('\n');
           copyText(tsv, e.currentTarget, 'Copied table!');
         });
 
@@ -2341,7 +2574,7 @@
           btn.disabled = true;
           btn.textContent = 'Building file...';
           try {
-            await exportRequestsToXlsx(rows, filter);
+            await exportRequestsToXlsx(getRows(), filter);
           } catch (err) {
             alert('Could not build the spreadsheet. Please try again.');
           } finally {
@@ -2349,103 +2582,17 @@
             btn.textContent = original;
           }
         });
-
-        document.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => {
-          const id = b.dataset.toggle;
-          if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
-          paint();
-        }));
-
-        document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', (e) => {
-          const id = b.dataset.copy;
-          const r = allRequests.find(x => x.id === id);
-          if (r) copyText([TSV_HEADER, rowToTSV(r)].join('\n'), e.currentTarget, 'Copied!');
-        }));
-
-        document.querySelectorAll('[data-check-elig]').forEach(b => b.addEventListener('click', async (e) => {
-          const username = b.dataset.checkElig;
-          eligibilityLoading.add(username);
-          paint();
-          try {
-            const data = await getUserEligibility(username);
-            eligibilityCache[username] = data;
-          } catch (err) {
-            eligibilityCache[username] = [];
-          }
-          eligibilityLoading.delete(username);
-          paint();
-        }));
-
-        document.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async (e) => {
-          const id = b.dataset.paid;
-          const r = allRequests.find(x => x.id === id);
-          if (!r) return;
-          e.currentTarget.disabled = true;
-          e.currentTarget.textContent = 'Saving...';
-          try {
-            r.paid = true;
-            r.status = 'paid';
-            r.paidAt = Date.now();
-            await updateRequest(r);
-            paint();
-          } catch (err) {
-            e.currentTarget.disabled = false;
-            e.currentTarget.textContent = 'Mark paid';
-            alert('Could not save. Check your connection and try again.');
-          }
-        }));
-
-        document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', async (e) => {
-          const id = b.dataset.reject;
-          const r = allRequests.find(x => x.id === id);
-          if (!r) return;
-          const note = prompt('Reason for rejecting this request (optional):', '') || '';
-          e.currentTarget.disabled = true;
-          e.currentTarget.textContent = 'Saving...';
-          try {
-            r.status = 'rejected';
-            r.statusNote = note;
-            r.paid = false;
-            r.paidAt = null;
-            await rejectRequest(id, note);
-            paint();
-          } catch (err) {
-            e.currentTarget.disabled = false;
-            e.currentTarget.textContent = 'Reject';
-            alert('Could not save. Check your connection and try again.');
-          }
-        }));
-
-        document.querySelectorAll('[data-reopen]').forEach(b => b.addEventListener('click', async (e) => {
-          const id = b.dataset.reopen;
-          const r = allRequests.find(x => x.id === id);
-          if (!r) return;
-          e.currentTarget.disabled = true;
-          e.currentTarget.textContent = 'Saving...';
-          try {
-            r.status = 'pending';
-            r.statusNote = '';
-            r.paid = false;
-            r.paidAt = null;
-            await reopenRequest(id);
-            paint();
-          } catch (err) {
-            e.currentTarget.disabled = false;
-            e.currentTarget.textContent = 'Reopen';
-            alert('Could not save. Check your connection and try again.');
-          }
-        }));
       }
 
       async function load() {
-        loading = true; loadError = null; paint();
+        loading = true; loadError = null; paintShell();
         try {
           allRequests = await loadAllRequests();
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Something went wrong while reading the shared request list.';
         }
         loading = false;
-        paint();
+        paintShell();
       }
 
       load();
@@ -3054,6 +3201,292 @@
       if (canManageRoles) {
         loadRoles().then(loadAssignments);
       }
+    }
+
+    function renderPolicyPage(type) {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+      if (!isHrAuthed) { renderHrGate(); return; }
+
+      let loading = true;
+      let loadError = null;
+      let step = null;
+
+      function paint() {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      <div class="heading-block">
+        <span class="eyebrow">Policy</span>
+        <h1>${type === 'tos' ? 'Terms of Service' : 'Acceptable Use Policy'}</h1>
+      </div>
+      <div class="table-wrap">
+        ${loading ? `<div class="dash-loading">Loading...</div>` : loadError ? `
+          <div class="dash-empty"><h3>Could not load this policy</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryPolicyBtn">Try again</button></div>
+        ` : `
+        <div class="panel" style="margin:18px;">
+          ${step.description ? `<p class="sub" style="margin:0 0 10px;">${esc(step.description)}</p>` : ''}
+          <div class="empty-note" style="white-space:pre-wrap;">${esc(step.content || '')}</div>
+        </div>`}
+      </div>
+    </div>`;
+
+        wireTopbarSignOut();
+        const retryBtn = document.getElementById('retryPolicyBtn');
+        if (retryBtn) retryBtn.addEventListener('click', load);
+      }
+
+      async function load() {
+        loading = true; loadError = null; paint();
+        try {
+          const json = await callHrData('list_onboarding_steps');
+          step = (json.data || []).find(s => s.type === type) || null;
+          if (!step) loadError = 'This policy is not available right now.';
+        } catch (err) {
+          loadError = (err && err.message) ? err.message : 'Could not load this policy.';
+        }
+        loading = false;
+        paint();
+      }
+
+      paint();
+      load();
+    }
+
+    function renderOnboarding() {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+      if (!isHrAuthed) { renderHrGate(); return; }
+
+      let steps = [];
+      let loading = true;
+      let loadError = null;
+      let busyStepId = null;
+      let stepMessage = {};
+
+      function paint() {
+        const requiredSteps = steps.filter(s => s.required);
+        const completedRequired = requiredSteps.filter(s => s.completedAt).length;
+        const allDone = requiredSteps.length > 0 && completedRequired === requiredSteps.length;
+
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      <div class="heading-block">
+        <span class="eyebrow">Staff onboarding</span>
+        <h1>Welcome to PlayVerse</h1>
+        <p class="sub">Before you get started, take a quick look through this and accept our policies below.</p>
+      </div>
+
+      ${!loading && requiredSteps.length > 0 ? (
+            allDone
+              ? `<div class="confirm-box" style="margin-bottom:22px;"><div class="icon">&#10003;</div><div class="txt"><strong>All set</strong><span>Taking you in...</span></div></div>`
+              : `<div class="panel" style="margin-bottom:22px;padding:16px 18px;"><strong>${completedRequired} of ${requiredSteps.length} steps done</strong></div>`
+          ) : ''}
+
+      <div class="table-wrap">
+        ${loading ? `<div class="dash-loading">Loading...</div>` : loadError ? `
+          <div class="dash-empty"><h3>Could not load onboarding</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryOnboardingBtn">Try again</button></div>
+        ` : `
+        <div style="display:flex;flex-direction:column;gap:12px;padding:18px;">
+          ${steps.map(s => {
+            const done = !!s.completedAt;
+            const msg = stepMessage[s.id];
+            return `
+          <div class="panel" style="margin:0;${done ? 'border-color:var(--ok-line);background:var(--ok-bg);' : ''}">
+            <div class="role-row-top" style="align-items:flex-start;">
+              <div>
+                <strong>${esc(s.title)}</strong>
+                <div class="role-meta">${esc(ONBOARDING_TYPE_LABELS[s.type] || s.type)}</div>
+                ${s.description ? `<p class="sub" style="margin:8px 0 0;">${esc(s.description)}</p>` : ''}
+                ${s.content ? `<div class="empty-note" style="white-space:pre-wrap;margin-top:10px;max-height:220px;overflow:auto;">${esc(s.content)}</div>` : ''}
+                ${msg ? `<div class="error-box" style="margin-top:10px;"><span>${esc(msg)}</span></div>` : ''}
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+                ${done ? `<span class="perm-chip" style="background:var(--ok-bg);color:var(--ok-text);border-color:var(--ok-line);">Completed</span>` : `
+                  <button class="btn btn-primary btn-sm" data-complete-step="${esc(s.id)}" ${busyStepId === s.id ? 'disabled' : ''}>
+                    ${busyStepId === s.id ? 'Saving...' : (s.type === 'tos' || s.type === 'aup') ? 'I agree' : 'Got it, continue'}
+                  </button>`}
+              </div>
+            </div>
+          </div>`;
+          }).join('')}
+        </div>`}
+      </div>
+    </div>`;
+
+        wireTopbarSignOut();
+
+        const retryBtn = document.getElementById('retryOnboardingBtn');
+        if (retryBtn) retryBtn.addEventListener('click', load);
+
+        document.querySelectorAll('[data-complete-step]').forEach(el => el.addEventListener('click', async () => {
+          const id = el.dataset.completeStep;
+          busyStepId = id; stepMessage = { ...stepMessage, [id]: null }; paint();
+          try {
+            await completeOnboardingStep(id);
+            busyStepId = null;
+            steps = steps.map(s => s.id === id ? { ...s, completedAt: new Date().toISOString() } : s);
+            paint();
+
+            const requiredSteps = steps.filter(s => s.required);
+            const allDone = requiredSteps.length > 0 && requiredSteps.every(s => s.completedAt);
+            if (allDone) {
+              needsOnboarding = false;
+              setTimeout(() => {
+                window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my';
+              }, 700);
+            }
+          } catch (err) {
+            busyStepId = null;
+            stepMessage = { ...stepMessage, [id]: (err && err.message) ? err.message : 'Could not save that step.' };
+            paint();
+          }
+        }));
+      }
+
+      async function load() {
+        loading = true; loadError = null; busyStepId = null; paint();
+        try {
+          steps = await loadMyOnboarding();
+        } catch (err) {
+          loadError = (err && err.message) ? err.message : 'Could not load your onboarding checklist.';
+          loading = false;
+          paint();
+          return;
+        }
+        loading = false;
+
+        const requiredSteps = steps.filter(s => s.required);
+        const allDone = requiredSteps.length > 0 && requiredSteps.every(s => s.completedAt);
+        if (allDone) {
+          needsOnboarding = false;
+          paint();
+          setTimeout(() => {
+            window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my';
+          }, 700);
+          return;
+        }
+
+        paint();
+      }
+
+      load();
+    }
+
+    function renderStaffDatabase() {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+      if (!isHrAuthed) { renderHrGate(); return; }
+      if (!hasPermission('staff.view_database')) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+
+      let staff = [];
+      let loading = true;
+      let loadError = null;
+      let search = '';
+
+      function getRows() {
+        let rows = staff;
+        if (search.trim()) {
+          const q = search.trim().toLowerCase();
+          rows = rows.filter(s => (s.robloxUsername || '').toLowerCase().includes(q) || (s.roles || []).some(r => r.toLowerCase().includes(q)));
+        }
+        return [...rows].sort((a, b) => (b.requestCount || 0) - (a.requestCount || 0));
+      }
+
+      function tableHtml() {
+        const rows = getRows();
+        return loading ? `<div class="dash-loading">Loading staff database...</div>` : loadError ? `
+          <div class="dash-empty"><h3>Could not load the staff database</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryStaffBtn">Try again</button></div>
+        ` : rows.length === 0 ? `
+          <div class="dash-empty"><h3>Nothing here</h3><p>No matching staff found.</p></div>
+        ` : `
+        <div class="table-scroll">
+          <table class="req-table">
+            <thead>
+              <tr>
+                <th>Roblox account</th>
+                <th>Roles</th>
+                <th>Requests</th>
+                <th>Pending</th>
+                <th>Paid total</th>
+                <th>Onboarding</th>
+                <th>Last active</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(s => `
+              <tr>
+                <td class="name-cell"><strong>${esc(s.robloxUsername || 'Unknown')}</strong>${s.robloxUserId ? `<span class="mono" style="display:block;font-size:11px;color:var(--muted);">${esc(s.robloxUserId)}</span>` : ''}</td>
+                <td>${(s.roles || []).length ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join(' ') : `<span class="hint">No roles</span>`}</td>
+                <td>${esc(s.requestCount || 0)}</td>
+                <td>${s.pendingCount ? `<span style="color:var(--warn-text);font-weight:600;">${esc(s.pendingCount)}</span>` : '0'}</td>
+                <td>${Object.keys(s.paidTotals || {}).length ? Object.entries(s.paidTotals).map(([cur, amt]) => cur === 'ROBUX' ? `<span style="white-space:nowrap;"><img class="robux-icon" src="${ROBUX_IMG}" alt="Robux">${Number(amt).toLocaleString()}</span>` : `${CURRENCY_SYMBOL[cur] || ''}${Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`).join('<br>') : '&mdash;'}</td>
+                <td>${s.onboardingRequired ? `${esc(s.onboardingCompleted)} / ${esc(s.onboardingRequired)}` : `<span class="hint">No steps set</span>`}</td>
+                <td>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      }
+
+      function wireTableEvents() {
+        const retryBtn = document.getElementById('retryStaffBtn');
+        if (retryBtn) retryBtn.addEventListener('click', load);
+      }
+
+      function paintTable() {
+        const area = document.getElementById('staffTableArea');
+        if (area) area.innerHTML = tableHtml();
+        wireTableEvents();
+      }
+
+      function paintShell() {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        <div>
+          <span class="eyebrow">HR dashboard</span>
+          <h1 style="margin-bottom:4px;">Staff database</h1>
+          <p class="sub">Everyone who has signed in, been assigned a role, or been paid, in one place.</p>
+        </div>
+        <div class="dash-toolbar">
+          <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
+          <button class="btn btn-ghost btn-sm" id="refreshStaffBtn">Refresh</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center;">
+        <div class="search-input-wrap">
+          <input type="text" id="staffSearchInput" placeholder="Search by username or role" value="${esc(search)}">
+        </div>
+      </div>
+
+      <div class="table-wrap" id="staffTableArea">${tableHtml()}</div>
+      <div class="footer-note">Combines sign-ins, role assignments, and payment history for everyone the system has seen.</div>
+    </div>`;
+
+        wireTopbarSignOut();
+        wireTableEvents();
+
+        const searchInput = document.getElementById('staffSearchInput');
+        if (searchInput) {
+          searchInput.addEventListener('input', () => { search = searchInput.value; paintTable(); });
+        }
+        const refreshBtn = document.getElementById('refreshStaffBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', load);
+      }
+
+      async function load() {
+        loading = true; loadError = null; paintShell();
+        try {
+          staff = await loadStaffDatabase();
+        } catch (err) {
+          loadError = (err && err.message) ? err.message : 'Could not load the staff database.';
+        }
+        loading = false;
+        paintTable();
+      }
+
+      load();
     }
 
     function renderCreateView() {
