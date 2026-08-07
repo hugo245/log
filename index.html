@@ -4301,20 +4301,49 @@
       let search = '';
       let activeProfile = null;
 
-      function avatarUrl(s) {
-        if (s && s.robloxUserId) {
-          return `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(s.robloxUserId)}&size=150x150&format=Png&isCircular=false`;
+
+
+
+
+
+
+      async function avatarUrl(s) {
+        if (!s?.robloxUserId) {
+          return fallbackAvatar();
         }
 
-        return (
-          "data:image/svg+xml;utf8," +
-          encodeURIComponent(`
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
-        <rect width="150" height="150" fill="#EEEDFB"/>
-        <text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#3730D9" text-anchor="middle">?</text>
-      </svg>
-    `)
-        );
+        try {
+          const res = await fetch(
+            `https://nobbiest-proboxing-corine.ngrok-free.dev/api/roblox/avatar/${s.robloxUserId}`
+          );
+
+          const json = await res.json();
+
+          return json.data?.[0]?.imageUrl || fallbackAvatar();
+        } catch (err) {
+          console.error("Avatar error:", err);
+          return fallbackAvatar();
+        }
+      }
+
+
+      function fallbackAvatar() {
+        return "data:image/svg+xml;utf8," + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+      <rect width="150" height="150" fill="#EEEDFB"/>
+      <text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#3730D9" text-anchor="middle">?</text>
+    </svg>
+  `);
+      }
+
+
+      function fallbackAvatar() {
+        return "data:image/svg+xml;utf8," + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+      <rect width="150" height="150" fill="#EEEDFB"/>
+      <text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#3730D9" text-anchor="middle">?</text>
+    </svg>
+  `);
       }
 
       function getRows() {
@@ -4334,74 +4363,186 @@
         ).join(stacked ? '<br>' : ', ');
       }
 
-      function cardsHtml() {
+
+
+      async function cardsHtml() {
         const rows = getRows();
-        return loading ? `<div class="dash-loading">Loading staff database...</div>` : loadError ? `
-          <div class="dash-empty"><h3>Could not load the staff database</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryStaffBtn">Try again</button></div>
-        ` : rows.length === 0 ? `
-          <div class="dash-empty"><h3>Nothing here</h3><p>No matching staff found.</p></div>
-        ` : `
-        <div class="staff-grid">
-          ${rows.map((s, i) => `
-          <div class="staff-card" data-staff-idx="${i}">
-            ${s.pendingCount ? `<span class="pending-badge">${esc(s.pendingCount)} pending</span>` : ''}
-            <div class="avatar-wrap"><img src="${avatarUrl(s)}" alt="${esc(s.robloxUsername || 'Unknown')}" loading="lazy"></div>
-            <div class="staff-name">${esc(s.robloxUsername || 'Unknown')}</div>
-            ${s.robloxUserId ? `<div class="staff-id mono">ID ${esc(s.robloxUserId)}</div>` : ''}
-            <div class="staff-roles">${(s.roles || []).length ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('') : `<span class="hint">No roles</span>`}</div>
-            <div class="staff-stats-row">
-              <div class="staff-stat"><b>${esc(s.requestCount || 0)}</b><span>Requests</span></div>
-              <div class="staff-stat"><b>${s.onboardingRequired ? `${esc(s.onboardingCompleted)}/${esc(s.onboardingRequired)}` : '&mdash;'}</b><span>Onboard</span></div>
-              <div class="staff-stat"><b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b><span>Active</span></div>
-            </div>
-          </div>`).join('')}
-        </div>`;
+
+        if (loading) {
+          return `<div class="dash-loading">Loading staff database...</div>`;
+        }
+
+        if (loadError) {
+          return `
+      <div class="dash-empty">
+        <h3>Could not load the staff database</h3>
+        <p>${esc(loadError)}</p>
+        <button class="btn btn-ghost btn-sm" id="retryStaffBtn">Try again</button>
+      </div>
+    `;
+        }
+
+        if (rows.length === 0) {
+          return `
+      <div class="dash-empty">
+        <h3>Nothing here</h3>
+        <p>No matching staff found.</p>
+      </div>
+    `;
+        }
+
+        const cards = await Promise.all(rows.map(async (s, i) => {
+          const avatar = await avatarUrl(s);
+
+          return `
+      <div class="staff-card" data-staff-idx="${i}">
+        ${s.pendingCount ? `<span class="pending-badge">${esc(s.pendingCount)} pending</span>` : ''}
+
+        <div class="avatar-wrap">
+          <img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}" loading="lazy">
+        </div>
+
+        <div class="staff-name">${esc(s.robloxUsername || 'Unknown')}</div>
+
+        ${s.robloxUserId ? `<div class="staff-id mono">ID ${esc(s.robloxUserId)}</div>` : ''}
+
+        <div class="staff-roles">
+          ${(s.roles || []).length
+              ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('')
+              : `<span class="hint">No roles</span>`
+            }
+        </div>
+
+        <div class="staff-stats-row">
+          <div class="staff-stat">
+            <b>${esc(s.requestCount || 0)}</b>
+            <span>Requests</span>
+          </div>
+
+          <div class="staff-stat">
+            <b>${s.onboardingRequired ? `${esc(s.onboardingCompleted)}/${esc(s.onboardingRequired)}` : '&mdash;'}</b>
+            <span>Onboard</span>
+          </div>
+
+          <div class="staff-stat">
+            <b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b>
+            <span>Active</span>
+          </div>
+        </div>
+      </div>
+    `;
+        }));
+
+        return `
+    <div class="staff-grid">
+      ${cards.join('')}
+    </div>
+  `;
       }
 
-      function modalHtml() {
+
+
+      async function modalHtml() {
         if (!activeProfile) return '';
+
         const s = activeProfile;
-        const pct = s.onboardingRequired ? Math.round((s.onboardingCompleted / s.onboardingRequired) * 100) : 0;
+        const avatar = await avatarUrl(s);
+
+        const pct = s.onboardingRequired
+          ? Math.round((s.onboardingCompleted / s.onboardingRequired) * 100)
+          : 0;
+
         return `
-        <div class="modal-scrim" id="staffModalScrim">
-          <div class="modal-card">
-            <button class="modal-close" id="staffModalClose">&times;</button>
-            <div class="modal-header">
-              <div class="avatar-wrap"><img src="${avatarUrl(s)}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
-              <h2>${esc(s.robloxUsername || 'Unknown')}</h2>
-              ${s.robloxUserId ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>` : ''}
-              <div class="staff-roles">${(s.roles || []).length ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('') : `<span class="hint">No roles assigned</span>`}</div>
-            </div>
-            <div class="modal-body">
-              <div class="modal-section">
-                <div class="modal-section-title">Activity</div>
-                <div class="modal-stat-grid">
-                  <div class="modal-stat-box"><b>${esc(s.requestCount || 0)}</b><span>Requests</span></div>
-                  <div class="modal-stat-box"><b>${esc(s.pendingCount || 0)}</b><span>Pending</span></div>
-                  <div class="modal-stat-box"><b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b><span>Last active</span></div>
-                </div>
+    <div class="modal-scrim" id="staffModalScrim">
+      <div class="modal-card">
+        <button class="modal-close" id="staffModalClose">&times;</button>
+
+        <div class="modal-header">
+          <div class="avatar-wrap">
+            <img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}">
+          </div>
+
+          <h2>${esc(s.robloxUsername || 'Unknown')}</h2>
+
+          ${s.robloxUserId
+            ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>`
+            : ''
+          }
+
+          <div class="staff-roles">
+            ${(s.roles || []).length
+            ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('')
+            : `<span class="hint">No roles assigned</span>`
+          }
+          </div>
+        </div>
+
+        <div class="modal-body">
+          <div class="modal-section">
+            <div class="modal-section-title">Activity</div>
+
+            <div class="modal-stat-grid">
+              <div class="modal-stat-box">
+                <b>${esc(s.requestCount || 0)}</b>
+                <span>Requests</span>
               </div>
-              <div class="modal-section">
-                <div class="modal-section-title">Assignment</div>
-                <div class="modal-info-row"><span class="label">Team</span><span class="value">${s.team ? esc(s.team) : '&mdash;'}</span></div>
-                <div class="modal-info-row"><span class="label">Skillset</span><span class="value">${s.skillset ? esc(s.skillset) : '&mdash;'}</span></div>
+
+              <div class="modal-stat-box">
+                <b>${esc(s.pendingCount || 0)}</b>
+                <span>Pending</span>
               </div>
-              <div class="modal-section">
-                <div class="modal-section-title">Onboarding</div>
-                ${s.onboardingRequired ? `
-                  <div class="modal-info-row"><span class="label">Steps completed</span><span class="value">${esc(s.onboardingCompleted)} / ${esc(s.onboardingRequired)}</span></div>
-                  <div class="onboard-bar-track"><div class="onboard-bar-fill" style="width:${pct}%;"></div></div>
-                ` : `<div class="hint">No onboarding steps configured.</div>`}
-              </div>
-              <div class="modal-section">
-                <div class="modal-section-title">Payments</div>
-                <div class="modal-info-row"><span class="label">Paid total</span><span class="value">${paidTotalsHtml(s, false)}</span></div>
+
+              <div class="modal-stat-box">
+                <b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b>
+                <span>Last active</span>
               </div>
             </div>
           </div>
-        </div>`;
-      }
 
+          <div class="modal-section">
+            <div class="modal-section-title">Assignment</div>
+
+            <div class="modal-info-row">
+              <span class="label">Team</span>
+              <span class="value">${s.team ? esc(s.team) : '&mdash;'}</span>
+            </div>
+
+            <div class="modal-info-row">
+              <span class="label">Skillset</span>
+              <span class="value">${s.skillset ? esc(s.skillset) : '&mdash;'}</span>
+            </div>
+          </div>
+
+          <div class="modal-section">
+            <div class="modal-section-title">Onboarding</div>
+
+            ${s.onboardingRequired ? `
+              <div class="modal-info-row">
+                <span class="label">Steps completed</span>
+                <span class="value">${esc(s.onboardingCompleted)} / ${esc(s.onboardingRequired)}</span>
+              </div>
+
+              <div class="onboard-bar-track">
+                <div class="onboard-bar-fill" style="width:${pct}%"></div>
+              </div>
+            ` : `
+              <div class="hint">No onboarding steps configured.</div>
+            `}
+          </div>
+
+          <div class="modal-section">
+            <div class="modal-section-title">Payments</div>
+
+            <div class="modal-info-row">
+              <span class="label">Paid total</span>
+              <span class="value">${paidTotalsHtml(s, false)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+      }
       function openProfile(idx) {
         const rows = getRows();
         activeProfile = rows[idx] || null;
@@ -4413,9 +4554,9 @@
         paintModal();
       }
 
-      function paintModal() {
+      async function paintModal() {
         const slot = document.getElementById('staffModalSlot');
-        if (slot) slot.innerHTML = modalHtml();
+        if (slot) slot.innerHTML = await modalHtml();
         wireModalEvents();
       }
 
@@ -4434,9 +4575,9 @@
         });
       }
 
-      function paintTable() {
+      async function paintTable() {
         const area = document.getElementById('staffTableArea');
-        if (area) area.innerHTML = cardsHtml();
+        if (area) area.innerHTML = await cardsHtml();
         wireTableEvents();
       }
 
@@ -4462,10 +4603,10 @@
         </div>
       </div>
 
-      <div class="table-wrap" id="staffTableArea">${cardsHtml()}</div>
+      <div class="table-wrap" id="staffTableArea"></div>
       <div class="footer-note">Combines sign-ins, role assignments, and payment history for everyone the system has seen.</div>
     </div>
-    <div id="staffModalSlot">${modalHtml()}</div>`;
+    <div id="staffModalSlot"></div>`;
 
         wireTopbarSignOut();
         wireTableEvents();

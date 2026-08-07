@@ -149,12 +149,28 @@ const PAYMENT_METHOD_TYPES = {
 };
 
 const app = express();
-app.use(express.json());
 app.use(cors({
     origin: APP_ORIGIN,
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning']
 }));
+
+app.use(express.json());
+
+app.get("/api/roblox/avatar/:userId", async (req, res) => {
+    try {
+        const response = await fetch(
+            `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${req.params.userId}&size=150x150&format=Png`
+        );
+
+        const data = await response.json();
+
+        res.json(data);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to fetch avatar" });
+    }
+});
 
 function randomToken(bytes) {
     return crypto.randomBytes(bytes || 32).toString('hex');
@@ -542,6 +558,7 @@ app.get('/hr-session', async (req, res) => {
         permissions: session.permissions || []
     });
 });
+
 
 app.delete('/hr-session', async (req, res) => {
     const token = getBearerToken(req);
