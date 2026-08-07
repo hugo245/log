@@ -1214,6 +1214,315 @@
       white-space: nowrap;
     }
 
+    .staff-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 14px;
+    }
+
+    .staff-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 10px;
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+      position: relative;
+    }
+
+    .staff-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(23, 26, 33, .08);
+      border-color: var(--accent);
+    }
+
+    .staff-card .avatar-wrap {
+      width: 76px;
+      height: 76px;
+      border-radius: 50%;
+      overflow: hidden;
+      background: var(--bg);
+      border: 2px solid var(--line);
+      flex-shrink: 0;
+    }
+
+    .staff-card .avatar-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .staff-card .staff-name {
+      font-weight: 700;
+      font-size: 14.5px;
+      color: var(--ink);
+      word-break: break-word;
+    }
+
+    .staff-card .staff-id {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: -6px;
+    }
+
+    .staff-card .staff-roles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      justify-content: center;
+    }
+
+    .staff-card .staff-stats-row {
+      display: flex;
+      gap: 14px;
+      margin-top: 2px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--line);
+      width: 100%;
+      justify-content: center;
+    }
+
+    .staff-card .staff-stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .staff-card .staff-stat b {
+      font-size: 13.5px;
+      color: var(--ink);
+    }
+
+    .staff-card .staff-stat span {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+
+    .staff-card .pending-badge {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-line);
+      color: var(--warn-text);
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 999px;
+    }
+
+    .modal-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 22, 28, .5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 100;
+      animation: fadeIn .12s ease;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+
+      to {
+        opacity: 1;
+      }
+    }
+
+    .modal-card {
+      background: var(--surface);
+      border-radius: 18px;
+      width: 100%;
+      max-width: 460px;
+      max-height: 88vh;
+      overflow-y: auto;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .22);
+      position: relative;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink-soft);
+      font-size: 15px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .modal-close:hover {
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .modal-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 8px;
+      padding: 32px 24px 20px;
+      background: linear-gradient(180deg, var(--accent-soft), var(--surface));
+      border-radius: 18px 18px 0 0;
+    }
+
+    .modal-header .avatar-wrap {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 3px solid var(--surface);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+      background: var(--bg);
+    }
+
+    .modal-header .avatar-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 800;
+    }
+
+    .modal-header .modal-id {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .modal-body {
+      padding: 20px 24px 26px;
+    }
+
+    .modal-section {
+      margin-bottom: 18px;
+    }
+
+    .modal-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .modal-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .modal-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .modal-stat-box {
+      background: var(--bg);
+      border-radius: 12px;
+      padding: 10px 8px;
+      text-align: center;
+    }
+
+    .modal-stat-box b {
+      display: block;
+      font-size: 15px;
+      color: var(--ink);
+    }
+
+    .modal-stat-box span {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .3px;
+    }
+
+    .modal-info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .modal-info-row:last-child {
+      border-bottom: none;
+    }
+
+    .modal-info-row .label {
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+
+    .modal-info-row .value {
+      font-weight: 600;
+      color: var(--ink);
+      text-align: right;
+    }
+
+    .onboard-bar-track {
+      height: 7px;
+      border-radius: 999px;
+      background: var(--line);
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .onboard-bar-fill {
+      height: 100%;
+      background: var(--ok-text);
+      border-radius: 999px;
+    }
+
+    .view-toggle {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .view-toggle button {
+      border: none;
+      background: var(--surface);
+      color: var(--ink-soft);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+
+    .view-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
     .perm-check-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -3990,6 +4299,14 @@
       let loading = true;
       let loadError = null;
       let search = '';
+      let activeProfile = null;
+
+      function avatarUrl(s) {
+        if (s && s.robloxUserId) {
+          return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(s.robloxUserId)}&width=150&height=150&format=png`;
+        }
+        return 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150"><rect width="150" height="150" fill="#EEEDFB"/><text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#3730D9" text-anchor="middle">?</text></svg>`);
+      }
 
       function getRows() {
         let rows = staff;
@@ -4000,50 +4317,117 @@
         return [...rows].sort((a, b) => (b.requestCount || 0) - (a.requestCount || 0));
       }
 
-      function tableHtml() {
+      function paidTotalsHtml(s, stacked) {
+        if (!Object.keys(s.paidTotals || {}).length) return '&mdash;';
+        return Object.entries(s.paidTotals).map(([cur, amt]) => cur === 'ROBUX'
+          ? `<span style="white-space:nowrap;"><img class="robux-icon" src="${ROBUX_IMG}" alt="Robux">${Number(amt).toLocaleString()}</span>`
+          : `${CURRENCY_SYMBOL[cur] || ''}${Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`
+        ).join(stacked ? '<br>' : ', ');
+      }
+
+      function cardsHtml() {
         const rows = getRows();
         return loading ? `<div class="dash-loading">Loading staff database...</div>` : loadError ? `
           <div class="dash-empty"><h3>Could not load the staff database</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryStaffBtn">Try again</button></div>
         ` : rows.length === 0 ? `
           <div class="dash-empty"><h3>Nothing here</h3><p>No matching staff found.</p></div>
         ` : `
-        <div class="table-scroll">
-          <table class="req-table">
-            <thead>
-              <tr>
-                <th>Roblox account</th>
-                <th>Roles</th>
-                <th>Requests</th>
-                <th>Pending</th>
-                <th>Paid total</th>
-                <th>Onboarding</th>
-                <th>Last active</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map(s => `
-              <tr>
-                <td class="name-cell"><strong>${esc(s.robloxUsername || 'Unknown')}</strong>${s.robloxUserId ? `<span class="mono" style="display:block;font-size:11px;color:var(--muted);">${esc(s.robloxUserId)}</span>` : ''}</td>
-                <td>${(s.roles || []).length ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join(' ') : `<span class="hint">No roles</span>`}</td>
-                <td>${esc(s.requestCount || 0)}</td>
-                <td>${s.pendingCount ? `<span style="color:var(--warn-text);font-weight:600;">${esc(s.pendingCount)}</span>` : '0'}</td>
-                <td>${Object.keys(s.paidTotals || {}).length ? Object.entries(s.paidTotals).map(([cur, amt]) => cur === 'ROBUX' ? `<span style="white-space:nowrap;"><img class="robux-icon" src="${ROBUX_IMG}" alt="Robux">${Number(amt).toLocaleString()}</span>` : `${CURRENCY_SYMBOL[cur] || ''}${Number(amt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`).join('<br>') : '&mdash;'}</td>
-                <td>${s.onboardingRequired ? `${esc(s.onboardingCompleted)} / ${esc(s.onboardingRequired)}` : `<span class="hint">No steps set</span>`}</td>
-                <td>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
+        <div class="staff-grid">
+          ${rows.map((s, i) => `
+          <div class="staff-card" data-staff-idx="${i}">
+            ${s.pendingCount ? `<span class="pending-badge">${esc(s.pendingCount)} pending</span>` : ''}
+            <div class="avatar-wrap"><img src="${avatarUrl(s)}" alt="${esc(s.robloxUsername || 'Unknown')}" loading="lazy"></div>
+            <div class="staff-name">${esc(s.robloxUsername || 'Unknown')}</div>
+            ${s.robloxUserId ? `<div class="staff-id mono">ID ${esc(s.robloxUserId)}</div>` : ''}
+            <div class="staff-roles">${(s.roles || []).length ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('') : `<span class="hint">No roles</span>`}</div>
+            <div class="staff-stats-row">
+              <div class="staff-stat"><b>${esc(s.requestCount || 0)}</b><span>Requests</span></div>
+              <div class="staff-stat"><b>${s.onboardingRequired ? `${esc(s.onboardingCompleted)}/${esc(s.onboardingRequired)}` : '&mdash;'}</b><span>Onboard</span></div>
+              <div class="staff-stat"><b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b><span>Active</span></div>
+            </div>
+          </div>`).join('')}
         </div>`;
+      }
+
+      function modalHtml() {
+        if (!activeProfile) return '';
+        const s = activeProfile;
+        const pct = s.onboardingRequired ? Math.round((s.onboardingCompleted / s.onboardingRequired) * 100) : 0;
+        return `
+        <div class="modal-scrim" id="staffModalScrim">
+          <div class="modal-card">
+            <button class="modal-close" id="staffModalClose">&times;</button>
+            <div class="modal-header">
+              <div class="avatar-wrap"><img src="${avatarUrl(s)}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
+              <h2>${esc(s.robloxUsername || 'Unknown')}</h2>
+              ${s.robloxUserId ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>` : ''}
+              <div class="staff-roles">${(s.roles || []).length ? s.roles.map(r => `<span class="perm-chip">${esc(r)}</span>`).join('') : `<span class="hint">No roles assigned</span>`}</div>
+            </div>
+            <div class="modal-body">
+              <div class="modal-section">
+                <div class="modal-section-title">Activity</div>
+                <div class="modal-stat-grid">
+                  <div class="modal-stat-box"><b>${esc(s.requestCount || 0)}</b><span>Requests</span></div>
+                  <div class="modal-stat-box"><b>${esc(s.pendingCount || 0)}</b><span>Pending</span></div>
+                  <div class="modal-stat-box"><b>${s.lastActive ? esc(fmtDate(s.lastActive)) : '&mdash;'}</b><span>Last active</span></div>
+                </div>
+              </div>
+              <div class="modal-section">
+                <div class="modal-section-title">Assignment</div>
+                <div class="modal-info-row"><span class="label">Team</span><span class="value">${s.team ? esc(s.team) : '&mdash;'}</span></div>
+                <div class="modal-info-row"><span class="label">Skillset</span><span class="value">${s.skillset ? esc(s.skillset) : '&mdash;'}</span></div>
+              </div>
+              <div class="modal-section">
+                <div class="modal-section-title">Onboarding</div>
+                ${s.onboardingRequired ? `
+                  <div class="modal-info-row"><span class="label">Steps completed</span><span class="value">${esc(s.onboardingCompleted)} / ${esc(s.onboardingRequired)}</span></div>
+                  <div class="onboard-bar-track"><div class="onboard-bar-fill" style="width:${pct}%;"></div></div>
+                ` : `<div class="hint">No onboarding steps configured.</div>`}
+              </div>
+              <div class="modal-section">
+                <div class="modal-section-title">Payments</div>
+                <div class="modal-info-row"><span class="label">Paid total</span><span class="value">${paidTotalsHtml(s, false)}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>`;
+      }
+
+      function openProfile(idx) {
+        const rows = getRows();
+        activeProfile = rows[idx] || null;
+        paintModal();
+      }
+
+      function closeProfile() {
+        activeProfile = null;
+        paintModal();
+      }
+
+      function paintModal() {
+        const slot = document.getElementById('staffModalSlot');
+        if (slot) slot.innerHTML = modalHtml();
+        wireModalEvents();
+      }
+
+      function wireModalEvents() {
+        const scrim = document.getElementById('staffModalScrim');
+        const closeBtn = document.getElementById('staffModalClose');
+        if (scrim) scrim.addEventListener('click', (e) => { if (e.target === scrim) closeProfile(); });
+        if (closeBtn) closeBtn.addEventListener('click', closeProfile);
       }
 
       function wireTableEvents() {
         const retryBtn = document.getElementById('retryStaffBtn');
         if (retryBtn) retryBtn.addEventListener('click', load);
+        document.querySelectorAll('[data-staff-idx]').forEach(el => {
+          el.addEventListener('click', () => openProfile(Number(el.dataset.staffIdx)));
+        });
       }
 
       function paintTable() {
         const area = document.getElementById('staffTableArea');
-        if (area) area.innerHTML = tableHtml();
+        if (area) area.innerHTML = cardsHtml();
         wireTableEvents();
       }
 
@@ -4055,7 +4439,7 @@
         <div>
           <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Staff database</h1>
-          <p class="sub">Everyone who has signed in, been assigned a role, or been paid, in one place.</p>
+          <p class="sub">Everyone who has signed in, been assigned a role, or been paid, in one place. Click a profile to see full details.</p>
         </div>
         <div class="dash-toolbar">
           <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
@@ -4069,12 +4453,14 @@
         </div>
       </div>
 
-      <div class="table-wrap" id="staffTableArea">${tableHtml()}</div>
+      <div class="table-wrap" id="staffTableArea">${cardsHtml()}</div>
       <div class="footer-note">Combines sign-ins, role assignments, and payment history for everyone the system has seen.</div>
-    </div>`;
+    </div>
+    <div id="staffModalSlot">${modalHtml()}</div>`;
 
         wireTopbarSignOut();
         wireTableEvents();
+        wireModalEvents();
 
         const searchInput = document.getElementById('staffSearchInput');
         if (searchInput) {
