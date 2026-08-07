@@ -4303,9 +4303,18 @@
 
       function avatarUrl(s) {
         if (s && s.robloxUserId) {
-          return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(s.robloxUserId)}&width=150&height=150&format=png`;
+          return `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(s.robloxUserId)}&size=150x150&format=Png&isCircular=false`;
         }
-        return 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150"><rect width="150" height="150" fill="#EEEDFB"/><text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#3730D9" text-anchor="middle">?</text></svg>`);
+
+        return (
+          "data:image/svg+xml;utf8," +
+          encodeURIComponent(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+        <rect width="150" height="150" fill="#EEEDFB"/>
+        <text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#3730D9" text-anchor="middle">?</text>
+      </svg>
+    `)
+        );
       }
 
       function getRows() {
