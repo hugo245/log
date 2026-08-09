@@ -291,10 +291,28 @@ async function computeAccess(robloxUserId) {
     const permissionSet = new Set();
     matchedRoles.forEach(role => (role.permissions || []).forEach(p => permissionSet.add(p)));
 
+    // The highest hierarchy value among a user's matched roles. This is used to
+    // gate "configure" and "moderate" actions so someone can only manage roles,
+    // role assignments, or staff (warn/ban) that sit strictly below their own
+    // level - never at or above it.
+    const maxHierarchy = matchedRoles.reduce((max, role) => Math.max(max, Number(role.hierarchy) || 0), 0);
+
     return {
         roleNames: matchedRoles.map(r => r.name),
-        permissions: Array.from(permissionSet)
+        permissions: Array.from(permissionSet),
+        maxHierarchy
     };
+}
+
+// Hierarchy level (0 if none) of a specific Roblox user, based on the roles
+// they currently qualify for (manual assignment or group rank).
+async function getUserHierarchy(robloxUserId) {
+    try {
+        const access = await computeAccess(robloxUserId);
+        return access.maxHierarchy || 0;
+    } catch (e) {
+        return 0;
+    }
 }
 
 async function computeGroupEligibility(robloxUserId) {
@@ -418,6 +436,17 @@ function requirePermission(res, session, permission) {
     return false;
 }
 
+// Ensures the acting session's hierarchy is strictly higher than the
+// hierarchy of whatever they're trying to configure or moderate (a role, a
+// role assignment, or another staff member). Equal or lower hierarchy is
+// rejected, so a role can never be used to manage itself or anything above it.
+function requireHigherHierarchy(res, session, targetHierarchy) {
+    const actorHierarchy = Number(session && session.max_hierarchy) || 0;
+    if (actorHierarchy > (Number(targetHierarchy) || 0)) return true;
+    res.status(403).json({ ok: false, error: 'insufficient_hierarchy' });
+    return false;
+}
+
 async function getSession(req) {
     const token = getBearerToken(req);
     if (!token) return null;
@@ -453,11 +482,13 @@ async function getSession(req) {
                 ...data,
                 roles: access.roleNames,
                 permissions: access.permissions,
+                max_hierarchy: access.maxHierarchy,
                 last_synced_at: new Date().toISOString()
             };
             await supabase.from('hr_sessions').update({
                 roles: updated.roles,
                 permissions: updated.permissions,
+                max_hierarchy: updated.max_hierarchy,
                 last_synced_at: updated.last_synced_at
             }).eq('token', token);
             return updated;
@@ -579,6 +610,7 @@ app.get('/roblox-auth-callback', async (req, res) => {
         roblox_username: robloxUsername,
         roles: access.roleNames,
         permissions: access.permissions,
+        max_hierarchy: access.maxHierarchy,
         last_synced_at: new Date().toISOString(),
         expires_at: expiresAt
     });
@@ -612,7 +644,8 @@ app.get('/hr-session', async (req, res) => {
         robloxUserId: session.roblox_user_id,
         robloxUsername: session.roblox_username,
         roles: session.roles || [],
-        permissions: session.permissions || []
+        permissions: session.permissions || [],
+        maxHierarchy: session.max_hierarchy || 0
     });
 });
 
@@ -1065,11 +1098,16 @@ app.post('/hr-data', async (req, res) => {
         if (!name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
         const robloxGroupId = payload.robloxGroupId === '' || payload.robloxGroupId == null ? null : Number(payload.robloxGroupId);
         const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
+        const hierarchy = payload.hierarchy === '' || payload.hierarchy == null ? 0 : Number(payload.hierarchy);
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
+        // A role can't be created at or above the creator's own hierarchy -
+        // otherwise someone could hand out a role more senior than themselves.
+        if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const { error } = await supabase.from('roles').insert({
             name,
             roblox_group_id: robloxGroupId,
             min_rank: minRank,
+            hierarchy,
             permissions
         });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
@@ -1081,12 +1119,21 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'roles.manage')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: existingRole, error: existingErr } = await supabase.from('roles').select('hierarchy').eq('id', id).maybeSingle();
+        if (existingErr) { res.status(500).json({ ok: false, error: existingErr.message }); return; }
+        if (!existingRole) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
+        // Can't edit a role that's already at or above your own level...
+        if (!requireHigherHierarchy(res, session, existingRole.hierarchy)) return;
         const robloxGroupId = payload.robloxGroupId === '' || payload.robloxGroupId == null ? null : Number(payload.robloxGroupId);
         const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
+        const hierarchy = payload.hierarchy === '' || payload.hierarchy == null ? 0 : Number(payload.hierarchy);
+        // ...and can't promote it to or above your own level either.
+        if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
         const { error } = await supabase.from('roles').update({
             roblox_group_id: robloxGroupId,
             min_rank: minRank,
+            hierarchy,
             permissions
         }).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
@@ -1098,6 +1145,10 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'roles.manage')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: existingRole, error: existingErr } = await supabase.from('roles').select('hierarchy').eq('id', id).maybeSingle();
+        if (existingErr) { res.status(500).json({ ok: false, error: existingErr.message }); return; }
+        if (!existingRole) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
+        if (!requireHigherHierarchy(res, session, existingRole.hierarchy)) return;
         const { error } = await supabase.from('roles').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
@@ -1108,7 +1159,7 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'roles.manage')) return;
         const { data, error } = await supabase
             .from('user_role_assignments')
-            .select('id, roblox_user_id, role_id, roblox_username, roles(name)')
+            .select('id, roblox_user_id, role_id, roblox_username, roles(name, hierarchy)')
             .order('created_at', { ascending: false });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true, data });
@@ -1120,6 +1171,12 @@ app.post('/hr-data', async (req, res) => {
         const roleId = payload.roleId;
         const robloxUserId = Number(payload.robloxUserId);
         if (!roleId || !robloxUserId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+
+        const { data: role, error: roleErr } = await supabase.from('roles').select('hierarchy').eq('id', roleId).maybeSingle();
+        if (roleErr) { res.status(500).json({ ok: false, error: roleErr.message }); return; }
+        if (!role) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
+        // Can't hand out a role that's at or above your own level.
+        if (!requireHigherHierarchy(res, session, role.hierarchy)) return;
 
         const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
         const robloxUsername = lookupRes.ok ? (await lookupRes.json()).name : null;
@@ -1138,6 +1195,16 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'roles.manage')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: assignment, error: assignErr } = await supabase
+            .from('user_role_assignments')
+            .select('id, roles(hierarchy)')
+            .eq('id', id)
+            .maybeSingle();
+        if (assignErr) { res.status(500).json({ ok: false, error: assignErr.message }); return; }
+        if (!assignment) { res.status(404).json({ ok: false, error: 'assignment_not_found' }); return; }
+        // Can't revoke a role assignment that's at or above your own level either -
+        // otherwise a lower role could strip a higher one from someone else.
+        if (!requireHigherHierarchy(res, session, assignment.roles && assignment.roles.hierarchy)) return;
         const { error } = await supabase.from('user_role_assignments').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
@@ -1150,9 +1217,10 @@ app.post('/hr-data', async (req, res) => {
             await supabase.from('hr_sessions').update({
                 roles: access.roleNames,
                 permissions: access.permissions,
+                max_hierarchy: access.maxHierarchy,
                 last_synced_at: new Date().toISOString()
             }).eq('token', getBearerToken(req));
-            res.json({ ok: true, roles: access.roleNames, permissions: access.permissions });
+            res.json({ ok: true, roles: access.roleNames, permissions: access.permissions, maxHierarchy: access.maxHierarchy });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'refresh_failed' });
         }
@@ -1207,20 +1275,26 @@ app.post('/hr-data', async (req, res) => {
     if (action === 'list_staff_database') {
         if (!requirePermission(res, session, 'staff.view_database')) return;
         try {
-            const [sessionsRes, requestsRes, assignmentsRes, progressRes, teamAssignRes, warningsRes, bansRes] = await Promise.all([
+            const [sessionsRes, requestsRes, assignmentsRes, progressRes, teamAssignRes, warningsRes, bansRes, rolesRes] = await Promise.all([
                 supabase.from('hr_sessions').select('roblox_user_id, roblox_username, roles, last_synced_at, expires_at'),
                 supabase.from('payment_requests').select('roblox_user_id, roblox_username, payment, currency, paid, status'),
                 supabase.from('user_role_assignments').select('roblox_user_id, roblox_username, roles(name)'),
                 supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id'),
                 supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id'),
                 supabase.from('staff_warnings').select('roblox_user_id'),
-                supabase.from('banned_users').select('roblox_user_id')
+                supabase.from('banned_users').select('roblox_user_id'),
+                supabase.from('roles').select('name, hierarchy')
             ]);
             if (sessionsRes.error) throw sessionsRes.error;
             if (requestsRes.error) throw requestsRes.error;
             if (assignmentsRes.error) throw assignmentsRes.error;
             if (progressRes.error) throw progressRes.error;
             if (teamAssignRes.error) throw teamAssignRes.error;
+
+            // Used by the client to grey out warn/ban/assign actions against staff
+            // whose highest role sits at or above the viewer's own hierarchy level.
+            const hierarchyByRoleName = {};
+            (rolesRes.data || []).forEach(r => { hierarchyByRoleName[r.name] = Number(r.hierarchy) || 0; });
 
             const teamIds = [...new Set((teamAssignRes.data || []).filter(a => a.team_id != null).map(a => a.team_id))];
             const skillsetIds = [...new Set((teamAssignRes.data || []).filter(a => a.skillset_id != null).map(a => a.skillset_id))];
@@ -1322,8 +1396,12 @@ app.post('/hr-data', async (req, res) => {
                 }
             });
 
+            byKey.forEach((row) => {
+                row.maxHierarchy = row.roles.reduce((max, name) => Math.max(max, hierarchyByRoleName[name] || 0), 0);
+            });
+
             const data = Array.from(byKey.values()).filter(r => r.robloxUserId != null || r.robloxUsername);
-            res.json({ ok: true, data });
+            res.json({ ok: true, data, viewerHierarchy: session.max_hierarchy || 0 });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not load the staff database.' });
         }
@@ -1613,6 +1691,10 @@ app.post('/hr-data', async (req, res) => {
         const reason = payload.reason ? String(payload.reason).trim() : '';
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
         if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
+        // Can't warn (or, via the 3-warning auto-ban, effectively ban) staff
+        // whose own role sits at or above the moderator's hierarchy level.
+        const targetHierarchy = await getUserHierarchy(robloxUserId);
+        if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
         let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
         if (!username) {
             const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
@@ -1648,6 +1730,8 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'staff.moderate')) return;
         const robloxUserId = Number(payload.robloxUserId);
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        const targetHierarchy = await getUserHierarchy(robloxUserId);
+        if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
         await supabase.from('banned_users').delete().eq('roblox_user_id', robloxUserId);
         res.json({ ok: true });
         return;

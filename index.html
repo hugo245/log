@@ -1961,6 +1961,7 @@
     let hrUsername = '';
     let hrRoles = [];
     let hrPermissions = [];
+    let hrMaxHierarchy = 0;
     let authReady = false;
     let appDataReady = false;
     let needsOnboarding = false;
@@ -2205,7 +2206,7 @@
 
     async function verifySession() {
       const token = getStoredToken();
-      if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; return; }
+      if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; return; }
       try {
         // Fire the session check and the onboarding check together instead of
         // waiting for the first to finish before starting the second - both
@@ -2226,12 +2227,14 @@
           hrUsername = json.robloxUsername || '';
           hrRoles = json.roles || [];
           hrPermissions = json.permissions || [];
+          hrMaxHierarchy = json.maxHierarchy || 0;
           needsOnboarding = onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false;
         } else {
           isHrAuthed = false;
           hrUsername = '';
           hrRoles = [];
           hrPermissions = [];
+          hrMaxHierarchy = 0;
           needsOnboarding = false;
           clearToken();
         }
@@ -2240,6 +2243,7 @@
         hrUsername = '';
         hrRoles = [];
         hrPermissions = [];
+        hrMaxHierarchy = 0;
         needsOnboarding = false;
       }
     }
@@ -2266,7 +2270,7 @@
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) {
-        if (res.status === 401) { clearToken(); isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; }
+        if (res.status === 401) { clearToken(); isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; }
         throw new Error((json && json.error) || 'That request failed.');
       }
       return json;
@@ -2643,6 +2647,7 @@
       hrUsername = '';
       hrRoles = [];
       hrPermissions = [];
+      hrMaxHierarchy = 0;
       window.location.hash = '#/';
     }
 
@@ -3622,19 +3627,23 @@
         <div class="panel">
           <div class="preview-label">Roles</div>
           ${rolesError ? `<div class="error-box"><span>${esc(rolesError)}</span></div>` : ''}
-          ${rolesLoading ? `<div class="dash-loading">Loading roles...</div>` : roles.length === 0 ? `<div class="empty-note">No roles yet. Create the first one below.</div>` : roles.map(r => `
+          ${rolesLoading ? `<div class="dash-loading">Loading roles...</div>` : roles.length === 0 ? `<div class="empty-note">No roles yet. Create the first one below.</div>` : roles.map(r => {
+                  const roleHierarchy = Number(r.hierarchy) || 0;
+                  const canManageThisRole = roleHierarchy < hrMaxHierarchy;
+                  return `
             <div class="role-row">
               <div class="role-row-top">
                 <div>
                   <strong>${esc(r.name)}</strong>
-                  <div class="role-meta">${r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'}</div>
+                  <div class="role-meta">${r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
-                <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}">Remove</button>
+                <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
               </div>
               <div class="perm-chip-wrap">
                 ${(r.permissions || []).length ? r.permissions.map(p => `<span class="perm-chip">${esc(PERMISSION_LABELS[p] || p)}</span>`).join('') : `<span class="empty-note">No permissions granted</span>`}
               </div>
-            </div>`).join('')}
+            </div>`;
+                }).join('')}
 
           <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
             <div class="preview-label">Add a role</div>
@@ -3644,6 +3653,7 @@
               <div class="field"><label>Roblox group ID <span class="hint">(optional)</span></label><input type="number" id="newRoleGroupId" placeholder="e.g. 123456"></div>
               <div class="field"><label>Minimum rank <span class="hint">(optional)</span></label><input type="number" id="newRoleMinRank" placeholder="e.g. 100" min="0" max="255"></div>
             </div>
+            <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" id="newRoleHierarchy" placeholder="e.g. 10" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}"></div>
             <div class="field">
               <label>Permissions</label>
               <div class="perm-check-grid">
@@ -3658,11 +3668,15 @@
         <div class="panel">
           <div class="preview-label">Manual assignments</div>
           <p class="sub" style="margin:0 0 14px;">Give a role to one Roblox account, regardless of group rank.</p>
-          ${assignments.length === 0 ? `<div class="empty-note">No manual assignments yet.</div>` : assignments.map(a => `
+          ${assignments.length === 0 ? `<div class="empty-note">No manual assignments yet.</div>` : assignments.map(a => {
+                  const roleHierarchy = Number(a.roles && a.roles.hierarchy) || 0;
+                  const canManageThisAssignment = roleHierarchy < hrMaxHierarchy;
+                  return `
             <div class="assignment-row">
               <span>${esc(a.roblox_username || a.roblox_user_id)} &rarr; <strong>${esc((a.roles && a.roles.name) || 'Unknown role')}</strong></span>
-              <button class="btn btn-ghost btn-sm" data-del-assignment="${esc(a.id)}">Remove</button>
-            </div>`).join('')}
+              <button class="btn btn-ghost btn-sm" data-del-assignment="${esc(a.id)}" ${canManageThisAssignment ? '' : 'disabled'} title="${canManageThisAssignment ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
+            </div>`;
+                }).join('')}
 
           <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
             <div class="preview-label">Assign a role</div>
@@ -3670,12 +3684,12 @@
             <div class="field"><label>Roblox user ID</label><input type="number" id="newAssignmentUserId" placeholder="e.g. 1234567"></div>
             <div class="field">
               <label>Role</label>
-              <select id="newAssignmentRoleId" ${roles.length === 0 ? 'disabled' : ''}>
+              <select id="newAssignmentRoleId" ${roles.filter(r => (Number(r.hierarchy) || 0) < hrMaxHierarchy).length === 0 ? 'disabled' : ''}>
                 <option value="">${roles.length === 0 ? 'No roles available' : 'Select a role'}</option>
-                ${roles.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}
+                ${roles.filter(r => (Number(r.hierarchy) || 0) < hrMaxHierarchy).map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}
               </select>
             </div>
-            <button class="btn btn-primary" id="addAssignmentBtn" ${addingAssignment || roles.length === 0 ? 'disabled' : ''}>${addingAssignment ? 'Assigning...' : 'Assign role'}</button>
+            <button class="btn btn-primary" id="addAssignmentBtn" ${addingAssignment || roles.filter(r => (Number(r.hierarchy) || 0) < hrMaxHierarchy).length === 0 ? 'disabled' : ''}>${addingAssignment ? 'Assigning...' : 'Assign role'}</button>
           </div>
         </div>
       </div>` : ''}
@@ -3943,11 +3957,13 @@
             const name = document.getElementById('newRoleName').value.trim();
             const groupId = document.getElementById('newRoleGroupId').value;
             const minRank = document.getElementById('newRoleMinRank').value;
+            const hierarchy = document.getElementById('newRoleHierarchy').value;
             const permissions = Array.from(document.querySelectorAll('.newRolePerm:checked')).map(el => el.value);
             if (!name) { addRoleError = 'Enter a role name.'; paint(); return; }
+            if (hierarchy !== '' && Number(hierarchy) >= hrMaxHierarchy) { addRoleError = 'Hierarchy level must be lower than your own.'; paint(); return; }
             addingRole = true; addRoleError = null; paint();
             try {
-              await addRole({ name, robloxGroupId: groupId, minRank, permissions });
+              await addRole({ name, robloxGroupId: groupId, minRank, hierarchy, permissions });
               addingRole = false;
               await loadRoles();
             } catch (err) {
@@ -4655,11 +4671,16 @@
           </div>
         </div>
         <div class="modal-body">
+          ${(Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? `
+          <div class="error-box" style="margin-bottom:14px;">
+            <span>This person's role is at or above your own hierarchy level, so you can't warn or ban them.</span>
+          </div>
+          ` : ''}
           ${(s.isBanned || bannedInfo) ? `
           <div class="error-box" style="margin-bottom:14px;">
             <span>This account is banned and cannot sign in again. ${bannedInfo && bannedInfo.reason ? esc(bannedInfo.reason) : 'Reached 3 warnings.'}</span>
           </div>
-          <button class="btn btn-ghost btn-sm" id="unbanBtn" ${warnBusy ? 'disabled' : ''}>Lift ban</button>
+          <button class="btn btn-ghost btn-sm" id="unbanBtn" ${warnBusy || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>Lift ban</button>
           ` : `
           <div class="modal-section">
             <div class="modal-section-title">Issue a warning</div>
@@ -4669,7 +4690,7 @@
               <label>Reason</label>
               <textarea id="warnReasonInput" placeholder="Describe the issue" rows="3">${esc(warnReason)}</textarea>
             </div>
-            <button class="btn btn-primary btn-sm" id="issueWarnBtn" ${warnBusy || !s.robloxUserId ? 'disabled' : ''}>${warnBusy ? 'Saving...' : 'Issue warning'}</button>
+            <button class="btn btn-primary btn-sm" id="issueWarnBtn" ${warnBusy || !s.robloxUserId || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>${warnBusy ? 'Saving...' : 'Issue warning'}</button>
           </div>
           `}
           <div class="modal-section" style="margin-top:18px;">
