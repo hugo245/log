@@ -417,7 +417,7 @@ async function getSession(req) {
             await supabase.from('hr_sessions').delete().eq('token', token);
             return null;
         }
-    } catch (e) {}
+    } catch (e) { }
 
     const lastSynced = data.last_synced_at ? new Date(data.last_synced_at).getTime() : 0;
     if (Date.now() - lastSynced > ACCESS_SYNC_INTERVAL_MS) {
@@ -671,15 +671,15 @@ app.post('/hr-data', async (req, res) => {
         const userIds = [...new Set(rows.filter(r => r.roblox_user_id != null).map(r => r.roblox_user_id))];
         const usernames = [...new Set(rows.filter(r => r.roblox_user_id == null && r.roblox_username).map(r => r.roblox_username))];
 
-        let methodRows = [];
-        if (userIds.length) {
-            const { data: byId } = await supabase.from('payment_methods').select('*').in('roblox_user_id', userIds);
-            methodRows = methodRows.concat(byId || []);
-        }
-        if (usernames.length) {
-            const { data: byUsername } = await supabase.from('payment_methods').select('*').in('roblox_username', usernames);
-            methodRows = methodRows.concat(byUsername || []);
-        }
+        // All four of these only depend on userIds/usernames (already known),
+        // not on each other, so fetch them together instead of waterfalling.
+        const [byIdRes, byUsernameRes, sessionRolesRes, assignmentsRes] = await Promise.all([
+            userIds.length ? supabase.from('payment_methods').select('*').in('roblox_user_id', userIds) : Promise.resolve({ data: [] }),
+            usernames.length ? supabase.from('payment_methods').select('*').in('roblox_username', usernames) : Promise.resolve({ data: [] }),
+            userIds.length ? supabase.from('hr_sessions').select('roblox_user_id, roles').in('roblox_user_id', userIds) : Promise.resolve({ data: [] }),
+            userIds.length ? supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id').in('roblox_user_id', userIds) : Promise.resolve({ data: [] })
+        ]);
+        const methodRows = [].concat(byIdRes.data || [], byUsernameRes.data || []);
 
         const methodByUserId = {};
         const methodByUsername = {};
@@ -693,23 +693,17 @@ app.post('/hr-data', async (req, res) => {
         let teamNameById = {};
         let skillsetNameById = {};
         if (userIds.length) {
-            const [sessionRolesRes, assignmentsRes] = await Promise.all([
-                supabase.from('hr_sessions').select('roblox_user_id, roles').in('roblox_user_id', userIds),
-                supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id').in('roblox_user_id', userIds)
-            ]);
             (sessionRolesRes.data || []).forEach(s => { rolesByUserId[s.roblox_user_id] = s.roles || []; });
             (assignmentsRes.data || []).forEach(a => { assignByUserId[a.roblox_user_id] = a; });
 
             const teamIds = [...new Set((assignmentsRes.data || []).filter(a => a.team_id != null).map(a => a.team_id))];
             const skillsetIds = [...new Set((assignmentsRes.data || []).filter(a => a.skillset_id != null).map(a => a.skillset_id))];
-            if (teamIds.length) {
-                const { data } = await supabase.from('teams').select('id,name').in('id', teamIds);
-                (data || []).forEach(t => { teamNameById[t.id] = t.name; });
-            }
-            if (skillsetIds.length) {
-                const { data } = await supabase.from('skillsets').select('id,name').in('id', skillsetIds);
-                (data || []).forEach(s => { skillsetNameById[s.id] = s.name; });
-            }
+            const [teamsRes, skillsetsRes] = await Promise.all([
+                teamIds.length ? supabase.from('teams').select('id,name').in('id', teamIds) : Promise.resolve({ data: [] }),
+                skillsetIds.length ? supabase.from('skillsets').select('id,name').in('id', skillsetIds) : Promise.resolve({ data: [] })
+            ]);
+            (teamsRes.data || []).forEach(t => { teamNameById[t.id] = t.name; });
+            (skillsetsRes.data || []).forEach(s => { skillsetNameById[s.id] = s.name; });
         }
 
         rows.forEach(r => {

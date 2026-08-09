@@ -1889,7 +1889,14 @@
 
 <body>
 
-  <div id="app"></div>
+  <div id="app">
+    <div class="gate-shell">
+      <div class="gate-card">
+        <div class="gate-icon">PV</div>
+        <h2>Loading...</h2>
+      </div>
+    </div>
+  </div>
 
   <script>
     const SUPABASE_URL = 'https://tixfcxypoyedqbkiwbtx.supabase.co';
@@ -1957,6 +1964,12 @@
     let authReady = false;
     let appDataReady = false;
     let needsOnboarding = false;
+
+    // Bumped every time route() switches pages. Async page loaders capture
+    // the value at the start and check it before repainting, so a slow
+    // fetch from a page you've since navigated away from can never
+    // overwrite what's currently on screen.
+    let renderGen = 0;
 
     function hasPermission(permission) {
       return hrPermissions.includes(permission);
@@ -2194,19 +2207,26 @@
       const token = getStoredToken();
       if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; return; }
       try {
-        const res = await fetch(EDGE_BASE + '/hr-session', {
-          headers: {
-            Authorization: 'Bearer ' + token,
-            'ngrok-skip-browser-warning': 'true'
-          }
-        });
+        // Fire the session check and the onboarding check together instead of
+        // waiting for the first to finish before starting the second - both
+        // just need the bearer token, so this saves a full round trip on
+        // every page load (meaningful when the API has to cold-start).
+        const [res, onboardingResult] = await Promise.all([
+          fetch(EDGE_BASE + '/hr-session', {
+            headers: {
+              Authorization: 'Bearer ' + token,
+              'ngrok-skip-browser-warning': 'true'
+            }
+          }),
+          loadMyOnboarding().catch(() => null)
+        ]);
         const json = await res.json().catch(() => ({}));
         if (res.ok && json.ok) {
           isHrAuthed = true;
           hrUsername = json.robloxUsername || '';
           hrRoles = json.roles || [];
           hrPermissions = json.permissions || [];
-          await refreshOnboardingNeed();
+          needsOnboarding = onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false;
         } else {
           isHrAuthed = false;
           hrUsername = '';
@@ -2584,8 +2604,10 @@
     }
 
     async function initAuth() {
-      await verifySession();
-      await loadAppData();
+      // These two don't depend on each other (one hits the API, the other
+      // talks to Supabase directly) so run them side by side rather than
+      // waiting on one before starting the other.
+      await Promise.all([verifySession(), loadAppData()]);
       authReady = true;
       route();
     }
@@ -2644,6 +2666,7 @@
 
     function route() {
       if (!authReady) return;
+      renderGen++;
       const path = window.location.hash.split('?')[0];
       if (path === '#/auth-callback') { handleAuthCallback(); return; }
 
@@ -2803,6 +2826,7 @@
 
     function renderDashboard() {
       if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding') ? '#/manage' : '#/'; return; }
+      const myGen = renderGen;
       let allRequests = [];
       let filter = 'pending';
       let search = '';
@@ -3177,6 +3201,7 @@
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Something went wrong while reading the shared request list.';
         }
+        if (myGen !== renderGen) return; // navigated away while this was loading
         loading = false;
         paintShell();
       }
@@ -3185,6 +3210,7 @@
     }
 
     function renderMyPayments() {
+      const myGen = renderGen;
       let summary = null;
       let loading = true;
       let loadError = null;
@@ -3349,6 +3375,7 @@
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Could not load your payment summary.';
         }
+        if (myGen !== renderGen) return;
         loading = false;
         paint();
       }
@@ -3359,6 +3386,7 @@
           method = await getMyPaymentMethod();
           if (method) { selectedMethod = method.method; methodDetails = method.details || {}; }
         } catch (err) { }
+        if (myGen !== renderGen) return;
         methodLoading = false;
         paint();
       }
@@ -3370,6 +3398,7 @@
         } catch (err) {
           eligibilityError = (err && err.message) ? err.message : 'Could not check your group eligibility.';
         }
+        if (myGen !== renderGen) return;
         eligibilityLoading = false;
         paint();
       }
@@ -3381,6 +3410,7 @@
     }
 
     function renderManagePanel() {
+      const myGen = renderGen;
       const canManageGames = hasPermission('settings.manage_games');
       const canManageRate = hasPermission('settings.manage_rate');
       const canManageGroups = hasPermission('settings.manage_groups');
@@ -4045,6 +4075,7 @@
         } catch (err) {
           groupsError = (err && err.message) ? err.message : 'Could not load groups.';
         }
+        if (myGen !== renderGen) return;
         groupsLoading = false;
         paint();
       }
@@ -4056,6 +4087,7 @@
         } catch (err) {
           baseAccessError = (err && err.message) ? err.message : 'Could not load the current sign-in requirement.';
         }
+        if (myGen !== renderGen) return;
         baseAccessLoading = false;
         paint();
       }
@@ -4067,6 +4099,7 @@
         } catch (err) {
           rolesError = (err && err.message) ? err.message : 'Could not load roles.';
         }
+        if (myGen !== renderGen) return;
         rolesLoading = false;
         paint();
       }
@@ -4077,6 +4110,7 @@
         } catch (err) {
           assignments = [];
         }
+        if (myGen !== renderGen) return;
         paint();
       }
 
@@ -4089,6 +4123,7 @@
         } catch (err) {
           teamsError = (err && err.message) ? err.message : 'Could not load teams and skillsets.';
         }
+        if (myGen !== renderGen) return;
         teamsLoading = false;
         paint();
         loadLinksData();
@@ -4100,6 +4135,7 @@
         } catch (err) {
           onboardingLinks = [];
         }
+        if (myGen !== renderGen) return;
         paint();
       }
 
@@ -4118,6 +4154,7 @@
       if (!authReady) { app.innerHTML = topbar(); return; }
       if (!isHrAuthed) { renderHrGate(); return; }
 
+      const myGen = renderGen;
       let loading = true;
       let loadError = null;
       let step = null;
@@ -4155,6 +4192,7 @@
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Could not load this policy.';
         }
+        if (myGen !== renderGen) return;
         loading = false;
         paint();
       }
@@ -4167,6 +4205,7 @@
       if (!authReady) { app.innerHTML = topbar(); return; }
       if (!isHrAuthed) { renderHrGate(); return; }
 
+      const myGen = renderGen;
       let steps = [];
       let loading = true;
       let loadError = null;
@@ -4293,10 +4332,12 @@
           myAssignment = assignmentResult;
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Could not load your onboarding checklist.';
+          if (myGen !== renderGen) return;
           loading = false;
           paint();
           return;
         }
+        if (myGen !== renderGen) return;
         loading = false;
 
         const requiredSteps = steps.filter(s => s.required);
@@ -4321,6 +4362,7 @@
       if (!isHrAuthed) { renderHrGate(); return; }
       if (!hasPermission('staff.view_database')) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
 
+      const myGen = renderGen;
       let staff = [];
       let loading = true;
       let loadError = null;
@@ -4837,6 +4879,7 @@
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Could not load the staff database.';
         }
+        if (myGen !== renderGen) return;
         loading = false;
         paintTable();
       }
