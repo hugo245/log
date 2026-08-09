@@ -235,6 +235,16 @@ async function checkBaseAccess(robloxUserId) {
     const base = await getBaseAccessConfig();
     if (!base.groupId) return { allowed: true, base };
 
+    // A manual role assignment overrides the base group/rank requirement,
+    // same as it does in computeAccess().
+    const { data: manualRows, error: manualErr } = await supabase
+        .from('user_role_assignments')
+        .select('id')
+        .eq('roblox_user_id', robloxUserId)
+        .limit(1);
+    if (manualErr) throw manualErr;
+    if (manualRows && manualRows.length > 0) return { allowed: true, base };
+
     const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
     const membership = groupRoles.find(g => g.group && g.group.id === base.groupId);
     if (!membership) return { allowed: false, base };
