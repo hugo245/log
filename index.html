@@ -2933,7 +2933,7 @@
         const allEligible = list.every(g => g.eligible);
         const isOverridden = list.some(g => g.overridden);
         return `
-            ${isOverridden ? `<div class="hint" style="display:block;margin-bottom:8px;color:var(--muted);">"Ignore Eligibility for All Requests" is on — everyone is treated as eligible regardless of the status below.</div>` : ''}
+            ${isOverridden ? `<div class="hint" style="display:block;margin-bottom:8px;color:var(--muted);">"Ignore Eligibility for All Requests" is on, everyone is treated as eligible regardless of the status below.</div>` : ''}
             <div class="elig-summary ${allEligible ? 'is-ok' : ''}">${allEligible ? 'Eligible' : 'Not yet eligible'}</div>
             ${list.map(g => `
               <div class="elig-row">
