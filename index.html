@@ -2416,6 +2416,19 @@
       await callHrData('save_base_access', { groupId, minRank });
     }
 
+    async function getIgnoreEligibility() {
+      const json = await callHrData('get_ignore_eligibility');
+      return !!(json.data && json.data.ignoreEligibility);
+    }
+
+    async function saveIgnoreEligibility(ignoreEligibility) {
+      await callHrData('save_ignore_eligibility', { ignoreEligibility });
+    }
+
+    async function adminSetPaymentMethod(robloxUserId, robloxUsername, method, details) {
+      await callHrData('admin_set_payment_method', { robloxUserId, robloxUsername, method, details });
+    }
+
     async function listTeams() {
       const json = await callHrData('list_teams');
       return json.data || [];
@@ -2918,7 +2931,9 @@
       function renderEligibilityList(list) {
         if (!list.length) return `<div class="empty-note">No eligibility groups configured yet.</div>`;
         const allEligible = list.every(g => g.eligible);
+        const isOverridden = list.some(g => g.overridden);
         return `
+            ${isOverridden ? `<div class="hint" style="display:block;margin-bottom:8px;color:var(--muted);">"Ignore Eligibility for All Requests" is on — everyone is treated as eligible regardless of the status below.</div>` : ''}
             <div class="elig-summary ${allEligible ? 'is-ok' : ''}">${allEligible ? 'Eligible' : 'Not yet eligible'}</div>
             ${list.map(g => `
               <div class="elig-row">
@@ -3440,6 +3455,11 @@
       let addingGroup = false;
       let addGroupError = null;
 
+      let ignoreEligibility = false;
+      let ignoreEligibilityLoading = canManageGroups;
+      let ignoreEligibilitySaving = false;
+      let ignoreEligibilityError = null;
+
       let baseAccess = { groupId: null, minRank: null };
       let baseAccessLoading = canManageBaseAccess;
       let baseAccessError = null;
@@ -3553,6 +3573,18 @@
         <span class="eyebrow">Payout requirements</span>
         <h1>Eligibility groups</h1>
         <p class="sub">Someone must be in every group listed here to be marked eligible for payout.</p>
+      </div>
+      <div class="panel" style="max-width:640px;margin-bottom:20px;">
+        ${ignoreEligibilityError ? `<div class="error-box"><span>${esc(ignoreEligibilityError)}</span></div>` : ''}
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:${ignoreEligibilityLoading || ignoreEligibilitySaving ? 'default' : 'pointer'};">
+          <input type="checkbox" id="ignoreEligibilityCheckbox" style="margin-top:3px;" ${ignoreEligibility ? 'checked' : ''} ${ignoreEligibilityLoading || ignoreEligibilitySaving ? 'disabled' : ''}>
+          <span>
+            <strong>Ignore Eligibility for All Requests</strong>
+            <p class="sub" style="margin:4px 0 0;">When on, submitting a payment request skips every eligibility check for the recipient, required groups, onboarding/Terms of Service acceptance, and payment method on file. Use with care.</p>
+          </span>
+        </label>
+        ${ignoreEligibilityLoading ? `<div class="dash-loading" style="margin-top:10px;">Loading current setting...</div>` : ''}
+        ${ignoreEligibilitySaving ? `<div class="hint" style="display:block;margin-top:10px;">Saving...</div>` : ''}
       </div>
       <div class="panel" style="max-width:640px;">
         ${groupsError ? `<div class="error-box"><span>${esc(groupsError)}</span></div>` : ''}
@@ -3860,6 +3892,22 @@
         }
 
         if (canManageGroups) {
+          const ignoreEligibilityCheckbox = document.getElementById('ignoreEligibilityCheckbox');
+          if (ignoreEligibilityCheckbox) ignoreEligibilityCheckbox.addEventListener('change', async () => {
+            const next = ignoreEligibilityCheckbox.checked;
+            ignoreEligibility = next;
+            ignoreEligibilitySaving = true; ignoreEligibilityError = null; paint();
+            try {
+              await saveIgnoreEligibility(next);
+              ignoreEligibilitySaving = false; paint();
+            } catch (err) {
+              ignoreEligibility = !next;
+              ignoreEligibilitySaving = false;
+              ignoreEligibilityError = (err && err.message) ? err.message : 'Could not save this setting. Check your connection and try again.';
+              paint();
+            }
+          });
+
           const addGroupBtn = document.getElementById('addGroupBtn');
           if (addGroupBtn) addGroupBtn.addEventListener('click', async () => {
             const groupId = document.getElementById('newGroupId').value;
@@ -4080,6 +4128,18 @@
         paint();
       }
 
+      async function loadIgnoreEligibility() {
+        ignoreEligibilityLoading = true; ignoreEligibilityError = null; paint();
+        try {
+          ignoreEligibility = await getIgnoreEligibility();
+        } catch (err) {
+          ignoreEligibilityError = (err && err.message) ? err.message : 'Could not load the current setting.';
+        }
+        if (myGen !== renderGen) return;
+        ignoreEligibilityLoading = false;
+        paint();
+      }
+
       async function loadBaseAccess() {
         baseAccessLoading = true; baseAccessError = null; paint();
         try {
@@ -4140,7 +4200,7 @@
       }
 
       paint();
-      if (canManageGroups) loadGroups();
+      if (canManageGroups) { loadGroups(); loadIgnoreEligibility(); }
       if (canManageBaseAccess) loadBaseAccess();
       if (canManageRoles) {
         loadRoles().then(loadAssignments);
@@ -4381,6 +4441,12 @@
       let warnError = null;
       let warnReason = '';
 
+      let paymentMethodSelected = 'PAYPAL';
+      let paymentMethodDetails = {};
+      let paymentLoading = false;
+      let paymentBusy = false;
+      let paymentMsg = null;
+
       const canAssign = hasPermission('settings.manage_onboarding');
       const canModerate = hasPermission('staff.moderate');
 
@@ -4535,6 +4601,44 @@
     </div>`;
         }
 
+        if (modalMode === 'payment') {
+          const def = PAYMENT_METHODS[paymentMethodSelected];
+          return `
+    <div class="modal-scrim" id="staffModalScrim">
+      <div class="modal-card">
+        <button class="modal-close" id="staffModalClose">&times;</button>
+        <div class="modal-header">
+          <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
+          <h2>Payment method</h2>
+          <div class="modal-id">${esc(s.robloxUsername || 'Unknown')}${s.robloxUserId ? ' · ID ' + esc(s.robloxUserId) : ''}</div>
+        </div>
+        <div class="modal-body">
+          <div class="modal-section">
+            <p class="sub" style="margin:0 0 12px;">Manually set or update the payout method on file for this person. This overwrites whatever they may have saved themselves.</p>
+            ${paymentMsg ? `<div class="${paymentMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(paymentMsg.text)}</span></div>` : ''}
+            ${paymentLoading ? `<div class="dash-loading">Loading current method...</div>` : `
+            <div class="field">
+              <label>Method</label>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                ${Object.entries(PAYMENT_METHODS).map(([key, m]) => `
+                  <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+                    <input type="radio" name="adminMethodChoice" value="${esc(key)}" ${paymentMethodSelected === key ? 'checked' : ''}>
+                    <span><strong>${esc(m.label)}</strong><br><span class="hint">${esc(m.sub)}</span></span>
+                  </label>`).join('')}
+              </div>
+            </div>
+            <div id="adminMethodFieldsSlot"></div>
+            <div style="display:flex;gap:8px;margin-top:14px;">
+              <button class="btn btn-primary btn-sm btn-equal" id="savePaymentBtn" ${paymentBusy ? 'disabled' : ''}>${paymentBusy ? 'Saving...' : 'Save payment method'}</button>
+              <button class="btn btn-ghost btn-sm btn-equal" id="paymentBackBtn">Back</button>
+            </div>
+            `}
+          </div>
+        </div>
+      </div>
+    </div>`;
+        }
+
         if (modalMode === 'moderate') {
           return `
     <div class="modal-scrim" id="staffModalScrim">
@@ -4605,6 +4709,7 @@
           <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
             ${canAssign && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openConfigBtn">Configure</button>` : ''}
             ${canModerate && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openModBtn">Moderation</button>` : ''}
+            ${canModerate && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openPaymentBtn">Payment method</button>` : ''}
           </div>
           <div class="modal-section">
             <div class="modal-section-title">Activity</div>
@@ -4670,6 +4775,9 @@
         warnReason = '';
         warnings = [];
         bannedInfo = null;
+        paymentMsg = null;
+        paymentMethodSelected = 'PAYPAL';
+        paymentMethodDetails = {};
         paintModal();
       }
 
@@ -4718,10 +4826,44 @@
         paintModal();
       }
 
+      async function openPayment() {
+        modalMode = 'payment';
+        paymentMsg = null;
+        paymentBusy = false;
+        paymentLoading = true;
+        paymentMethodSelected = 'PAYPAL';
+        paymentMethodDetails = {};
+        paintModal();
+        try {
+          const existing = activeProfile.robloxUsername ? await getPaymentMethodForUser(activeProfile.robloxUsername) : null;
+          if (existing) {
+            paymentMethodSelected = existing.method;
+            paymentMethodDetails = existing.details || {};
+          }
+        } catch (e) { }
+        paymentLoading = false;
+        paintModal();
+      }
+
+      function paintAdminMethodFields() {
+        const slot = document.getElementById('adminMethodFieldsSlot');
+        if (!slot) return;
+        const def = PAYMENT_METHODS[paymentMethodSelected];
+        slot.innerHTML = def.fields.map(f => `
+          <div class="field">
+            <label>${esc(f.label)}</label>
+            <input type="${f.type}" data-admin-method-field="${f.key}" placeholder="${esc(f.placeholder || '')}" value="${esc(paymentMethodDetails[f.key] || '')}">
+          </div>`).join('');
+        slot.querySelectorAll('[data-admin-method-field]').forEach(el => el.addEventListener('input', () => {
+          paymentMethodDetails[el.dataset.adminMethodField] = el.value;
+        }));
+      }
+
       async function paintModal() {
         const slot = document.getElementById('staffModalSlot');
         if (slot) slot.innerHTML = await modalHtml();
         wireModalEvents();
+        if (modalMode === 'payment' && !paymentLoading) paintAdminMethodFields();
       }
 
       function wireModalEvents() {
@@ -4734,11 +4876,39 @@
         if (openConfigBtn) openConfigBtn.addEventListener('click', openConfig);
         const openModBtn = document.getElementById('openModBtn');
         if (openModBtn) openModBtn.addEventListener('click', openModerate);
+        const openPaymentBtn = document.getElementById('openPaymentBtn');
+        if (openPaymentBtn) openPaymentBtn.addEventListener('click', openPayment);
 
         const cfgBackBtn = document.getElementById('cfgBackBtn');
         if (cfgBackBtn) cfgBackBtn.addEventListener('click', () => { modalMode = 'view'; paintModal(); });
         const modBackBtn = document.getElementById('modBackBtn');
         if (modBackBtn) modBackBtn.addEventListener('click', () => { modalMode = 'view'; paintModal(); });
+        const paymentBackBtn = document.getElementById('paymentBackBtn');
+        if (paymentBackBtn) paymentBackBtn.addEventListener('click', () => { modalMode = 'view'; paintModal(); });
+
+        document.querySelectorAll('input[name="adminMethodChoice"]').forEach(el => el.addEventListener('change', () => {
+          paymentMethodSelected = el.value;
+          paymentMethodDetails = {};
+          paintModal();
+        }));
+
+        const savePaymentBtn = document.getElementById('savePaymentBtn');
+        if (savePaymentBtn) savePaymentBtn.addEventListener('click', async () => {
+          const def = PAYMENT_METHODS[paymentMethodSelected];
+          const missing = def.fields.find(f => !String(paymentMethodDetails[f.key] || '').trim());
+          if (missing) { paymentMsg = { ok: false, text: `Enter a value for "${missing.label}".` }; paintModal(); return; }
+          paymentBusy = true; paymentMsg = null; paintModal();
+          try {
+            await adminSetPaymentMethod(activeProfile.robloxUserId, activeProfile.robloxUsername, paymentMethodSelected, paymentMethodDetails);
+            paymentBusy = false;
+            paymentMsg = { ok: true, text: 'Payment method saved.' };
+            paintModal();
+          } catch (err) {
+            paymentBusy = false;
+            paymentMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not save this payment method.' };
+            paintModal();
+          }
+        });
 
         const cfgSaveBtn = document.getElementById('cfgSaveBtn');
         if (cfgSaveBtn) cfgSaveBtn.addEventListener('click', async () => {
@@ -4926,6 +5096,7 @@
       let usernameSuggestions = [];
       let usernameSuggestTimer = null;
       let usernameSuggestVisible = false;
+      let ignoreEligibility = false;
 
       function currentData() {
         const username = document.getElementById('f_username')?.value.trim() || '';
@@ -5163,7 +5334,7 @@
         }
         fieldErrors = {};
 
-        if (data.currency === 'ROBUX') {
+        if (data.currency === 'ROBUX' && !ignoreEligibility) {
           submitting = true; submitError = null; paint();
 
           let eligibility = [];
@@ -5216,6 +5387,9 @@
       }
 
       paint();
+      (async () => {
+        try { ignoreEligibility = await getIgnoreEligibility(); } catch (e) { }
+      })();
     }
   </script>
 </body>

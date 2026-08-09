@@ -231,6 +231,16 @@ async function getBaseAccessConfig() {
     };
 }
 
+async function getIgnoreEligibilityConfig() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('ignore_eligibility')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return !!(data && data.ignore_eligibility);
+}
+
 async function checkBaseAccess(robloxUserId) {
     const base = await getBaseAccessConfig();
     if (!base.groupId) return { allowed: true, base };
@@ -808,7 +818,10 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'get_payment_method_for_user') {
-        if (!requirePermission(res, session, 'dashboard.submit_request')) return;
+        if (!hasPermission(session, 'dashboard.submit_request') && !hasPermission(session, 'staff.view_database') && !hasPermission(session, 'staff.moderate')) {
+            res.status(403).json({ ok: false, error: 'missing_permission' });
+            return;
+        }
         const robloxUsername = payload.robloxUsername && String(payload.robloxUsername).trim();
         if (!robloxUsername) { res.status(400).json({ ok: false, error: 'missing_username' }); return; }
         const { data, error } = await supabase
@@ -818,6 +831,42 @@ app.post('/hr-data', async (req, res) => {
             .maybeSingle();
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true, data: data ? { method: data.method, details: data.details || {} } : null });
+        return;
+    }
+
+    if (action === 'admin_set_payment_method') {
+        // Lets staff manually put a payment method on file for someone else,
+        // e.g. when the person can't or hasn't added their own yet.
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+
+        const method = payload.method;
+        const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
+        const methodDef = PAYMENT_METHOD_TYPES[method];
+        if (!methodDef) { res.status(400).json({ ok: false, error: 'invalid_method' }); return; }
+        const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
+        if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
+
+        const cleanDetails = {};
+        methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim(); });
+
+        let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        if (!username) {
+            const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
+            if (lookupRes.ok) username = (await lookupRes.json()).name;
+        }
+
+        const { error } = await supabase.from('payment_methods').upsert({
+            roblox_user_id: robloxUserId,
+            roblox_username: username,
+            method,
+            details: cleanDetails,
+            updated_at: new Date().toISOString(),
+            set_by: session.roblox_username
+        }, { onConflict: 'roblox_user_id' });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
         return;
     }
 
@@ -898,8 +947,19 @@ app.post('/hr-data', async (req, res) => {
         try {
             const userId = await resolveRobloxUserId(robloxUsername);
             if (!userId) { res.status(404).json({ ok: false, error: 'roblox_user_not_found' }); return; }
-            const data = await computeGroupEligibility(userId);
-            res.json({ ok: true, data });
+            let data = await computeGroupEligibility(userId);
+
+            // When "Ignore Eligibility for All Requests" is enabled, requests can be
+            // submitted regardless of group membership, onboarding/ToS status, or
+            // payment method on file. The real underlying status stays in each entry
+            // (isMember/metaLabel) for transparency, but `eligible` is forced true so
+            // the submit flow does not block on it.
+            const ignoreEligibility = await getIgnoreEligibilityConfig();
+            if (ignoreEligibility) {
+                data = data.map(entry => ({ ...entry, eligible: true, overridden: true }));
+            }
+
+            res.json({ ok: true, data, ignoreEligibility });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'eligibility_check_failed' });
         }
@@ -959,6 +1019,27 @@ app.post('/hr-data', async (req, res) => {
         const { error } = await supabase
             .from('app_settings')
             .upsert({ id: 1, base_group_id: groupId, base_min_rank: minRank, updated_at: new Date().toISOString() });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_ignore_eligibility') {
+        try {
+            const ignoreEligibility = await getIgnoreEligibilityConfig();
+            res.json({ ok: true, data: { ignoreEligibility } });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load the eligibility override setting.' });
+        }
+        return;
+    }
+
+    if (action === 'save_ignore_eligibility') {
+        if (!requirePermission(res, session, 'settings.manage_groups')) return;
+        const ignoreEligibility = !!payload.ignoreEligibility;
+        const { error } = await supabase
+            .from('app_settings')
+            .upsert({ id: 1, ignore_eligibility: ignoreEligibility, updated_at: new Date().toISOString() });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;
