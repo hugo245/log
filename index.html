@@ -2121,6 +2121,14 @@
       return `&asymp; $${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD at DevEx`;
     }
 
+    function robuxEquivalentLabel(data) {
+      if (data.currency !== 'USD') return '';
+      const usd = Number(data.payment) || 0;
+      if (usd <= 0 || !DEVEX_RATE) return '';
+      const robux = usd / DEVEX_RATE;
+      return `Equal to ${Math.round(robux).toLocaleString()} Robux`;
+    }
+
     function esc(str) {
       return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
@@ -5620,6 +5628,7 @@
             </div>
           </div>
           <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
+          <div class="field" id="usdEquivSlot" style="margin-top:-10px;${robuxEquivalentLabel(currentData()) ? '' : 'display:none;'}"><span class="hint" style="margin-left:0;">${robuxEquivalentLabel(currentData())}</span></div>
           <div class="field"><label>Submitted by (you)</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
           <button class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
         </div>
@@ -5675,6 +5684,12 @@
       function updatePreview() {
         const slot = document.getElementById('previewSlot');
         if (slot) slot.innerHTML = renderInvoice(currentData());
+        const equivSlot = document.getElementById('usdEquivSlot');
+        if (equivSlot) {
+          const label = robuxEquivalentLabel(currentData());
+          equivSlot.style.display = label ? '' : 'none';
+          equivSlot.innerHTML = `<span class="hint" style="margin-left:0;">${label}</span>`;
+        }
       }
 
       function scheduleUsernameSuggest() {
