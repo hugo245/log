@@ -42,7 +42,8 @@ const PERMISSIONS = [
     'settings.manage_onboarding',
     'roles.manage',
     'staff.view_database',
-    'staff.moderate'
+    'staff.moderate',
+    'broadcasts.manage'
 ];
 
 const TOS_CONTENT = `Last updated: August 2026
@@ -239,6 +240,55 @@ async function getIgnoreEligibilityConfig() {
         .maybeSingle();
     if (error) throw error;
     return !!(data && data.ignore_eligibility);
+}
+
+async function getDevexRate() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('devex_rate')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return data && data.devex_rate != null ? Number(data.devex_rate) : 0;
+}
+
+// When someone sets their payout method to PayPal or Venmo, any of their
+// still-pending Robux requests can't actually be paid out that way, so we
+// convert them to a USD amount (using the current DevEx rate) automatically
+// instead of leaving them stuck in a currency that no longer matches how
+// they get paid. Requests that are already paid/rejected, or already in
+// USD, are left alone.
+async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, method) {
+    if (method !== 'PAYPAL' && method !== 'VENMO') return;
+    try {
+        let query = supabase
+            .from('payment_requests')
+            .select('id, payment, currency, status, paid')
+            .eq('currency', 'ROBUX')
+            .eq('paid', false);
+        if (robloxUserId != null) {
+            query = query.eq('roblox_user_id', robloxUserId);
+        } else if (robloxUsername) {
+            query = query.is('roblox_user_id', null).ilike('roblox_username', robloxUsername);
+        } else {
+            return;
+        }
+        const { data: rows, error } = await query;
+        if (error || !rows || !rows.length) return;
+
+        const pendingRows = rows.filter(r => (r.status || 'pending') === 'pending');
+        if (!pendingRows.length) return;
+
+        const rate = await getDevexRate();
+        if (!(rate > 0)) return;
+
+        await Promise.all(pendingRows.map(row => {
+            const usdAmount = Math.round((Number(row.payment) || 0) * rate * 100) / 100;
+            return supabase.from('payment_requests').update({ payment: usdAmount, currency: 'USD' }).eq('id', row.id);
+        }));
+    } catch (e) {
+        // Best-effort - if this fails, the payment method itself was still saved successfully.
+    }
 }
 
 async function checkBaseAccess(robloxUserId) {
@@ -815,6 +865,16 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'delete_request') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('payment_requests').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
     if (action === 'get_my_summary') {
         const [byId, byUsername] = await Promise.all([
             supabase.from('payment_requests').select('*').eq('roblox_user_id', session.roblox_user_id),
@@ -899,6 +959,7 @@ app.post('/hr-data', async (req, res) => {
             set_by: session.roblox_username
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        await convertPendingRobuxOnMethodChange(robloxUserId, username, method);
         res.json({ ok: true });
         return;
     }
@@ -922,6 +983,7 @@ app.post('/hr-data', async (req, res) => {
             updated_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        await convertPendingRobuxOnMethodChange(session.roblox_user_id, session.roblox_username, method);
         res.json({ ok: true });
         return;
     }
@@ -1527,6 +1589,75 @@ app.post('/hr-data', async (req, res) => {
         const { error } = await supabase.from('skillsets').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_broadcasts') {
+        if (!requirePermission(res, session, 'broadcasts.manage')) return;
+        const { data, error } = await supabase
+            .from('broadcasts')
+            .select('id, type, team_id, message, created_by, created_at, teams(name)')
+            .order('created_at', { ascending: false });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data || [] });
+        return;
+    }
+
+    if (action === 'create_broadcast') {
+        if (!requirePermission(res, session, 'broadcasts.manage')) return;
+        const type = payload.type === 'team' ? 'team' : payload.type === 'global' ? 'global' : null;
+        const message = payload.message ? String(payload.message).trim() : '';
+        if (!type) { res.status(400).json({ ok: false, error: 'invalid_type' }); return; }
+        if (!message) { res.status(400).json({ ok: false, error: 'missing_message' }); return; }
+        let teamId = null;
+        if (type === 'team') {
+            teamId = payload.teamId === '' || payload.teamId == null ? null : Number(payload.teamId);
+            if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team' }); return; }
+        }
+        const { error } = await supabase.from('broadcasts').insert({
+            type,
+            team_id: teamId,
+            message,
+            created_by: session.roblox_username,
+            created_at: new Date().toISOString()
+        });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_broadcast') {
+        if (!requirePermission(res, session, 'broadcasts.manage')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('broadcasts').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_my_broadcasts') {
+        try {
+            const { data: ua } = await supabase
+                .from('user_assignments')
+                .select('team_id')
+                .eq('roblox_user_id', session.roblox_user_id)
+                .maybeSingle();
+            const teamId = ua && ua.team_id != null ? ua.team_id : null;
+
+            const orParts = ["type.eq.global"];
+            if (teamId != null) orParts.push(`and(type.eq.team,team_id.eq.${teamId})`);
+
+            const { data, error } = await supabase
+                .from('broadcasts')
+                .select('id, type, team_id, message, created_by, created_at, teams(name)')
+                .or(orParts.join(','))
+                .order('created_at', { ascending: false });
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            res.json({ ok: true, data: data || [] });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load broadcasts.' });
+        }
         return;
     }
 

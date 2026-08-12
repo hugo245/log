@@ -2039,7 +2039,8 @@
       'settings.manage_onboarding': 'Manage teams, skillsets & invite links',
       'roles.manage': 'Manage roles and access',
       'staff.view_database': 'View staff database',
-      'staff.moderate': 'Warn and ban staff'
+      'staff.moderate': 'Warn and ban staff',
+      'broadcasts.manage': 'Send broadcasts'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
 
@@ -2414,6 +2415,10 @@
       await callHrData('reopen_request', { id });
     }
 
+    async function deleteRequest(id) {
+      await callHrData('delete_request', { id });
+    }
+
     async function saveRequest(data) {
       const json = await callHrData('submit_request', {
         robloxUsername: data.robloxUsername,
@@ -2585,6 +2590,21 @@
     }
     async function deleteSkillset(id) {
       await callHrData('delete_skillset', { id });
+    }
+
+    async function listBroadcasts() {
+      const json = await callHrData('list_broadcasts');
+      return json.data || [];
+    }
+    async function createBroadcast(broadcast) {
+      await callHrData('create_broadcast', broadcast);
+    }
+    async function deleteBroadcast(id) {
+      await callHrData('delete_broadcast', { id });
+    }
+    async function listMyBroadcasts() {
+      const json = await callHrData('list_my_broadcasts');
+      return json.data || [];
     }
 
     async function listOnboardingLinks() {
@@ -3040,7 +3060,7 @@
                 ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
                 ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
                 ${r.status !== 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
-                ${canExport ? `<button class="btn btn-ghost btn-sm" data-copy="${esc(r.id)}">Copy row</button>` : ''}
+                ${canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-delete-request="${esc(r.id)}">Delete Request</button>` : ''}
               </td>
             </tr>`;
         const cacheEntry = eligibilityCache[r.robloxUsername];
@@ -3117,12 +3137,6 @@
           paintTable();
         }));
 
-        document.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', (e) => {
-          const id = b.dataset.copy;
-          const r = allRequests.find(x => x.id === id);
-          if (r) copyText([TSV_HEADER, rowToTSV(r)].join('\n'), e.currentTarget, 'Copied!');
-        }));
-
         document.querySelectorAll('[data-check-elig]').forEach(b => b.addEventListener('click', async (e) => {
           const username = b.dataset.checkElig;
           eligibilityLoading.add(username);
@@ -3194,6 +3208,24 @@
             e.currentTarget.disabled = false;
             e.currentTarget.textContent = 'Reopen';
             alert('Could not save. Check your connection and try again.');
+          }
+        }));
+
+        document.querySelectorAll('[data-delete-request]').forEach(b => b.addEventListener('click', async (e) => {
+          const id = b.dataset.deleteRequest;
+          const r = allRequests.find(x => x.id === id);
+          if (!r) return;
+          if (!confirm('Permanently delete this payment request? This cannot be undone.')) return;
+          e.currentTarget.disabled = true;
+          e.currentTarget.textContent = 'Deleting...';
+          try {
+            await deleteRequest(id);
+            allRequests = allRequests.filter(x => x.id !== id);
+            paintShell();
+          } catch (err) {
+            e.currentTarget.disabled = false;
+            e.currentTarget.textContent = 'Delete Request';
+            alert('Could not delete that request. Check your connection and try again.');
           }
         }));
       }
@@ -3376,6 +3408,9 @@
       let warningsLoading = true;
       let warningsError = null;
 
+      let myBroadcasts = [];
+      let myBroadcastsLoading = true;
+
       function paint() {
         const totals = (summary && summary.totals) || {};
         const pendingRequests = summary ? summary.requests.filter(r => r.status === 'pending') : [];
@@ -3390,6 +3425,18 @@
         <h1>My payments</h1>
         <p class="sub">What you're owed, how you get paid, and whether you meet the payout requirements. A producer logs requests for you, so there's nothing to submit yourself.</p>
       </div>
+
+      ${!myBroadcastsLoading && myBroadcasts.length > 0 ? `
+      <div style="margin-bottom:24px;display:flex;flex-direction:column;gap:10px;">
+        ${myBroadcasts.map(b => `
+          <div class="confirm-box">
+            <div class="icon">&#128226;</div>
+            <div class="txt">
+              <strong>${b.type === 'global' ? 'Announcement' : `Team announcement${(b.teams && b.teams.name) ? ' &middot; ' + esc(b.teams.name) : ''}`}</strong>
+              <span>${esc(b.message)}</span>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
 
       ${loading ? `<div class="dash-loading">Loading your payment info...</div>` : loadError ? `
         <div class="error-box"><span>${esc(loadError)}</span></div>
@@ -3581,11 +3628,24 @@
         paint();
       }
 
+      async function loadMyBroadcastsData() {
+        myBroadcastsLoading = true; paint();
+        try {
+          myBroadcasts = await listMyBroadcasts();
+        } catch (err) {
+          myBroadcasts = [];
+        }
+        if (myGen !== renderGen) return;
+        myBroadcastsLoading = false;
+        paint();
+      }
+
       paint();
       loadSummary();
       loadMethod();
       loadEligibility();
       loadWarnings();
+      loadMyBroadcastsData();
     }
 
     function renderManagePanel() {
@@ -3596,14 +3656,16 @@
       const canManageBaseAccess = hasPermission('settings.manage_base_access');
       const canManageRoles = hasPermission('roles.manage');
       const canManageOnboarding = hasPermission('settings.manage_onboarding');
+      const canManageBroadcasts = hasPermission('broadcasts.manage');
 
-      if (!canManageGames && !canManageRate && !canManageGroups && !canManageBaseAccess && !canManageRoles && !canManageOnboarding) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+      if (!canManageGames && !canManageRate && !canManageGroups && !canManageBaseAccess && !canManageRoles && !canManageOnboarding && !canManageBroadcasts) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
 
       const manageTabDefs = [
         { id: 'access', label: 'Access', enabled: canManageBaseAccess || canManageGroups },
         { id: 'games', label: 'Games & rate', enabled: canManageGames || canManageRate },
         { id: 'roles', label: 'Roles', enabled: canManageRoles },
-        { id: 'onboarding', label: 'Onboarding', enabled: canManageOnboarding }
+        { id: 'onboarding', label: 'Onboarding', enabled: canManageOnboarding },
+        { id: 'broadcasts', label: 'Broadcasts', enabled: canManageBroadcasts }
       ].filter(t => t.enabled);
       let manageTab = manageTabDefs.length ? manageTabDefs[0].id : null;
 
@@ -3657,6 +3719,14 @@
       let addingLink = false;
       let addLinkError = null;
       let lastCreatedLink = null;
+
+      let broadcasts = [];
+      let broadcastTeams = [];
+      let broadcastsLoading = canManageBroadcasts;
+      let broadcastsError = null;
+      let addingBroadcast = false;
+      let addBroadcastError = null;
+      let newBroadcastType = 'global';
 
       function paint() {
         app.innerHTML = `
@@ -3802,7 +3872,7 @@
                   <div class="role-meta">${r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
                 <div style="display:flex;gap:6px;">
-                  <button class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
+                  <button class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}">${isEditing ? 'Close' : 'Edit'}</button>
                   <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
                 </div>
               </div>
@@ -4027,6 +4097,65 @@
           <button class="btn btn-primary" id="createLinkBtn" ${addingLink ? 'disabled' : ''}>${addingLink ? 'Creating...' : 'Create link'}</button>
         </div>
       </div>` : ''}
+
+      ${manageTab === 'broadcasts' && canManageBroadcasts ? `
+      <div class="heading-block">
+        <span class="eyebrow">Announcements</span>
+        <h1>Broadcasts</h1>
+        <p class="sub">Send a message to everyone (global) or to just one team. Broadcasts show up at the top of everyone's "My payments" tab.</p>
+      </div>
+
+      <div class="panel" style="max-width:640px;">
+        ${addBroadcastError ? `<div class="error-box"><span>${esc(addBroadcastError)}</span></div>` : ''}
+        <div class="field">
+          <label>Audience</label>
+          <div class="row2">
+            <label class="method-option ${newBroadcastType === 'global' ? 'active' : ''}">
+              <input type="radio" name="broadcastType" value="global" ${newBroadcastType === 'global' ? 'checked' : ''}>
+              <div>
+                <div class="mo-label">Global</div>
+                <div class="mo-sub">Everyone sees this</div>
+              </div>
+            </label>
+            <label class="method-option ${newBroadcastType === 'team' ? 'active' : ''}">
+              <input type="radio" name="broadcastType" value="team" ${newBroadcastType === 'team' ? 'checked' : ''}>
+              <div>
+                <div class="mo-label">Team only</div>
+                <div class="mo-sub">Just one team</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        ${newBroadcastType === 'team' ? `
+        <div class="field">
+          <label>Team</label>
+          <select id="newBroadcastTeam">
+            <option value="">${broadcastTeams.length === 0 ? 'No teams available' : 'Select a team'}</option>
+            ${broadcastTeams.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        <div class="field"><label>Message</label><textarea id="newBroadcastMessage" placeholder="What do you want people to see?"></textarea></div>
+        <button class="btn btn-ok" id="addBroadcastBtn" ${addingBroadcast ? 'disabled' : ''}>${addingBroadcast ? 'Sending...' : 'Send broadcast'}</button>
+      </div>
+
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">History</span>
+        <h1>Sent broadcasts</h1>
+      </div>
+      <div class="panel" style="max-width:640px;">
+        ${broadcastsError ? `<div class="error-box"><span>${esc(broadcastsError)}</span></div>` : ''}
+        ${broadcastsLoading ? `<div class="dash-loading">Loading broadcasts...</div>` : broadcasts.length === 0 ? `<div class="empty-note">No broadcasts sent yet.</div>` : broadcasts.map(b => `
+          <div class="role-row">
+            <div class="role-row-top">
+              <div>
+                <div class="role-meta">${b.type === 'global' ? 'Global' : `Team &middot; ${esc((b.teams && b.teams.name) || 'Unknown team')}`} &middot; ${esc(b.created_by || 'Unknown')} &middot; ${esc(fmtDate(b.created_at || Date.now()))}</div>
+                <div style="margin-top:4px;">${esc(b.message)}</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" data-del-broadcast="${esc(b.id)}">Remove</button>
+            </div>
+          </div>`).join('')}
+      </div>
+      ` : ''}
     </div>`;
 
         wireTopbarSignOut();
@@ -4362,6 +4491,43 @@
             }
           });
         }
+
+        if (canManageBroadcasts) {
+          document.querySelectorAll('input[name="broadcastType"]').forEach(el => el.addEventListener('change', () => {
+            newBroadcastType = el.value;
+            paint();
+          }));
+
+          const addBroadcastBtn = document.getElementById('addBroadcastBtn');
+          if (addBroadcastBtn) addBroadcastBtn.addEventListener('click', async () => {
+            const message = document.getElementById('newBroadcastMessage').value.trim();
+            const teamSelect = document.getElementById('newBroadcastTeam');
+            const teamId = teamSelect ? teamSelect.value : '';
+            if (!message) { addBroadcastError = 'Enter a message.'; paint(); return; }
+            if (newBroadcastType === 'team' && !teamId) { addBroadcastError = 'Pick a team.'; paint(); return; }
+            addingBroadcast = true; addBroadcastError = null; paint();
+            try {
+              await createBroadcast({ type: newBroadcastType, teamId: newBroadcastType === 'team' ? teamId : null, message });
+              addingBroadcast = false;
+              await loadBroadcastsData();
+            } catch (err) {
+              addingBroadcast = false;
+              addBroadcastError = (err && err.message) ? err.message : 'Could not send that broadcast.';
+              paint();
+            }
+          });
+
+          document.querySelectorAll('[data-del-broadcast]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delBroadcast;
+            if (!confirm('Remove this broadcast? It will disappear from everyone\'s "My payments" tab.')) return;
+            try {
+              await deleteBroadcast(id);
+              await loadBroadcastsData();
+            } catch (err) {
+              alert('Could not remove that broadcast. Check your connection and try again.');
+            }
+          }));
+        }
       }
 
       async function loadGroups() {
@@ -4447,6 +4613,20 @@
         paint();
       }
 
+      async function loadBroadcastsData() {
+        broadcastsLoading = true; broadcastsError = null; paint();
+        try {
+          const [broadcastsData, teamsData] = await Promise.all([listBroadcasts(), listTeams()]);
+          broadcasts = broadcastsData;
+          broadcastTeams = teamsData;
+        } catch (err) {
+          broadcastsError = (err && err.message) ? err.message : 'Could not load broadcasts.';
+        }
+        if (myGen !== renderGen) return;
+        broadcastsLoading = false;
+        paint();
+      }
+
       paint();
       if (canManageGroups) { loadGroups(); loadIgnoreEligibility(); }
       if (canManageBaseAccess) loadBaseAccess();
@@ -4456,6 +4636,7 @@
         loadRoles();
       }
       if (canManageOnboarding) loadTeamsData();
+      if (canManageBroadcasts) loadBroadcastsData();
     }
 
     function renderPolicyPage(type) {
