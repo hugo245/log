@@ -1124,18 +1124,22 @@ app.post('/hr-data', async (req, res) => {
         if (!existingRole) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
         // Can't edit a role that's already at or above your own level...
         if (!requireHigherHierarchy(res, session, existingRole.hierarchy)) return;
+        const name = payload.name != null ? String(payload.name).trim() : null;
+        if (payload.name != null && !name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
         const robloxGroupId = payload.robloxGroupId === '' || payload.robloxGroupId == null ? null : Number(payload.robloxGroupId);
         const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
         const hierarchy = payload.hierarchy === '' || payload.hierarchy == null ? 0 : Number(payload.hierarchy);
         // ...and can't promote it to or above your own level either.
         if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
-        const { error } = await supabase.from('roles').update({
+        const update = {
             roblox_group_id: robloxGroupId,
             min_rank: minRank,
             hierarchy,
             permissions
-        }).eq('id', id);
+        };
+        if (name) update.name = name;
+        const { error } = await supabase.from('roles').update(update).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;
@@ -1664,6 +1668,17 @@ app.post('/hr-data', async (req, res) => {
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_my_warnings') {
+        const { data, error } = await supabase
+            .from('staff_warnings')
+            .select('*')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .order('created_at', { ascending: false });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data || [] });
         return;
     }
 

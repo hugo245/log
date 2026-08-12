@@ -1653,6 +1653,126 @@
       }
     }
 
+    @media (max-width:640px) {
+      .topbar {
+        padding: 12px 14px;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .brand {
+        font-size: 13px;
+      }
+
+      .brand small {
+        display: none;
+      }
+
+      .topbar-right {
+        flex-wrap: wrap;
+        gap: 6px;
+        width: 100%;
+      }
+
+      .hr-pill {
+        font-size: 12px;
+        padding: 7px 10px;
+      }
+
+      .shell {
+        padding: 24px 14px 60px;
+      }
+
+      .dash-shell {
+        padding: 20px 14px 60px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      .sub {
+        max-width: none;
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .row2,
+      .row3 {
+        grid-template-columns: 1fr;
+      }
+
+      .dash-head {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .dash-toolbar {
+        width: 100%;
+      }
+
+      .dash-toolbar .btn,
+      .dash-toolbar a {
+        flex: 1 1 auto;
+      }
+
+      .tabs {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      .filter-bar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .filter-select-group {
+        width: 100%;
+      }
+
+      .filter-select {
+        flex: 1 1 auto;
+      }
+
+      .perm-check-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .owed-hero .owed-amounts {
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .role-row-top {
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .modal-scrim {
+        padding: 12px;
+      }
+
+      .modal-stat-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .acct-menu-list {
+        min-width: 150px;
+      }
+
+      .invoice-top,
+      .parties,
+      .task-block,
+      .stat-grid,
+      .items-block,
+      .total-row {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+    }
+
     .stat-strip .strip-card {
       background: var(--surface);
       border: 1px solid var(--line);
@@ -2318,6 +2438,11 @@
 
     async function loadStaffDatabase() {
       const json = await callHrData('list_staff_database');
+      return json.data || [];
+    }
+
+    async function loadMyWarnings() {
+      const json = await callHrData('get_my_warnings');
       return json.data || [];
     }
 
@@ -3247,6 +3372,10 @@
       let eligibilityLoading = true;
       let eligibilityError = null;
 
+      let warnings = [];
+      let warningsLoading = true;
+      let warningsError = null;
+
       function paint() {
         const totals = (summary && summary.totals) || {};
         const pendingRequests = summary ? summary.requests.filter(r => r.status === 'pending') : [];
@@ -3318,6 +3447,23 @@
             <button class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
           `}
         </div>
+      </div>
+
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">Moderation</span>
+        <h1>Warnings received</h1>
+      </div>
+      <div class="panel">
+        ${warningsError ? `<div class="error-box"><span>${esc(warningsError)}</span></div>` : ''}
+        ${warningsLoading ? `<div class="dash-loading">Loading your warnings...</div>` : warnings.length === 0 ? `<div class="empty-note">No warnings on file for you.</div>` : warnings.map(w => `
+          <div class="role-row">
+            <div class="role-row-top">
+              <div>
+                <strong>${esc(w.reason || 'No reason given')}</strong>
+                <div class="role-meta">Warned by ${esc(w.warned_by || 'Unknown')} on ${esc(fmtDate(w.created_at || Date.now()))}</div>
+              </div>
+            </div>
+          </div>`).join('')}
       </div>
 
       ${!loading && !loadError ? `
@@ -3423,10 +3569,23 @@
         paint();
       }
 
+      async function loadWarnings() {
+        warningsLoading = true; warningsError = null; paint();
+        try {
+          warnings = await loadMyWarnings();
+        } catch (err) {
+          warningsError = (err && err.message) ? err.message : 'Could not load your warnings.';
+        }
+        if (myGen !== renderGen) return;
+        warningsLoading = false;
+        paint();
+      }
+
       paint();
       loadSummary();
       loadMethod();
       loadEligibility();
+      loadWarnings();
     }
 
     function renderManagePanel() {
@@ -3479,6 +3638,9 @@
       let addRoleError = null;
       let addingAssignment = false;
       let addAssignmentError = null;
+      let editingRoleId = null;
+      let savingRoleEdit = false;
+      let editRoleError = null;
 
       let teams = [];
       let skillsets = [];
@@ -3489,8 +3651,9 @@
       let addTeamError = null;
       let addingSkillset = false;
       let addSkillsetError = null;
-      let editingTeamSkillsetsId = null;
-      let savingTeamSkillsets = false;
+      let editingTeamId = null;
+      let savingTeamEdit = false;
+      let editTeamError = null;
       let addingLink = false;
       let addLinkError = null;
       let lastCreatedLink = null;
@@ -3630,6 +3793,7 @@
           ${rolesLoading ? `<div class="dash-loading">Loading roles...</div>` : roles.length === 0 ? `<div class="empty-note">No roles yet. Create the first one below.</div>` : roles.map(r => {
                   const roleHierarchy = Number(r.hierarchy) || 0;
                   const canManageThisRole = roleHierarchy < hrMaxHierarchy;
+                  const isEditing = editingRoleId === r.id;
                   return `
             <div class="role-row">
               <div class="role-row-top">
@@ -3637,11 +3801,32 @@
                   <strong>${esc(r.name)}</strong>
                   <div class="role-meta">${r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
-                <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
+                <div style="display:flex;gap:6px;">
+                  <button class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
+                  <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
+                </div>
               </div>
               <div class="perm-chip-wrap">
                 ${(r.permissions || []).length ? r.permissions.map(p => `<span class="perm-chip">${esc(PERMISSION_LABELS[p] || p)}</span>`).join('') : `<span class="empty-note">No permissions granted</span>`}
               </div>
+              ${isEditing ? `
+              <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
+                ${editRoleError ? `<div class="error-box"><span>${esc(editRoleError)}</span></div>` : ''}
+                <div class="field"><label>Role name</label><input type="text" class="editRoleName" data-role-id="${esc(r.id)}" value="${esc(r.name)}"></div>
+                <div class="row2">
+                  <div class="field"><label>Roblox group ID <span class="hint">(optional)</span></label><input type="number" class="editRoleGroupId" data-role-id="${esc(r.id)}" value="${r.roblox_group_id != null ? esc(r.roblox_group_id) : ''}"></div>
+                  <div class="field"><label>Minimum rank <span class="hint">(optional)</span></label><input type="number" class="editRoleMinRank" data-role-id="${esc(r.id)}" min="0" max="255" value="${r.min_rank != null ? esc(r.min_rank) : ''}"></div>
+                </div>
+                <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" class="editRoleHierarchy" data-role-id="${esc(r.id)}" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}" value="${esc(roleHierarchy)}"></div>
+                <div class="field">
+                  <label>Permissions</label>
+                  <div class="perm-check-grid">
+                    ${ALL_PERMISSIONS.map(p => `
+                      <label class="perm-check-item"><input type="checkbox" class="editRolePerm" data-role-id="${esc(r.id)}" value="${p}" ${(r.permissions || []).includes(p) ? 'checked' : ''}> ${esc(PERMISSION_LABELS[p])}</label>`).join('')}
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" data-save-role="${esc(r.id)}" ${savingRoleEdit ? 'disabled' : ''}>${savingRoleEdit ? 'Saving...' : 'Save role'}</button>
+              </div>` : ''}
             </div>`;
                 }).join('')}
 
@@ -3707,7 +3892,7 @@
           ${teamsError ? `<div class="error-box"><span>${esc(teamsError)}</span></div>` : ''}
           ${teamsLoading ? `<div class="dash-loading">Loading teams...</div>` : teams.length === 0 ? `<div class="empty-note">No teams yet. Add the first one below.</div>` : teams.map(t => {
                   const teamSkillsets = skillsets.filter(s => (t.skillsetIds || []).includes(s.id));
-                  const isEditing = editingTeamSkillsetsId === t.id;
+                  const isEditing = editingTeamId === t.id;
                   return `
           <div class="role-row">
             <div class="role-row-top">
@@ -3716,7 +3901,7 @@
                 <div class="role-meta">${t.discord_url ? 'Discord linked' : 'No Discord linked'}${t.roblox_group_url ? ' &middot; Roblox group linked' : ''}</div>
               </div>
               <div style="display:flex;gap:6px;">
-                <button class="btn btn-ghost btn-sm" data-edit-team-skillsets="${esc(t.id)}">${isEditing ? 'Close' : 'Edit skillsets'}</button>
+                <button class="btn btn-ghost btn-sm" data-edit-team="${esc(t.id)}">${isEditing ? 'Close' : 'Edit'}</button>
                 <button class="btn btn-ghost btn-sm" data-del-team="${esc(t.id)}">Remove</button>
               </div>
             </div>
@@ -3725,10 +3910,21 @@
             </div>
             ${isEditing ? `
             <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
-              <div class="perm-check-grid">
-                ${skillsets.length ? skillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="editTeamSkillset" value="${esc(s.id)}" ${(t.skillsetIds || []).includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') : `<span class="empty-note">No skillsets created yet.</span>`}
+              ${editTeamError ? `<div class="error-box"><span>${esc(editTeamError)}</span></div>` : ''}
+              <div class="row2">
+                <div class="field"><label>Team name</label><input type="text" class="editTeamName" data-team-id="${esc(t.id)}" value="${esc(t.name)}"></div>
+                <div class="field"><label>Color <span class="hint">(optional, hex)</span></label><input type="text" class="editTeamColor" data-team-id="${esc(t.id)}" value="${esc(t.color || '')}"></div>
               </div>
-              <button class="btn btn-primary btn-sm" style="margin-top:10px;" data-save-team-skillsets="${esc(t.id)}" ${savingTeamSkillsets ? 'disabled' : ''}>${savingTeamSkillsets ? 'Saving...' : 'Save skillsets'}</button>
+              <div class="field"><label>Discord invite URL</label><input type="text" class="editTeamDiscord" data-team-id="${esc(t.id)}" value="${esc(t.discord_url || '')}"></div>
+              <div class="field"><label>Roblox group URL</label><input type="text" class="editTeamGroupUrl" data-team-id="${esc(t.id)}" value="${esc(t.roblox_group_url || '')}"></div>
+              <div class="field"><label>Custom info <span class="hint">(shown to them during onboarding)</span></label><textarea class="editTeamInfo" data-team-id="${esc(t.id)}">${esc(t.info || '')}</textarea></div>
+              <div class="field">
+                <label>Skillsets on this team</label>
+                <div class="perm-check-grid">
+                  ${skillsets.length ? skillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="editTeamSkillset" data-team-id="${esc(t.id)}" value="${esc(s.id)}" ${(t.skillsetIds || []).includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') : `<span class="empty-note">No skillsets created yet.</span>`}
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm" data-save-team="${esc(t.id)}" ${savingTeamEdit ? 'disabled' : ''}>${savingTeamEdit ? 'Saving...' : 'Save team'}</button>
             </div>` : ''}
           </div>`;
                 }).join('')}
@@ -3984,6 +4180,35 @@
             }
           }));
 
+          document.querySelectorAll('[data-edit-role]').forEach(el => el.addEventListener('click', () => {
+            const id = Number(el.dataset.editRole);
+            editingRoleId = editingRoleId === id ? null : id;
+            editRoleError = null;
+            paint();
+          }));
+
+          document.querySelectorAll('[data-save-role]').forEach(el => el.addEventListener('click', async () => {
+            const id = Number(el.dataset.saveRole);
+            const name = document.querySelector(`.editRoleName[data-role-id="${id}"]`).value.trim();
+            const groupId = document.querySelector(`.editRoleGroupId[data-role-id="${id}"]`).value;
+            const minRank = document.querySelector(`.editRoleMinRank[data-role-id="${id}"]`).value;
+            const hierarchy = document.querySelector(`.editRoleHierarchy[data-role-id="${id}"]`).value;
+            const permissions = Array.from(document.querySelectorAll(`.editRolePerm[data-role-id="${id}"]:checked`)).map(x => x.value);
+            if (!name) { editRoleError = 'Enter a role name.'; paint(); return; }
+            if (hierarchy !== '' && Number(hierarchy) >= hrMaxHierarchy) { editRoleError = 'Hierarchy level must be lower than your own.'; paint(); return; }
+            savingRoleEdit = true; editRoleError = null; paint();
+            try {
+              await updateRole(id, { name, robloxGroupId: groupId, minRank, hierarchy, permissions });
+              savingRoleEdit = false;
+              editingRoleId = null;
+              await loadRoles();
+            } catch (err) {
+              savingRoleEdit = false;
+              editRoleError = (err && err.message) ? err.message : 'Could not save that role.';
+              paint();
+            }
+          }));
+
           const addAssignmentBtn = document.getElementById('addAssignmentBtn');
           if (addAssignmentBtn) addAssignmentBtn.addEventListener('click', async () => {
             const userId = document.getElementById('newAssignmentUserId').value;
@@ -4034,24 +4259,31 @@
             }
           });
 
-          document.querySelectorAll('[data-edit-team-skillsets]').forEach(el => el.addEventListener('click', () => {
-            const id = Number(el.dataset.editTeamSkillsets);
-            editingTeamSkillsetsId = editingTeamSkillsetsId === id ? null : id;
+          document.querySelectorAll('[data-edit-team]').forEach(el => el.addEventListener('click', () => {
+            const id = Number(el.dataset.editTeam);
+            editingTeamId = editingTeamId === id ? null : id;
+            editTeamError = null;
             paint();
           }));
 
-          document.querySelectorAll('[data-save-team-skillsets]').forEach(el => el.addEventListener('click', async () => {
-            const id = Number(el.dataset.saveTeamSkillsets);
-            const skillsetIds = Array.from(document.querySelectorAll('.editTeamSkillset:checked')).map(x => Number(x.value));
-            savingTeamSkillsets = true; paint();
+          document.querySelectorAll('[data-save-team]').forEach(el => el.addEventListener('click', async () => {
+            const id = Number(el.dataset.saveTeam);
+            const name = document.querySelector(`.editTeamName[data-team-id="${id}"]`).value.trim();
+            const color = document.querySelector(`.editTeamColor[data-team-id="${id}"]`).value.trim();
+            const discordUrl = document.querySelector(`.editTeamDiscord[data-team-id="${id}"]`).value.trim();
+            const robloxGroupUrl = document.querySelector(`.editTeamGroupUrl[data-team-id="${id}"]`).value.trim();
+            const info = document.querySelector(`.editTeamInfo[data-team-id="${id}"]`).value;
+            const skillsetIds = Array.from(document.querySelectorAll(`.editTeamSkillset[data-team-id="${id}"]:checked`)).map(x => Number(x.value));
+            if (!name) { editTeamError = 'Enter a team name.'; paint(); return; }
+            savingTeamEdit = true; editTeamError = null; paint();
             try {
-              await updateTeam(id, { skillsetIds });
-              savingTeamSkillsets = false;
-              editingTeamSkillsetsId = null;
+              await updateTeam(id, { name, color, discordUrl, robloxGroupUrl, info, skillsetIds });
+              savingTeamEdit = false;
+              editingTeamId = null;
               await loadTeamsData();
             } catch (err) {
-              savingTeamSkillsets = false;
-              alert('Could not save skillsets for that team. Check your connection and try again.');
+              savingTeamEdit = false;
+              editTeamError = (err && err.message) ? err.message : 'Could not save that team.';
               paint();
             }
           }));
@@ -5118,6 +5350,7 @@
       let usernameSuggestTimer = null;
       let usernameSuggestVisible = false;
       let ignoreEligibility = false;
+      let currencyTouched = false;
 
       function currentData() {
         const username = document.getElementById('f_username')?.value.trim() || '';
@@ -5227,6 +5460,9 @@
           el.addEventListener('change', updatePreview);
         });
 
+        const currencySelect = document.getElementById('f_currency');
+        if (currencySelect) currencySelect.addEventListener('change', () => { currencyTouched = true; });
+
         const usernameInput = document.getElementById('f_username');
         if (usernameInput) {
           usernameInput.addEventListener('input', () => {
@@ -5250,7 +5486,7 @@
         const anotherBtn = document.getElementById('anotherBtn');
         if (anotherBtn) anotherBtn.addEventListener('click', () => {
           submitted = false; submitError = null; fieldErrors = {};
-          targetMethod = null; targetMethodLoaded = false; lastLookedUpUsername = '';
+          targetMethod = null; targetMethodLoaded = false; lastLookedUpUsername = ''; currencyTouched = false;
           paint();
         });
       }
@@ -5327,6 +5563,14 @@
         }
         targetMethodLoading = false;
         targetMethodLoaded = true;
+        if (targetMethod && !currencyTouched) {
+          const suggestedCurrency = targetMethod.method === 'DEVEX_ROBUX' ? 'ROBUX' : 'USD';
+          const currencySelect = document.getElementById('f_currency');
+          if (currencySelect && currencySelect.value !== suggestedCurrency) {
+            currencySelect.value = suggestedCurrency;
+            updatePreview();
+          }
+        }
         renderMethodWarning();
       }
 
@@ -5382,18 +5626,6 @@
             return;
           }
 
-          const beenInLongEnough = confirm('Has the developer been in all required groups for over 2 weeks?');
-          if (!beenInLongEnough) {
-            const proceedAnyway = confirm(
-              'HR may reject this if they haven\'t been in the group(s) for 2 weeks yet.\n\n' +
-              'Submit anyway?'
-            );
-            if (!proceedAnyway) {
-              submitting = false;
-              paint();
-              return;
-            }
-          }
         }
 
         submitting = true; submitError = null; paint();
