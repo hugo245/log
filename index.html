@@ -3881,7 +3881,7 @@
               <div class="role-row-top">
                 <div>
                   <strong>${esc(r.name)}</strong>
-                  <div class="role-meta">${r.link_only ? `Link only${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)} required` : ''}` : r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
+                  <div class="role-meta">${r.link_only ? `Link only${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ''}` : r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
                 <div style="display:flex;gap:6px;">
                   <button class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
@@ -3897,12 +3897,12 @@
                 <div class="field"><label>Role name</label><input type="text" class="editRoleName" data-role-id="${esc(r.id)}" value="${esc(r.name)}"></div>
                 <div class="row2">
                   <div class="field"><label>Roblox group ID <span class="hint">(optional)</span></label><input type="number" class="editRoleGroupId" data-role-id="${esc(r.id)}" value="${r.roblox_group_id != null ? esc(r.roblox_group_id) : ''}"></div>
-                  <div class="field"><label>Minimum rank <span class="hint">(optional)</span></label><input type="number" class="editRoleMinRank" data-role-id="${esc(r.id)}" min="0" max="255" value="${r.min_rank != null ? esc(r.min_rank) : ''}"></div>
+                  <div class="field"><label>Rank <span class="hint">(optional, must match exactly)</span></label><input type="number" class="editRoleMinRank" data-role-id="${esc(r.id)}" min="0" max="255" value="${r.min_rank != null ? esc(r.min_rank) : ''}"></div>
                 </div>
                 <div class="field">
-                  <label class="perm-check-item link-only-item" title="If on, this role is never handed out just from meeting the group and rank above. It only gets given through an onboarding link. Minimum rank above still applies at that point as a safeguard, so the link can only grant the role to someone who actually meets it.">
+                  <label class="perm-check-item link-only-item" title="If on, this role is never handed out just from meeting the group and rank above. It only gets given through an onboarding link. Rank above still applies at that point as a safeguard, so the link can only grant the role to someone who is at that exact rank.">
                     <input type="checkbox" class="editRoleLinkOnly" data-role-id="${esc(r.id)}" ${r.link_only ? 'checked' : ''}>
-                    Link only <span class="hint">(only given via onboarding link, minimum rank above becomes a safeguard on that link)</span>
+                    Link only <span class="hint">(only given via onboarding link, rank above becomes a safeguard on that link)</span>
                   </label>
                 </div>
                 <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" class="editRoleHierarchy" data-role-id="${esc(r.id)}" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}" value="${esc(roleHierarchy)}"></div>
@@ -3924,12 +3924,12 @@
             <div class="field"><label>Role name</label><input type="text" id="newRoleName" placeholder="e.g. Producer"></div>
             <div class="row2">
               <div class="field"><label>Roblox group ID <span class="hint">(optional)</span></label><input type="number" id="newRoleGroupId" placeholder="e.g. 123456"></div>
-              <div class="field"><label>Minimum rank <span class="hint">(optional)</span></label><input type="number" id="newRoleMinRank" placeholder="e.g. 100" min="0" max="255"></div>
+              <div class="field"><label>Rank <span class="hint">(optional, must match exactly)</span></label><input type="number" id="newRoleMinRank" placeholder="e.g. 100" min="0" max="255"></div>
             </div>
             <div class="field">
-              <label class="perm-check-item link-only-item" title="If on, this role is never handed out just from meeting the group and rank above. It only gets given through an onboarding link. Minimum rank above still applies at that point as a safeguard, so the link can only grant the role to someone who actually meets it.">
+              <label class="perm-check-item link-only-item" title="If on, this role is never handed out just from meeting the group and rank above. It only gets given through an onboarding link. Rank above still applies at that point as a safeguard, so the link can only grant the role to someone who is at that exact rank.">
                 <input type="checkbox" id="newRoleLinkOnly">
-                Link only <span class="hint">(only given via onboarding link, minimum rank above becomes a safeguard on that link)</span>
+                Link only <span class="hint">(only given via onboarding link, rank above becomes a safeguard on that link)</span>
               </label>
             </div>
             <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" id="newRoleHierarchy" placeholder="e.g. 10" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}"></div>

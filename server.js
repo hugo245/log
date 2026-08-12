@@ -399,7 +399,7 @@ async function computeAccess(robloxUserId) {
             const rank = rankByGroupId[role.roblox_group_id];
             if (rank == null) return false;
             if (role.min_rank == null) return true;
-            return rank >= role.min_rank;
+            return rank === role.min_rank;
         }
         return false;
     });
@@ -520,15 +520,15 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
         const { data: role, error: roleErr } = await supabase.from('roles').select('*').eq('id', link.role_id).maybeSingle();
         if (roleErr) throw roleErr;
         // For a link-only role, min_rank is a safeguard on the link itself:
-        // the person still has to actually meet the rank before the link
-        // can hand out the role. It never grants the role on its own at
-        // login, only here at claim time.
+        // the person still has to actually be at that exact rank before the
+        // link can hand out the role. It never grants the role on its own
+        // at login, only here at claim time, and only on an exact match.
         let meetsRankSafeguard = true;
         if (role && role.link_only && role.min_rank != null && role.roblox_group_id != null) {
             const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
             const membership = groupRoles.find(g => g.group && g.group.id === role.roblox_group_id);
             const rank = membership ? membership.role.rank : null;
-            meetsRankSafeguard = rank != null && rank >= role.min_rank;
+            meetsRankSafeguard = rank != null && rank === role.min_rank;
         }
         if (role && meetsRankSafeguard) {
             const { error: roleAssignErr } = await supabase.from('user_role_assignments').insert({
