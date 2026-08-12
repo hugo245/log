@@ -1939,6 +1939,26 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'remove_user_warning') {
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const warningId = payload.warningId;
+        if (!warningId) { res.status(400).json({ ok: false, error: 'missing_warning_id' }); return; }
+        const { data: warning, error: warningErr } = await supabase
+            .from('staff_warnings')
+            .select('roblox_user_id')
+            .eq('id', warningId)
+            .maybeSingle();
+        if (warningErr) { res.status(500).json({ ok: false, error: warningErr.message }); return; }
+        if (!warning) { res.status(404).json({ ok: false, error: 'warning_not_found' }); return; }
+        const targetHierarchy = await getUserHierarchy(warning.roblox_user_id);
+        if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
+        const { error } = await supabase.from('staff_warnings').delete().eq('id', warningId);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const count = await getWarnCount(warning.roblox_user_id);
+        res.json({ ok: true, warnCount: count });
+        return;
+    }
+
     if (action === 'unban_user') {
         if (!requirePermission(res, session, 'staff.moderate')) return;
         const robloxUserId = Number(payload.robloxUserId);

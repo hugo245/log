@@ -2634,6 +2634,10 @@
       const json = await callHrData('add_user_warning', { robloxUserId, robloxUsername, reason });
       return json;
     }
+    async function removeUserWarning(warningId) {
+      const json = await callHrData('remove_user_warning', { warningId });
+      return json;
+    }
     async function unbanUser(robloxUserId) {
       await callHrData('unban_user', { robloxUserId });
     }
@@ -5119,7 +5123,8 @@
             ${warnings.length === 0 ? `<div class="hint">No warnings on record.</div>` : warnings.map(w => `
               <div class="modal-info-row">
                 <span class="label">${esc(fmtDate(w.created_at))}${w.warned_by ? ' by ' + esc(w.warned_by) : ''}</span>
-                <span class="value" style="max-width:60%;text-align:right;">${esc(w.reason || '')}</span>
+                <span class="value" style="max-width:52%;text-align:right;">${esc(w.reason || '')}</span>
+                <button class="btn btn-ghost btn-sm remove-warn-btn" data-warning-id="${esc(w.id)}" ${warnBusy || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>Remove</button>
               </div>
             `).join('')}
           </div>
@@ -5430,6 +5435,27 @@
             warnError = (err && err.message) ? err.message : 'Could not lift the ban.';
             paintModal();
           }
+        });
+
+        document.querySelectorAll('.remove-warn-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const warningId = btn.dataset.warningId;
+            if (!confirm('Remove this warning? This cannot be undone.')) return;
+            warnBusy = true; warnError = null; paintModal();
+            try {
+              const res = await removeUserWarning(warningId);
+              activeProfile.warnCount = res.warnCount || 0;
+              const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
+              if (idx >= 0) staff[idx].warnCount = activeProfile.warnCount;
+              warnBusy = false;
+              await openModerate();
+              paintTable();
+            } catch (err) {
+              warnBusy = false;
+              warnError = (err && err.message) ? err.message : 'Could not remove that warning.';
+              paintModal();
+            }
+          });
         });
       }
 
