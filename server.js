@@ -390,6 +390,11 @@ async function computeAccess(robloxUserId) {
 
     const matchedRoles = (roles || []).filter(role => {
         if (manualRoleIds.has(role.id)) return true;
+        // Link-only roles never auto-grant off group rank. They can only be
+        // picked up through a manual assignment, which includes claiming an
+        // onboarding link. min_rank still applies at claim time as a
+        // safeguard, but it does not grant the role on its own.
+        if (role.link_only) return false;
         if (role.roblox_group_id != null) {
             const rank = rankByGroupId[role.roblox_group_id];
             if (rank == null) return false;
@@ -512,12 +517,27 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
         assigned_at: new Date().toISOString()
     }, { onConflict: 'roblox_user_id' });
     if (link.role_id) {
-        const { error: roleAssignErr } = await supabase.from('user_role_assignments').insert({
-            roblox_user_id: robloxUserId,
-            role_id: link.role_id,
-            roblox_username: robloxUsername
-        });
-        if (roleAssignErr && roleAssignErr.code !== '23505') throw roleAssignErr;
+        const { data: role, error: roleErr } = await supabase.from('roles').select('*').eq('id', link.role_id).maybeSingle();
+        if (roleErr) throw roleErr;
+        // For a link-only role, min_rank is a safeguard on the link itself:
+        // the person still has to actually meet the rank before the link
+        // can hand out the role. It never grants the role on its own at
+        // login, only here at claim time.
+        let meetsRankSafeguard = true;
+        if (role && role.link_only && role.min_rank != null && role.roblox_group_id != null) {
+            const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
+            const membership = groupRoles.find(g => g.group && g.group.id === role.roblox_group_id);
+            const rank = membership ? membership.role.rank : null;
+            meetsRankSafeguard = rank != null && rank >= role.min_rank;
+        }
+        if (role && meetsRankSafeguard) {
+            const { error: roleAssignErr } = await supabase.from('user_role_assignments').insert({
+                roblox_user_id: robloxUserId,
+                role_id: link.role_id,
+                roblox_username: robloxUsername
+            });
+            if (roleAssignErr && roleAssignErr.code !== '23505') throw roleAssignErr;
+        }
     }
     await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
     return link;
@@ -1228,6 +1248,7 @@ app.post('/hr-data', async (req, res) => {
         const robloxGroupId = payload.robloxGroupId === '' || payload.robloxGroupId == null ? null : Number(payload.robloxGroupId);
         const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
         const hierarchy = payload.hierarchy === '' || payload.hierarchy == null ? 0 : Number(payload.hierarchy);
+        const linkOnly = !!payload.linkOnly;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
         // A role can't be created at or above the creator's own hierarchy -
         // otherwise someone could hand out a role more senior than themselves.
@@ -1236,6 +1257,7 @@ app.post('/hr-data', async (req, res) => {
             name,
             roblox_group_id: robloxGroupId,
             min_rank: minRank,
+            link_only: linkOnly,
             hierarchy,
             permissions
         });
@@ -1258,12 +1280,14 @@ app.post('/hr-data', async (req, res) => {
         const robloxGroupId = payload.robloxGroupId === '' || payload.robloxGroupId == null ? null : Number(payload.robloxGroupId);
         const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
         const hierarchy = payload.hierarchy === '' || payload.hierarchy == null ? 0 : Number(payload.hierarchy);
+        const linkOnly = !!payload.linkOnly;
         // ...and can't promote it to or above your own level either.
         if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
         const update = {
             roblox_group_id: robloxGroupId,
             min_rank: minRank,
+            link_only: linkOnly,
             hierarchy,
             permissions
         };
