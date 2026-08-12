@@ -159,6 +159,10 @@ app.use(cors({
 
 app.use(express.json());
 
+app.get('/ping', (req, res) => {
+    res.status(200).json({ ok: true, time: new Date().toISOString() });
+});
+
 app.get("/api/roblox/avatar/:userId", async (req, res) => {
     try {
         const response = await fetch(
