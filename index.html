@@ -3863,7 +3863,7 @@
           ${rolesLoading ? `<div class="dash-loading">Loading roles...</div>` : roles.length === 0 ? `<div class="empty-note">No roles yet. Create the first one below.</div>` : roles.map(r => {
                   const roleHierarchy = Number(r.hierarchy) || 0;
                   const canManageThisRole = roleHierarchy < hrMaxHierarchy;
-                  const isEditing = editingRoleId === r.id;
+                  const isEditing = editingRoleId != null && String(editingRoleId) === String(r.id);
                   return `
             <div class="role-row">
               <div class="role-row-top">
@@ -4310,14 +4310,14 @@
           }));
 
           document.querySelectorAll('[data-edit-role]').forEach(el => el.addEventListener('click', () => {
-            const id = Number(el.dataset.editRole);
+            const id = el.dataset.editRole;
             editingRoleId = editingRoleId === id ? null : id;
             editRoleError = null;
             paint();
           }));
 
           document.querySelectorAll('[data-save-role]').forEach(el => el.addEventListener('click', async () => {
-            const id = Number(el.dataset.saveRole);
+            const id = el.dataset.saveRole;
             const name = document.querySelector(`.editRoleName[data-role-id="${id}"]`).value.trim();
             const groupId = document.querySelector(`.editRoleGroupId[data-role-id="${id}"]`).value;
             const minRank = document.querySelector(`.editRoleMinRank[data-role-id="${id}"]`).value;
