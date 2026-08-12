@@ -5444,6 +5444,8 @@
       async function paintTable() {
         const area = document.getElementById('staffTableArea');
         if (area) area.innerHTML = await cardsHtml();
+        const countEl = document.getElementById('staffTotalCount');
+        if (countEl) countEl.textContent = loading ? 'Loading total users...' : (loadError ? 'Total users: unavailable' : `Total users: ${staff.length}`);
         wireTableEvents();
       }
 
@@ -5455,6 +5457,7 @@
         <div>
           <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Staff database</h1>
+          <p class="sub" id="staffTotalCount">${loading ? 'Loading total users...' : `Total users: ${staff.length}`}</p>
           <p class="sub">Everyone who has signed in, been assigned a role, or been paid, in one place. Click a profile to see full details.</p>
         </div>
         <div class="dash-toolbar">
