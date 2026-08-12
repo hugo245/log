@@ -3872,7 +3872,7 @@
                   <div class="role-meta">${r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank &ge; ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
                 <div style="display:flex;gap:6px;">
-                  <button class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}">${isEditing ? 'Close' : 'Edit'}</button>
+                  <button class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
                   <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
                 </div>
               </div>
