@@ -291,6 +291,63 @@ async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, m
     }
 }
 
+// Sweep for any pending Robux request whose owner's *currently saved*
+// payment method is PayPal or Venmo, and convert it to USD. This catches
+// cases the point-in-time conversion (above) can miss - e.g. a request
+// logged before the person ever set a payment method, or a method that
+// was set through a path that predates this feature. Called on every
+// dashboard/"My payments" load so it self-heals over time.
+async function convertPendingRobuxForCashMethodUsers(filter) {
+    try {
+        let query = supabase
+            .from('payment_requests')
+            .select('id, roblox_user_id, roblox_username, payment, currency, status, paid')
+            .eq('currency', 'ROBUX')
+            .eq('paid', false);
+        if (filter && filter.robloxUserId != null) {
+            query = query.eq('roblox_user_id', filter.robloxUserId);
+        } else if (filter && filter.robloxUsername) {
+            query = query.is('roblox_user_id', null).ilike('roblox_username', filter.robloxUsername);
+        }
+        const { data: rows, error } = await query;
+        if (error || !rows || !rows.length) return;
+
+        const pendingRows = rows.filter(r => (r.status || 'pending') === 'pending');
+        if (!pendingRows.length) return;
+
+        const userIds = [...new Set(pendingRows.filter(r => r.roblox_user_id != null).map(r => r.roblox_user_id))];
+        const usernames = [...new Set(pendingRows.filter(r => r.roblox_user_id == null && r.roblox_username).map(r => r.roblox_username))];
+
+        const [byIdRes, byUsernameRes] = await Promise.all([
+            userIds.length ? supabase.from('payment_methods').select('roblox_user_id, roblox_username, method').in('roblox_user_id', userIds) : Promise.resolve({ data: [] }),
+            usernames.length ? supabase.from('payment_methods').select('roblox_user_id, roblox_username, method').in('roblox_username', usernames) : Promise.resolve({ data: [] })
+        ]);
+        const methodByUserId = {};
+        const methodByUsername = {};
+        [].concat(byIdRes.data || [], byUsernameRes.data || []).forEach(m => {
+            if (m.roblox_user_id != null) methodByUserId[m.roblox_user_id] = m.method;
+            if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m.method;
+        });
+
+        const toConvert = pendingRows.filter(r => {
+            const method = (r.roblox_user_id != null ? methodByUserId[r.roblox_user_id] : null)
+                || (r.roblox_username ? methodByUsername[(r.roblox_username || '').toLowerCase()] : null);
+            return method === 'PAYPAL' || method === 'VENMO';
+        });
+        if (!toConvert.length) return;
+
+        const rate = await getDevexRate();
+        if (!(rate > 0)) return;
+
+        await Promise.all(toConvert.map(row => {
+            const usdAmount = Math.round((Number(row.payment) || 0) * rate * 100) / 100;
+            return supabase.from('payment_requests').update({ payment: usdAmount, currency: 'USD' }).eq('id', row.id);
+        }));
+    } catch (e) {
+        // Best-effort - a failure here shouldn't block loading the requests.
+    }
+}
+
 async function checkBaseAccess(robloxUserId) {
     const base = await getBaseAccessConfig();
     if (!base.groupId) return { allowed: true, base };
@@ -764,6 +821,7 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
+        await convertPendingRobuxForCashMethodUsers();
         const { data, error } = await supabase
             .from('payment_requests')
             .select('*')
@@ -876,6 +934,11 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'get_my_summary') {
+        await Promise.all([
+            convertPendingRobuxForCashMethodUsers({ robloxUserId: session.roblox_user_id }),
+            convertPendingRobuxForCashMethodUsers({ robloxUsername: session.roblox_username })
+        ]);
+
         const [byId, byUsername] = await Promise.all([
             supabase.from('payment_requests').select('*').eq('roblox_user_id', session.roblox_user_id),
             supabase.from('payment_requests').select('*').is('roblox_user_id', null).ilike('roblox_username', session.roblox_username)
