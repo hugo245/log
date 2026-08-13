@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PlayVerse Payment Log</title>
+  <link rel="icon" type="image/x-icon" href="/images/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -1001,6 +1002,7 @@
       font-weight: 500;
       color: var(--ink);
       background: var(--surface);
+      max-width: 160px;
     }
 
     .table-wrap {
@@ -2014,7 +2016,8 @@
       background: var(--row-alt);
     }
 
-    table.an-table td.num-cell {
+    table.an-table td.num-cell,
+    table.an-table th.num-cell {
       text-align: right;
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
@@ -2022,6 +2025,12 @@
 
     .filter-select.date-select {
       font-family: inherit;
+      max-width: 150px;
+    }
+
+    .person-input-wrap {
+      max-width: 220px;
+      flex: 1 1 180px;
     }
 
     .an-toggle-group {
@@ -3744,7 +3753,7 @@
       let skillsetFilter = 'all';
       let roleFilter = 'all';
       let currencyFilter = 'all';
-      let userFilter = 'all';
+      let personFilter = '';
       let dateFrom = '';
       let dateTo = '';
       let search = '';
@@ -3800,7 +3809,7 @@
         if (skillsetFilter !== 'all') rows = rows.filter(r => splitList(r.requesterSkillset).includes(skillsetFilter));
         if (roleFilter !== 'all') rows = rows.filter(r => (r.requesterRoles || []).includes(roleFilter));
         if (currencyFilter !== 'all') rows = rows.filter(r => r.currency === currencyFilter);
-        if (userFilter !== 'all') rows = rows.filter(r => r.robloxUsername === userFilter);
+        if (personFilter.trim()) { const pq = personFilter.trim().toLowerCase(); rows = rows.filter(r => (r.robloxUsername || '').toLowerCase().includes(pq)); }
         if (dateFrom) { const from = new Date(dateFrom).getTime(); rows = rows.filter(r => (r.createdAt || 0) >= from); }
         if (dateTo) { const to = new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1; rows = rows.filter(r => (r.createdAt || 0) <= to); }
         if (search.trim()) {
@@ -3850,7 +3859,7 @@
           cur.count += 1;
           map.set(r.robloxUsername, cur);
         });
-        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v })).sort((a, b) => (b.robux * DEVEX_RATE + b.usd) - (a.robux * DEVEX_RATE + a.usd));
+        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v, total: v.robux * DEVEX_RATE + v.usd })).sort((a, b) => b.total - a.total);
       }
 
       function computeEarnings(rows) {
@@ -3861,7 +3870,7 @@
           cur.tasks += 1;
           map.set(r.robloxUsername, cur);
         });
-        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v })).sort((a, b) => (b.robux * DEVEX_RATE + b.usd) - (a.robux * DEVEX_RATE + a.usd));
+        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v, total: v.robux * DEVEX_RATE + v.usd })).sort((a, b) => b.total - a.total);
       }
 
       const GROUP_LABELS = { game: 'game', skillset: 'skillset', role: 'role', team: 'team', user: 'person' };
@@ -3934,8 +3943,14 @@
       </div>
 
       <div class="filter-bar">
+        <div class="search-input-wrap person-input-wrap">
+          <input type="text" id="personFilterInput" list="personListDatalist" placeholder="Filter by person" value="${esc(personFilter)}" autocomplete="off">
+          <datalist id="personListDatalist">
+            ${getAllUsers().map(u => `<option value="${esc(u)}"></option>`).join('')}
+          </datalist>
+        </div>
         <div class="search-input-wrap">
-          <input type="text" id="searchInput" placeholder="Search by username, task, or game" value="${esc(search)}">
+          <input type="text" id="searchInput" placeholder="Search by task or game" value="${esc(search)}">
         </div>
         <div class="filter-select-group">
           <select id="statusFilterSelect" class="filter-select">
@@ -3943,6 +3958,11 @@
             <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>Pending</option>
             <option value="paid" ${statusFilter === 'paid' ? 'selected' : ''}>Paid</option>
             <option value="rejected" ${statusFilter === 'rejected' ? 'selected' : ''}>Rejected</option>
+          </select>
+          <select id="currencyFilterSelect" class="filter-select">
+            <option value="all" ${currencyFilter === 'all' ? 'selected' : ''}>All currencies</option>
+            <option value="ROBUX" ${currencyFilter === 'ROBUX' ? 'selected' : ''}>Robux</option>
+            <option value="USD" ${currencyFilter === 'USD' ? 'selected' : ''}>USD</option>
           </select>
           ${getAllGames().length ? `
           <select id="gameFilterSelect" class="filter-select">
@@ -3964,16 +3984,6 @@
             <option value="all" ${roleFilter === 'all' ? 'selected' : ''}>All roles</option>
             ${getAllRoles().map(r => `<option value="${esc(r)}" ${roleFilter === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
           </select>` : ''}
-          ${getAllUsers().length ? `
-          <select id="userFilterSelect" class="filter-select">
-            <option value="all" ${userFilter === 'all' ? 'selected' : ''}>All people</option>
-            ${getAllUsers().map(u => `<option value="${esc(u)}" ${userFilter === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}
-          </select>` : ''}
-          <select id="currencyFilterSelect" class="filter-select">
-            <option value="all" ${currencyFilter === 'all' ? 'selected' : ''}>All currencies</option>
-            <option value="ROBUX" ${currencyFilter === 'ROBUX' ? 'selected' : ''}>Robux</option>
-            <option value="USD" ${currencyFilter === 'USD' ? 'selected' : ''}>USD</option>
-          </select>
           <input type="date" id="dateFromInput" class="filter-select date-select" value="${esc(dateFrom)}" title="From date">
           <input type="date" id="dateToInput" class="filter-select date-select" value="${esc(dateTo)}" title="To date">
         </div>
@@ -3984,7 +3994,7 @@
           <div class="chart-card-head">
             <div>
               <div class="chart-card-title">Earnings over time</div>
-              <div class="chart-card-sub">Paid requests by month, converted to USD${userFilter !== 'all' ? ` &middot; ${esc(userFilter)}` : ' &middot; everyone matching the filters'}</div>
+              <div class="chart-card-sub">Paid requests by month, converted to USD${personFilter.trim() ? ` &middot; matching "${esc(personFilter.trim())}"` : ' &middot; everyone matching the filters'}</div>
             </div>
           </div>
           ${monthly.length ? `<div class="chart-canvas-wrap"><canvas id="earningsChart"></canvas></div>` : `<div class="chart-empty">No paid requests match these filters yet.</div>`}
@@ -4010,9 +4020,9 @@
         <div class="table-scroll">
           ${owedRows.length ? `
           <table class="an-table">
-            <thead><tr><th>Person</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th></tr></thead>
+            <thead><tr><th>Person</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th></tr></thead>
             <tbody>
-              ${owedRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td></tr>`).join('')}
+              ${owedRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td></tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -4023,9 +4033,9 @@
         <div class="table-scroll">
           ${earningsRows.length ? `
           <table class="an-table">
-            <thead><tr><th>Person</th><th class="num-cell">Paid Robux</th><th class="num-cell">Paid USD</th><th class="num-cell">Tasks completed</th></tr></thead>
+            <thead><tr><th>Person</th><th class="num-cell">Total earned (USD equiv.)</th><th class="num-cell">Paid Robux</th><th class="num-cell">Paid USD</th><th class="num-cell">Tasks completed</th></tr></thead>
             <tbody>
-              ${earningsRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.tasks}</td></tr>`).join('')}
+              ${earningsRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.tasks}</td></tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>No paid requests</h3><p>No paid requests match these filters.</p></div>`}
         </div>
@@ -4066,12 +4076,14 @@
           const el = document.getElementById(id);
           if (el) el.addEventListener('change', () => { setter(el.value); paintShell(); });
         };
+        const personFilterInput = document.getElementById('personFilterInput');
+        if (personFilterInput) personFilterInput.addEventListener('input', () => { personFilter = personFilterInput.value; paintShell(); });
+
         bind('statusFilterSelect', v => statusFilter = v);
         bind('gameFilterSelect', v => gameFilter = v);
         bind('teamFilterSelect', v => teamFilter = v);
         bind('skillsetFilterSelect', v => skillsetFilter = v);
         bind('roleFilterSelect', v => roleFilter = v);
-        bind('userFilterSelect', v => userFilter = v);
         bind('currencyFilterSelect', v => currencyFilter = v);
         bind('dateFromInput', v => dateFrom = v);
         bind('dateToInput', v => dateTo = v);
