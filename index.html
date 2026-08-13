@@ -3105,22 +3105,6 @@
     async function handleJoinLink(token) {
       storePendingRef(token);
 
-      if (isHrAuthed) {
-        app.innerHTML = `${topbar()}<div class="gate-shell"><div class="gate-card"><div class="gate-icon">PV</div><h2>Joining...</h2><p>Setting up your team and skillset.</p></div></div>`;
-        let claimFailed = false;
-        try {
-          await claimOnboardingLinkToken(token);
-        } catch (e) { claimFailed = true; }
-        clearPendingRef();
-        if (claimFailed) {
-          app.innerHTML = `${topbar()}<div class="gate-shell"><div class="gate-card"><div class="gate-icon">PV</div><h2>Couldn't join that team</h2><div class="error-box"><span>This invite link is invalid, expired, or something went wrong applying it. You can try the link again or ask whoever sent it for a new one.</span></div></div></div>`;
-          wireTopbarSignOut();
-          return;
-        }
-        window.location.hash = '#/onboarding';
-        return;
-      }
-
       app.innerHTML = `${topbar()}<div class="gate-shell"><div class="gate-card"><div class="gate-icon">PV</div><h2>Loading your invite...</h2></div></div>`;
 
       let info = null;
@@ -3129,6 +3113,49 @@
         info = await fetchOnboardingLinkPreview(token);
       } catch (e) {
         loadFailed = true;
+      }
+
+      if (isHrAuthed) {
+        let joining = false;
+        let joinError = null;
+
+        const renderInvite = () => {
+          app.innerHTML = `
+    ${topbar()}
+    <div class="gate-shell">
+      <div class="gate-card">
+        <div class="gate-icon">PV</div>
+        <h2>You've been invited</h2>
+        ${loadFailed
+              ? `<div class="error-box"><span>This invite link is invalid or has expired.</span></div>`
+              : `
+          <p>Click join to add this team and skillset to your account.</p>
+          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
+            ${info && info.team ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Team</div><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
+            ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
+          </div>`}
+        ${joinError ? `<div class="error-box"><span>${esc(joinError)}</span></div>` : ''}
+        ${!loadFailed ? `<button class="btn btn-primary" id="joinTeamBtn" ${joining ? 'disabled' : ''}>${joining ? 'Joining...' : 'Join'}</button>` : ''}
+      </div>
+    </div>`;
+          wireTopbarSignOut();
+          const btn = document.getElementById('joinTeamBtn');
+          if (btn) btn.addEventListener('click', async () => {
+            joining = true; joinError = null; renderInvite();
+            try {
+              await claimOnboardingLinkToken(token);
+              clearPendingRef();
+              window.location.hash = '#/onboarding';
+            } catch (e) {
+              joining = false;
+              joinError = "Could not apply that invite link. It may be invalid or expired.";
+              renderInvite();
+            }
+          });
+        };
+
+        renderInvite();
+        return;
       }
 
       app.innerHTML = `
