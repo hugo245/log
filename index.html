@@ -11,6 +11,7 @@
     rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
     :root {
       --bg: #F5F6F8;
@@ -1913,6 +1914,144 @@
       object-fit: contain;
     }
 
+    .an-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    @media (max-width:980px) {
+      .an-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px 18px 10px;
+    }
+
+    .chart-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .chart-card-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .chart-card-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .chart-canvas-wrap {
+      position: relative;
+      height: 260px;
+    }
+
+    .chart-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 260px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .an-section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink);
+      margin: 26px 0 10px;
+    }
+
+    .an-table-wrap {
+      margin-bottom: 22px;
+    }
+
+    table.an-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      min-width: 640px;
+    }
+
+    table.an-table thead th {
+      text-align: left;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 11px 14px;
+      background: var(--row-alt);
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+
+    table.an-table tbody td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    table.an-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    table.an-table tbody tr:hover {
+      background: var(--row-alt);
+    }
+
+    table.an-table td.num-cell {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .filter-select.date-select {
+      font-family: inherit;
+    }
+
+    .an-toggle-group {
+      display: flex;
+      gap: 4px;
+      background: var(--row-alt);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 3px;
+    }
+
+    .an-toggle-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 11.5px;
+      padding: 6px 11px;
+      border-radius: 6px;
+      color: var(--ink-soft);
+      white-space: nowrap;
+    }
+
+    .an-toggle-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
     .search-input-wrap {
       position: relative;
       flex: 1;
@@ -3010,6 +3149,8 @@
         if (isHrAuthed) renderDashboard(); else renderHrGate();
       } else if (path === '#/manage') {
         if (isHrAuthed) renderManagePanel(); else renderHrGate();
+      } else if (path === '#/analytics') {
+        if (isHrAuthed) renderAnalytics(); else renderHrGate();
       } else if (path === '#/my') {
         if (isHrAuthed) renderMyPayments(); else renderHrGate();
       } else if (path === '#/new') {
@@ -3029,6 +3170,10 @@
     window.addEventListener('hashchange', route);
     initAuth();
 
+    function canSeeAnalytics() {
+      return isHrAuthed && hasPermission('dashboard.view');
+    }
+
     function topbar() {
       const canSeeDashboard = isHrAuthed && hasPermission('dashboard.view');
       const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding'));
@@ -3038,7 +3183,7 @@
       <div class="topbar-right">
         <button class="theme-toggle" id="themeToggleBtn" type="button" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${isHrAuthed
-          ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}
+          ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeAnalytics() ? `<a class="hr-pill" href="#/analytics">Analytics</a>` : ''}
              <details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
@@ -3457,6 +3602,7 @@
         </div>
         <div class="dash-toolbar">
           ${canSubmitRequests() ? `<a class="btn btn-ghost btn-sm" href="#/new">New request</a>` : ''}
+          ${canSeeAnalytics() ? `<a class="btn btn-ghost btn-sm" href="#/analytics">Analytics</a>` : ''}
           ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
           ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
           <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
@@ -3575,6 +3721,438 @@
           loadError = (err && err.message) ? err.message : 'Something went wrong while reading the shared request list.';
         }
         if (myGen !== renderGen) return; // navigated away while this was loading
+        loading = false;
+        paintShell();
+      }
+
+      load();
+    }
+
+    const AN_PALETTE = ['#3730D9', '#178A4C', '#B3311C', '#8A6300', '#0EA5E9', '#DB2777', '#65A30D', '#7C3AED', '#EA580C', '#0D9488'];
+
+    function renderAnalytics() {
+      if (!canSeeAnalytics()) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+      const myGen = renderGen;
+
+      let allRequests = [];
+      let loading = true;
+      let loadError = null;
+
+      let statusFilter = 'all';
+      let gameFilter = 'all';
+      let teamFilter = 'all';
+      let skillsetFilter = 'all';
+      let roleFilter = 'all';
+      let currencyFilter = 'all';
+      let userFilter = 'all';
+      let dateFrom = '';
+      let dateTo = '';
+      let search = '';
+      let groupBy = 'game';
+
+      let earningsChartInstance = null;
+      let breakdownChartInstance = null;
+
+      function usdEquivalent(r) {
+        const amt = Number(r.payment) || 0;
+        return r.currency === 'USD' ? amt : amt * DEVEX_RATE;
+      }
+
+      function fmtUsd(n) {
+        return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
+      function fmtRobux(n) {
+        return Math.round(n).toLocaleString();
+      }
+
+      function splitList(str) {
+        return str ? String(str).split(',').map(s => s.trim()).filter(Boolean) : [];
+      }
+
+      function getAllGames() {
+        return Array.from(new Set(allRequests.map(r => r.game).filter(Boolean))).sort();
+      }
+      function getAllTeams() {
+        const set = new Set();
+        allRequests.forEach(r => splitList(r.requesterTeam).forEach(t => set.add(t)));
+        return Array.from(set).sort();
+      }
+      function getAllSkillsets() {
+        const set = new Set();
+        allRequests.forEach(r => splitList(r.requesterSkillset).forEach(s => set.add(s)));
+        return Array.from(set).sort();
+      }
+      function getAllRoles() {
+        const set = new Set();
+        allRequests.forEach(r => (r.requesterRoles || []).forEach(role => set.add(role)));
+        return Array.from(set).sort();
+      }
+      function getAllUsers() {
+        return Array.from(new Set(allRequests.map(r => r.robloxUsername).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      }
+
+      function getFilteredRows() {
+        let rows = allRequests.slice();
+        if (statusFilter !== 'all') rows = rows.filter(r => r.status === statusFilter);
+        if (gameFilter !== 'all') rows = rows.filter(r => r.game === gameFilter);
+        if (teamFilter !== 'all') rows = rows.filter(r => splitList(r.requesterTeam).includes(teamFilter));
+        if (skillsetFilter !== 'all') rows = rows.filter(r => splitList(r.requesterSkillset).includes(skillsetFilter));
+        if (roleFilter !== 'all') rows = rows.filter(r => (r.requesterRoles || []).includes(roleFilter));
+        if (currencyFilter !== 'all') rows = rows.filter(r => r.currency === currencyFilter);
+        if (userFilter !== 'all') rows = rows.filter(r => r.robloxUsername === userFilter);
+        if (dateFrom) { const from = new Date(dateFrom).getTime(); rows = rows.filter(r => (r.createdAt || 0) >= from); }
+        if (dateTo) { const to = new Date(dateTo).getTime() + 24 * 60 * 60 * 1000 - 1; rows = rows.filter(r => (r.createdAt || 0) <= to); }
+        if (search.trim()) {
+          const q = search.trim().toLowerCase();
+          rows = rows.filter(r => (r.robloxUsername || '').toLowerCase().includes(q) || (r.taskName || '').toLowerCase().includes(q) || (r.game || '').toLowerCase().includes(q) || (r.requestedBy || '').toLowerCase().includes(q));
+        }
+        return rows;
+      }
+
+      function computeMonthlySeries(rows) {
+        const map = new Map();
+        rows.filter(r => r.status === 'paid' && r.paidAt).forEach(r => {
+          const d = new Date(r.paidAt);
+          const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+          const cur = map.get(key) || { usdEq: 0, sortKey: d.getFullYear() * 12 + d.getMonth(), label: d.toLocaleString(undefined, { month: 'short', year: 'numeric' }) };
+          cur.usdEq += usdEquivalent(r);
+          map.set(key, cur);
+        });
+        return Array.from(map.values()).sort((a, b) => a.sortKey - b.sortKey);
+      }
+
+      function computeBreakdown(rows, dimension) {
+        const map = new Map();
+        rows.forEach(r => {
+          let labels;
+          if (dimension === 'game') labels = [r.game || '(no game)'];
+          else if (dimension === 'user') labels = [r.robloxUsername || '(unknown)'];
+          else if (dimension === 'team') labels = splitList(r.requesterTeam).length ? splitList(r.requesterTeam) : ['(no team)'];
+          else if (dimension === 'skillset') labels = splitList(r.requesterSkillset).length ? splitList(r.requesterSkillset) : ['(no skillset)'];
+          else labels = (r.requesterRoles && r.requesterRoles.length) ? r.requesterRoles : ['(no role)'];
+          const amt = usdEquivalent(r);
+          labels.forEach(l => {
+            const cur = map.get(l) || { amount: 0, count: 0 };
+            cur.amount += amt;
+            cur.count += 1;
+            map.set(l, cur);
+          });
+        });
+        return Array.from(map.entries()).map(([label, v]) => ({ label, ...v })).sort((a, b) => b.amount - a.amount);
+      }
+
+      function computeOwed(rows) {
+        const map = new Map();
+        rows.filter(r => r.status === 'pending').forEach(r => {
+          const cur = map.get(r.robloxUsername) || { robux: 0, usd: 0, count: 0 };
+          if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
+          cur.count += 1;
+          map.set(r.robloxUsername, cur);
+        });
+        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v })).sort((a, b) => (b.robux * DEVEX_RATE + b.usd) - (a.robux * DEVEX_RATE + a.usd));
+      }
+
+      function computeEarnings(rows) {
+        const map = new Map();
+        rows.filter(r => r.status === 'paid').forEach(r => {
+          const cur = map.get(r.robloxUsername) || { robux: 0, usd: 0, tasks: 0 };
+          if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
+          cur.tasks += 1;
+          map.set(r.robloxUsername, cur);
+        });
+        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v })).sort((a, b) => (b.robux * DEVEX_RATE + b.usd) - (a.robux * DEVEX_RATE + a.usd));
+      }
+
+      const GROUP_LABELS = { game: 'game', skillset: 'skillset', role: 'role', team: 'team', user: 'person' };
+
+      function paintShell() {
+        if (loading || loadError) {
+          app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        <div>
+          <span class="eyebrow">HR dashboard</span>
+          <h1 style="margin-bottom:4px;">Analytics</h1>
+          <p class="sub">Who's owed what, who's earned what, and where the money's going.</p>
+        </div>
+      </div>
+      ${loading ? `<div class="dash-loading">Loading payment requests...</div>` : `
+      <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>`}
+    </div>`;
+          wireTopbarSignOut();
+          const retryBtn = document.getElementById('retryBtn');
+          if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
+          return;
+        }
+
+        const rows = getFilteredRows();
+        const pendingRows = rows.filter(r => r.status === 'pending');
+        const paidRows = rows.filter(r => r.status === 'paid');
+        const pendingRobux = pendingRows.filter(r => r.currency === 'ROBUX').reduce((s, r) => s + (Number(r.payment) || 0), 0);
+        const pendingUsd = pendingRows.filter(r => r.currency === 'USD').reduce((s, r) => s + (Number(r.payment) || 0), 0);
+        const paidUsdEquiv = paidRows.reduce((s, r) => s + usdEquivalent(r), 0);
+
+        const owedRows = computeOwed(rows);
+        const earningsRows = computeEarnings(rows);
+        const breakdownRows = computeBreakdown(rows, groupBy);
+        const monthly = computeMonthlySeries(rows);
+
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        <div>
+          <span class="eyebrow">HR dashboard</span>
+          <h1 style="margin-bottom:4px;">Analytics</h1>
+          <p class="sub">Who's owed what, who's earned what, and where the money's going. Filters below apply to everything on this page.</p>
+        </div>
+        <div class="dash-toolbar">
+          <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
+          <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
+        </div>
+      </div>
+
+      <div class="stat-strip">
+        <div class="strip-card">
+          <div class="strip-label">Pending Robux</div>
+          <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${fmtRobux(pendingRobux)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Pending USD</div>
+          <div class="strip-value">${fmtUsd(pendingUsd)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Paid out (USD equiv.)</div>
+          <div class="strip-value">${fmtUsd(paidUsdEquiv)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Tasks completed</div>
+          <div class="strip-value">${paidRows.length}</div>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <div class="search-input-wrap">
+          <input type="text" id="searchInput" placeholder="Search by username, task, or game" value="${esc(search)}">
+        </div>
+        <div class="filter-select-group">
+          <select id="statusFilterSelect" class="filter-select">
+            <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>All statuses</option>
+            <option value="pending" ${statusFilter === 'pending' ? 'selected' : ''}>Pending</option>
+            <option value="paid" ${statusFilter === 'paid' ? 'selected' : ''}>Paid</option>
+            <option value="rejected" ${statusFilter === 'rejected' ? 'selected' : ''}>Rejected</option>
+          </select>
+          ${getAllGames().length ? `
+          <select id="gameFilterSelect" class="filter-select">
+            <option value="all" ${gameFilter === 'all' ? 'selected' : ''}>All games</option>
+            ${getAllGames().map(g => `<option value="${esc(g)}" ${gameFilter === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}
+          </select>` : ''}
+          ${getAllTeams().length ? `
+          <select id="teamFilterSelect" class="filter-select">
+            <option value="all" ${teamFilter === 'all' ? 'selected' : ''}>All teams</option>
+            ${getAllTeams().map(t => `<option value="${esc(t)}" ${teamFilter === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+          </select>` : ''}
+          ${getAllSkillsets().length ? `
+          <select id="skillsetFilterSelect" class="filter-select">
+            <option value="all" ${skillsetFilter === 'all' ? 'selected' : ''}>All skillsets</option>
+            ${getAllSkillsets().map(s => `<option value="${esc(s)}" ${skillsetFilter === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+          </select>` : ''}
+          ${getAllRoles().length ? `
+          <select id="roleFilterSelect" class="filter-select">
+            <option value="all" ${roleFilter === 'all' ? 'selected' : ''}>All roles</option>
+            ${getAllRoles().map(r => `<option value="${esc(r)}" ${roleFilter === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
+          </select>` : ''}
+          ${getAllUsers().length ? `
+          <select id="userFilterSelect" class="filter-select">
+            <option value="all" ${userFilter === 'all' ? 'selected' : ''}>All people</option>
+            ${getAllUsers().map(u => `<option value="${esc(u)}" ${userFilter === u ? 'selected' : ''}>${esc(u)}</option>`).join('')}
+          </select>` : ''}
+          <select id="currencyFilterSelect" class="filter-select">
+            <option value="all" ${currencyFilter === 'all' ? 'selected' : ''}>All currencies</option>
+            <option value="ROBUX" ${currencyFilter === 'ROBUX' ? 'selected' : ''}>Robux</option>
+            <option value="USD" ${currencyFilter === 'USD' ? 'selected' : ''}>USD</option>
+          </select>
+          <input type="date" id="dateFromInput" class="filter-select date-select" value="${esc(dateFrom)}" title="From date">
+          <input type="date" id="dateToInput" class="filter-select date-select" value="${esc(dateTo)}" title="To date">
+        </div>
+      </div>
+
+      <div class="an-grid">
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <div class="chart-card-title">Earnings over time</div>
+              <div class="chart-card-sub">Paid requests by month, converted to USD${userFilter !== 'all' ? ` &middot; ${esc(userFilter)}` : ' &middot; everyone matching the filters'}</div>
+            </div>
+          </div>
+          ${monthly.length ? `<div class="chart-canvas-wrap"><canvas id="earningsChart"></canvas></div>` : `<div class="chart-empty">No paid requests match these filters yet.</div>`}
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-card-head">
+            <div>
+              <div class="chart-card-title">Breakdown by ${esc(GROUP_LABELS[groupBy])}</div>
+              <div class="chart-card-sub">Total value (USD equiv.) of matching requests</div>
+            </div>
+            <div class="an-toggle-group">
+              ${['game', 'skillset', 'role', 'team', 'user'].map(g => `<button class="an-toggle-btn ${groupBy === g ? 'active' : ''}" data-group="${g}">${GROUP_LABELS[g].charAt(0).toUpperCase() + GROUP_LABELS[g].slice(1)}</button>`).join('')}
+            </div>
+          </div>
+          ${breakdownRows.length ? `<div class="chart-canvas-wrap"><canvas id="breakdownChart"></canvas></div>` : `<div class="chart-empty">No requests match these filters yet.</div>`}
+          ${(groupBy === 'team' || groupBy === 'skillset' || groupBy === 'role') ? `<div class="chart-card-sub" style="margin:6px 0 4px;">A request counts toward every ${esc(GROUP_LABELS[groupBy])} its requester has, so totals can add up to more than the overall total.</div>` : ''}
+        </div>
+      </div>
+
+      <div class="an-section-title">Who's owed what (pending requests)</div>
+      <div class="table-wrap an-table-wrap">
+        <div class="table-scroll">
+          ${owedRows.length ? `
+          <table class="an-table">
+            <thead><tr><th>Person</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th></tr></thead>
+            <tbody>
+              ${owedRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td></tr>`).join('')}
+            </tbody>
+          </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
+        </div>
+      </div>
+
+      <div class="an-section-title">Earnings &amp; tasks completed by person</div>
+      <div class="table-wrap an-table-wrap">
+        <div class="table-scroll">
+          ${earningsRows.length ? `
+          <table class="an-table">
+            <thead><tr><th>Person</th><th class="num-cell">Paid Robux</th><th class="num-cell">Paid USD</th><th class="num-cell">Tasks completed</th></tr></thead>
+            <tbody>
+              ${earningsRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.tasks}</td></tr>`).join('')}
+            </tbody>
+          </table>` : `<div class="dash-empty"><h3>No paid requests</h3><p>No paid requests match these filters.</p></div>`}
+        </div>
+      </div>
+
+      <div class="an-section-title">Breakdown by ${esc(GROUP_LABELS[groupBy])}</div>
+      <div class="table-wrap an-table-wrap">
+        <div class="table-scroll">
+          ${breakdownRows.length ? `
+          <table class="an-table">
+            <thead><tr><th>${esc(GROUP_LABELS[groupBy].charAt(0).toUpperCase() + GROUP_LABELS[groupBy].slice(1))}</th><th class="num-cell">Total (USD equiv.)</th><th class="num-cell">Requests</th></tr></thead>
+            <tbody>
+              ${breakdownRows.map(b => `<tr><td>${esc(b.label)}</td><td class="num-cell">${fmtUsd(b.amount)}</td><td class="num-cell">${b.count}</td></tr>`).join('')}
+            </tbody>
+          </table>` : `<div class="dash-empty"><h3>Nothing to show</h3><p>No requests match these filters.</p></div>`}
+        </div>
+      </div>
+
+      <div class="footer-note">Robux amounts are converted to USD for charts and totals using the current DevEx rate (${(DEVEX_RATE * 10000).toFixed(2)} USD per 10,000 Robux). Tables show raw amounts per currency.</div>
+    </div>`;
+
+        wireTopbarSignOut();
+        wireEvents();
+        drawCharts(monthly, breakdownRows);
+      }
+
+      function wireEvents() {
+        const retryBtn = document.getElementById('retryBtn');
+        if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
+
+        const refreshBtn = document.getElementById('refreshBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', () => { load(); });
+
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) searchInput.addEventListener('input', () => { search = searchInput.value; paintShell(); });
+
+        const bind = (id, setter) => {
+          const el = document.getElementById(id);
+          if (el) el.addEventListener('change', () => { setter(el.value); paintShell(); });
+        };
+        bind('statusFilterSelect', v => statusFilter = v);
+        bind('gameFilterSelect', v => gameFilter = v);
+        bind('teamFilterSelect', v => teamFilter = v);
+        bind('skillsetFilterSelect', v => skillsetFilter = v);
+        bind('roleFilterSelect', v => roleFilter = v);
+        bind('userFilterSelect', v => userFilter = v);
+        bind('currencyFilterSelect', v => currencyFilter = v);
+        bind('dateFromInput', v => dateFrom = v);
+        bind('dateToInput', v => dateTo = v);
+
+        document.querySelectorAll('.an-toggle-btn').forEach(b => b.addEventListener('click', () => { groupBy = b.dataset.group; paintShell(); }));
+      }
+
+      function drawCharts(monthly, breakdownRows) {
+        if (typeof Chart === 'undefined') return;
+
+        if (earningsChartInstance) { earningsChartInstance.destroy(); earningsChartInstance = null; }
+        if (breakdownChartInstance) { breakdownChartInstance.destroy(); breakdownChartInstance = null; }
+
+        const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--line').trim() || '#E4E7ED';
+        const inkColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-soft').trim() || '#5B616E';
+        const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#3730D9';
+
+        const earningsCanvas = document.getElementById('earningsChart');
+        if (earningsCanvas && monthly.length) {
+          earningsChartInstance = new Chart(earningsCanvas, {
+            type: 'line',
+            data: {
+              labels: monthly.map(m => m.label),
+              datasets: [{
+                label: 'Paid (USD equiv.)',
+                data: monthly.map(m => Number(m.usdEq.toFixed(2))),
+                borderColor: accent,
+                backgroundColor: accent + '33',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 3
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { grid: { color: gridColor }, ticks: { color: inkColor } },
+                y: { grid: { color: gridColor }, ticks: { color: inkColor, callback: v => '$' + v } }
+              }
+            }
+          });
+        }
+
+        const breakdownCanvas = document.getElementById('breakdownChart');
+        if (breakdownCanvas && breakdownRows.length) {
+          const top = breakdownRows.slice(0, 12);
+          breakdownChartInstance = new Chart(breakdownCanvas, {
+            type: 'bar',
+            data: {
+              labels: top.map(b => b.label),
+              datasets: [{
+                label: 'Total (USD equiv.)',
+                data: top.map(b => Number(b.amount.toFixed(2))),
+                backgroundColor: top.map((_, i) => AN_PALETTE[i % AN_PALETTE.length]),
+                borderRadius: 6,
+                maxBarThickness: 46
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: inkColor } },
+                y: { grid: { color: gridColor }, ticks: { color: inkColor, callback: v => '$' + v } }
+              }
+            }
+          });
+        }
+      }
+
+      async function load() {
+        loading = true; loadError = null; paintShell();
+        try {
+          allRequests = await loadAllRequests();
+        } catch (err) {
+          loadError = (err && err.message) ? err.message : 'Something went wrong while reading the shared request list.';
+        }
+        if (myGen !== renderGen) return;
         loading = false;
         paintShell();
       }
