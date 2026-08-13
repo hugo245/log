@@ -33,45 +33,8 @@
       --radius: 14px;
     }
 
-    :root[data-theme="dark"] {
-      --bg: #14161C;
-      --surface: #1C1F27;
-      --ink: #EDEEF2;
-      --ink-soft: #A7ACB8;
-      --muted: #767C8A;
-      --line: #2C303C;
-      --accent: #8B85F5;
-      --accent-soft: #262346;
-      --warn-bg: #2E2717;
-      --warn-line: #4A3C1C;
-      --warn-text: #E8BE5C;
-      --ok-bg: #16281F;
-      --ok-line: #204A32;
-      --ok-text: #4FCE8B;
-      --err-bg: #2E1A18;
-      --err-line: #532620;
-      --err-text: #F0847A;
-    }
-
     * {
       box-sizing: border-box;
-    }
-
-    html {
-      color-scheme: light;
-    }
-
-    html[data-theme="dark"] {
-      color-scheme: dark;
-    }
-
-    body,
-    .panel,
-    .topbar,
-    input,
-    select,
-    textarea {
-      transition: background-color .15s ease, border-color .15s ease, color .15s ease;
     }
 
     html,
@@ -230,28 +193,6 @@
 
     .hr-pill:hover {
       background: var(--bg);
-    }
-
-    .theme-toggle {
-      appearance: none;
-      border: 1px solid var(--line);
-      background: var(--surface);
-      color: var(--ink);
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      line-height: 1;
-      flex-shrink: 0;
-    }
-
-    .theme-toggle:hover {
-      background: var(--bg);
-      border-color: var(--accent);
     }
 
     .hr-pill .dot-live {
@@ -1273,41 +1214,6 @@
       white-space: nowrap;
     }
 
-    .team-chip-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-      gap: 10px;
-    }
-
-    .team-chip-card {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      align-items: flex-start;
-      background: var(--bg);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 12px 14px;
-    }
-
-    .team-chip,
-    .skillset-chip {
-      display: inline-flex;
-      align-items: center;
-      font-size: 12px;
-      font-weight: 700;
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1.5px solid var(--line);
-      background: var(--surface);
-      white-space: nowrap;
-    }
-
-    .skillset-chip {
-      font-weight: 600;
-      opacity: .85;
-    }
-
     .staff-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -2102,15 +2008,6 @@
 </head>
 
 <body>
-  <script>
-    (function () {
-      try {
-        var saved = localStorage.getItem('pv_theme');
-        var theme = saved === 'dark' || saved === 'light' ? saved : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-theme', theme);
-      } catch (e) { }
-    })();
-  </script>
 
   <div id="app">
     <div class="gate-shell">
@@ -2129,28 +2026,6 @@
     const SETTINGS_TABLE = 'app_settings';
     const SESSION_STORAGE_KEY = 'pv_hr_session_token';
     const RETURN_HASH_KEY = 'pv_return_hash';
-    const THEME_STORAGE_KEY = 'pv_theme';
-
-    function getTheme() {
-      return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-    }
-    function setTheme(theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-      try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { }
-    }
-    function toggleTheme() {
-      setTheme(getTheme() === 'dark' ? 'light' : 'dark');
-      const app = document.getElementById('app');
-      if (app) {
-        const btn = document.getElementById('themeToggleBtn');
-        if (btn) { btn.innerHTML = themeToggleIcon(); btn.setAttribute('aria-label', getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'); }
-      }
-    }
-    function themeToggleIcon() {
-      return getTheme() === 'dark'
-        ? '&#9788;' // sun
-        : '&#9789;'; // moon
-    }
 
     const PERMISSION_LABELS = {
       'dashboard.view': 'View dashboard',
@@ -2751,13 +2626,6 @@
     async function assignUserTeamSkillset(robloxUserId, robloxUsername, teamId, skillsetId) {
       await callHrData('assign_user_team_skillset', { robloxUserId, robloxUsername, teamId, skillsetId });
     }
-    async function removeUserTeamAssignment(robloxUserId, teamId) {
-      await callHrData('remove_user_team_assignment', { robloxUserId, teamId });
-    }
-    async function listUserTeamAssignments(robloxUserId) {
-      const json = await callHrData('list_user_team_assignments', { robloxUserId });
-      return json.data || [];
-    }
     async function listUserWarnings(robloxUserId) {
       const json = await callHrData('list_user_warnings', { robloxUserId });
       return json;
@@ -3022,14 +2890,12 @@
     <div class="topbar">
       <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
-        <button class="theme-toggle" id="themeToggleBtn" type="button" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${isHrAuthed
           ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}
              <details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
                  ${canSeeManage ? `<a href="#/manage">Manage</a><div class="acct-menu-divider"></div>` : ''}
-                 <a href="#/my">My teams &amp; skillsets</a>
                  <a href="#/tos">Terms of Service</a>
                  <a href="#/aup">Acceptable Use Policy</a>
                  <a href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a>
@@ -3045,8 +2911,6 @@
     function wireTopbarSignOut() {
       const btn = document.getElementById('signOutBtn');
       if (btn) btn.addEventListener('click', hrSignOut);
-      const themeBtn = document.getElementById('themeToggleBtn');
-      if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     }
 
     function renderHrGate() {
@@ -3083,7 +2947,6 @@
       </div>
     </div>`;
 
-      wireTopbarSignOut();
       const btn = document.getElementById('robloxSignInBtn');
       if (btn) btn.addEventListener('click', () => beginLogin('#/dashboard'));
     }
@@ -3560,9 +3423,6 @@
       let myBroadcasts = [];
       let myBroadcastsLoading = true;
 
-      let myTeams = [];
-      let myTeamsLoading = true;
-
       function paint() {
         const totals = (summary && summary.totals) || {};
         const pendingRequests = summary ? summary.requests.filter(r => r.status === 'pending') : [];
@@ -3646,22 +3506,6 @@
             <button class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
           `}
         </div>
-      </div>
-
-      <div class="heading-block" style="margin-top:36px;">
-        <span class="eyebrow">Where you fit in</span>
-        <h1>My teams &amp; skillsets</h1>
-      </div>
-      <div class="panel">
-        ${myTeamsLoading ? `<div class="dash-loading">Loading your teams...</div>` : myTeams.length === 0 ? `<div class="empty-note">You haven't joined any teams yet. Ask whoever invited you for an invite link.</div>` : `
-          <div class="team-chip-grid">
-            ${myTeams.map(a => `
-              <div class="team-chip-card">
-                ${a.team ? `<span class="team-chip" style="border-color:${esc(a.team.color || 'var(--line)')};color:${esc(a.team.color || 'var(--ink)')};">${esc(a.team.name)}</span>` : `<span class="team-chip">No team</span>`}
-                ${a.skillset ? `<span class="skillset-chip" style="border-color:${esc(a.skillset.color || 'var(--line)')};color:${esc(a.skillset.color || 'var(--ink)')};">${esc(a.skillset.name)}</span>` : ''}
-              </div>`).join('')}
-          </div>
-        `}
       </div>
 
       <div class="heading-block" style="margin-top:36px;">
@@ -3808,25 +3652,12 @@
         paint();
       }
 
-      async function loadMyTeamsData() {
-        myTeamsLoading = true; paint();
-        try {
-          myTeams = await getMyAssignment();
-        } catch (err) {
-          myTeams = [];
-        }
-        if (myGen !== renderGen) return;
-        myTeamsLoading = false;
-        paint();
-      }
-
       paint();
       loadSummary();
       loadMethod();
       loadEligibility();
       loadWarnings();
       loadMyBroadcastsData();
-      loadMyTeamsData();
     }
 
     function renderManagePanel() {
@@ -4895,41 +4726,32 @@
       let loadError = null;
       let busyStepId = null;
       let stepMessage = {};
-      let myAssignment = [];
+      let myAssignment = null;
 
       function renderTeamInfoBody(s) {
-        const assignments = myAssignment || [];
-        if (!assignments.length) {
+        const team = myAssignment && myAssignment.team;
+        const skillset = myAssignment && myAssignment.skillset;
+        if (!team && !skillset) {
           return `<div class="empty-note" style="margin-top:10px;">You haven't been assigned to a team yet. Ask whoever invited you for an invite link, or check back later.</div>`;
         }
         return `
           <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
-            ${assignments.map(a => {
-          const team = a.team;
-          const skillset = a.skillset;
-          if (!team && !skillset) return '';
-          return `
+            ${team ? `
             <div class="panel" style="margin:0;padding:14px 16px;">
-              <div style="display:flex;flex-wrap:wrap;gap:16px;">
-                ${team ? `
-                <div style="flex:1;min-width:160px;">
-                  <div class="preview-label" style="margin-bottom:2px;">Team</div>
-                  <strong style="font-size:15px;color:${esc(team.color || 'var(--ink)')};">${esc(team.name)}</strong>
-                  ${team.info ? `<p class="sub" style="margin:8px 0 0;white-space:pre-wrap;">${esc(team.info)}</p>` : ''}
-                  <div style="display:flex;gap:8px;margin-top:12px;">
-                    ${team.discord_url ? `<a class="btn btn-primary btn-sm btn-equal" href="${esc(team.discord_url)}" target="_blank" rel="noopener">Join Discord</a>` : ''}
-                    ${team.roblox_group_url ? `<a class="btn btn-ghost btn-sm btn-equal" href="${esc(team.roblox_group_url)}" target="_blank" rel="noopener">Roblox group</a>` : ''}
-                  </div>
-                </div>` : ''}
-                ${skillset ? `
-                <div style="flex:1;min-width:160px;">
-                  <div class="preview-label" style="margin-bottom:2px;">Skillset</div>
-                  <strong style="font-size:15px;color:${esc(skillset.color || 'var(--ink)')};">${esc(skillset.name)}</strong>
-                  ${skillset.description ? `<p class="sub" style="margin:8px 0 0;">${esc(skillset.description)}</p>` : ''}
-                </div>` : ''}
+              <div class="preview-label" style="margin-bottom:2px;">Team</div>
+              <strong style="font-size:15px;color:${esc(team.color || 'var(--ink)')};">${esc(team.name)}</strong>
+              ${team.info ? `<p class="sub" style="margin:8px 0 0;white-space:pre-wrap;">${esc(team.info)}</p>` : ''}
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                ${team.discord_url ? `<a class="btn btn-primary btn-sm btn-equal" href="${esc(team.discord_url)}" target="_blank" rel="noopener">Join Discord</a>` : ''}
+                ${team.roblox_group_url ? `<a class="btn btn-ghost btn-sm btn-equal" href="${esc(team.roblox_group_url)}" target="_blank" rel="noopener">Roblox group</a>` : ''}
               </div>
-            </div>`;
-        }).join('')}
+            </div>` : ''}
+            ${skillset ? `
+            <div class="panel" style="margin:0;padding:14px 16px;">
+              <div class="preview-label" style="margin-bottom:2px;">Skillset</div>
+              <strong style="font-size:15px;color:${esc(skillset.color || 'var(--ink)')};">${esc(skillset.name)}</strong>
+              ${skillset.description ? `<p class="sub" style="margin:8px 0 0;">${esc(skillset.description)}</p>` : ''}
+            </div>` : ''}
           </div>`;
       }
 
@@ -5064,13 +4886,10 @@
       let modalMode = 'view';
       let teamsList = [];
       let skillsetsList = [];
-      let currentAssignments = [];
-      let currentAssignmentsLoading = false;
       let configTeamId = '';
       let configSkillsetId = '';
       let configBusy = false;
       let configMsg = null;
-      let removeBusyTeamId = null;
       let warnings = [];
       let bannedInfo = null;
       let warnBusy = false;
@@ -5200,8 +5019,6 @@
           : 0;
 
         if (modalMode === 'config') {
-          const joinedTeamIds = new Set(currentAssignments.map(a => String(a.teamId)));
-          const availableTeams = teamsList.filter(t => !joinedTeamIds.has(String(t.id)));
           return `
     <div class="modal-scrim" id="staffModalScrim">
       <div class="modal-card">
@@ -5213,40 +5030,24 @@
         </div>
         <div class="modal-body">
           <div class="modal-section">
-            <div class="modal-section-title">Teams &amp; skillsets</div>
+            <div class="modal-section-title">Team & skillset</div>
             ${configMsg ? `<div class="${configMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(configMsg.text)}</span></div>` : ''}
-
-            ${currentAssignmentsLoading ? `<div class="dash-loading">Loading current teams...</div>` : currentAssignments.length === 0 ? `<div class="empty-note" style="margin-bottom:12px;">Not on any team yet.</div>` : `
-              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
-                ${currentAssignments.map(a => `
-                  <div class="role-row" style="margin:0;">
-                    <div class="role-row-top">
-                      <div>
-                        <strong style="color:${esc((a.team && a.team.color) || 'var(--ink)')};">${esc(a.team ? a.team.name : 'No team')}</strong>
-                        ${a.skillset ? `<div class="role-meta">${esc(a.skillset.name)}</div>` : ''}
-                      </div>
-                      <button class="btn btn-ghost btn-sm" data-remove-team="${esc(a.teamId)}" ${removeBusyTeamId === a.teamId ? 'disabled' : ''}>${removeBusyTeamId === a.teamId ? 'Removing...' : 'Remove'}</button>
-                    </div>
-                  </div>`).join('')}
-              </div>
-            `}
-
             <div class="field">
-              <label>Add to team</label>
+              <label>Team</label>
               <select id="cfgTeam">
-                <option value="">${availableTeams.length ? 'Select a team' : 'No more teams to add'}</option>
-                ${availableTeams.map(t => `<option value="${esc(t.id)}" ${String(configTeamId) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+                <option value="">No team</option>
+                ${teamsList.map(t => `<option value="${esc(t.id)}" ${String(configTeamId) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
               </select>
             </div>
             <div class="field">
-              <label>Skillset on this team</label>
+              <label>Skillset</label>
               <select id="cfgSkillset">
                 <option value="">No skillset</option>
                 ${skillsetsList.map(sk => `<option value="${esc(sk.id)}" ${String(configSkillsetId) === String(sk.id) ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}
               </select>
             </div>
             <div style="display:flex;gap:8px;margin-top:8px;">
-              <button class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId || !availableTeams.length ? 'disabled' : ''}>${configBusy ? 'Adding...' : 'Add team'}</button>
+              <button class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId ? 'disabled' : ''}>${configBusy ? 'Saving...' : 'Save assignment'}</button>
               <button class="btn btn-ghost btn-sm btn-equal" id="cfgBackBtn">Back</button>
             </div>
           </div>
@@ -5451,11 +5252,6 @@
         modalMode = 'config';
         configMsg = null;
         configBusy = false;
-        configTeamId = '';
-        configSkillsetId = '';
-        currentAssignments = [];
-        currentAssignmentsLoading = true;
-        paintModal();
         try {
           const [t, sk] = await Promise.all([listTeams(), listSkillsets()]);
           teamsList = t;
@@ -5464,12 +5260,10 @@
           teamsList = [];
           skillsetsList = [];
         }
-        try {
-          currentAssignments = activeProfile.robloxUserId ? await listUserTeamAssignments(activeProfile.robloxUserId) : [];
-        } catch (e) {
-          currentAssignments = [];
-        }
-        currentAssignmentsLoading = false;
+        const matchTeam = teamsList.find(t => t.name === activeProfile.team);
+        const matchSk = skillsetsList.find(sk => sk.name === activeProfile.skillset);
+        configTeamId = matchTeam ? matchTeam.id : '';
+        configSkillsetId = matchSk ? matchSk.id : '';
         paintModal();
       }
 
@@ -5583,62 +5377,33 @@
           const skEl = document.getElementById('cfgSkillset');
           configTeamId = teamEl ? teamEl.value : '';
           configSkillsetId = skEl ? skEl.value : '';
-          if (!configTeamId) { configMsg = { ok: false, text: 'Pick a team to add.' }; paintModal(); return; }
           configBusy = true; configMsg = null; paintModal();
           try {
             await assignUserTeamSkillset(
               activeProfile.robloxUserId,
               activeProfile.robloxUsername,
-              configTeamId,
+              configTeamId || null,
               configSkillsetId || null
             );
-            currentAssignments = await listUserTeamAssignments(activeProfile.robloxUserId);
-            const teamNames = currentAssignments.map(a => a.team && a.team.name).filter(Boolean);
-            const skillsetNames = [...new Set(currentAssignments.map(a => a.skillset && a.skillset.name).filter(Boolean))];
-            activeProfile.team = teamNames.join(', ') || null;
-            activeProfile.skillset = skillsetNames.join(', ') || null;
+            const tName = teamsList.find(t => String(t.id) === String(configTeamId));
+            const sName = skillsetsList.find(sk => String(sk.id) === String(configSkillsetId));
+            activeProfile.team = tName ? tName.name : null;
+            activeProfile.skillset = sName ? sName.name : null;
             const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
             if (idx >= 0) {
               staff[idx].team = activeProfile.team;
               staff[idx].skillset = activeProfile.skillset;
             }
-            configTeamId = ''; configSkillsetId = '';
             configBusy = false;
-            configMsg = { ok: true, text: 'Team added.' };
+            configMsg = { ok: true, text: 'Assignment saved.' };
             paintModal();
             paintTable();
           } catch (err) {
             configBusy = false;
-            configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not add that team.' };
+            configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not save assignment.' };
             paintModal();
           }
         });
-
-        document.querySelectorAll('[data-remove-team]').forEach(el => el.addEventListener('click', async () => {
-          const teamId = el.dataset.removeTeam;
-          removeBusyTeamId = teamId; configMsg = null; paintModal();
-          try {
-            await removeUserTeamAssignment(activeProfile.robloxUserId, teamId);
-            currentAssignments = await listUserTeamAssignments(activeProfile.robloxUserId);
-            const teamNames = currentAssignments.map(a => a.team && a.team.name).filter(Boolean);
-            const skillsetNames = [...new Set(currentAssignments.map(a => a.skillset && a.skillset.name).filter(Boolean))];
-            activeProfile.team = teamNames.join(', ') || null;
-            activeProfile.skillset = skillsetNames.join(', ') || null;
-            const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
-            if (idx >= 0) {
-              staff[idx].team = activeProfile.team;
-              staff[idx].skillset = activeProfile.skillset;
-            }
-            removeBusyTeamId = null;
-            configMsg = { ok: true, text: 'Team removed.' };
-            paintModal();
-            paintTable();
-          } catch (err) {
-            removeBusyTeamId = null;
-            configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not remove that team.' };
-            paintModal();
-          }
-        }));
 
         const issueWarnBtn = document.getElementById('issueWarnBtn');
         if (issueWarnBtn) issueWarnBtn.addEventListener('click', async () => {
