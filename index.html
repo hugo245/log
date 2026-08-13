@@ -15,26 +15,77 @@
     :root {
       --bg: #F5F6F8;
       --surface: #FFFFFF;
+      --row-alt: #FAFAFB;
+      --input-bg: #FCFCFD;
       --ink: #171A21;
       --ink-soft: #5B616E;
       --muted: #8A93A3;
       --line: #E4E7ED;
       --accent: #3730D9;
       --accent-soft: #EEEDFB;
+      --accent-soft-strong: #E2E0FA;
+      --btn-primary-bg: #171A21;
+      --btn-primary-bg-hover: #000000;
+      --btn-primary-text: #FFFFFF;
       --warn-bg: #FFF7E6;
       --warn-line: #F1E4BC;
       --warn-text: #8A6300;
       --ok-bg: #E9F7EF;
       --ok-line: #C7E9D3;
       --ok-text: #178A4C;
+      --ok-text-hover: #126B3B;
       --err-bg: #FDEDEC;
       --err-line: #F5C6C0;
       --err-text: #B3311C;
       --radius: 14px;
     }
 
+    :root[data-theme="dark"] {
+      --bg: #101114;
+      --surface: #1A1B20;
+      --row-alt: #1E2026;
+      --input-bg: #1E2026;
+      --ink: #E6E7EB;
+      --ink-soft: #9DA1AC;
+      --muted: #6B707C;
+      --line: #2A2C33;
+      --accent: #7C76E8;
+      --accent-soft: #23222E;
+      --accent-soft-strong: #2C2A3C;
+      --btn-primary-bg: #E6E7EB;
+      --btn-primary-bg-hover: #FFFFFF;
+      --btn-primary-text: #14161A;
+      --warn-bg: #2A2313;
+      --warn-line: #443A1E;
+      --warn-text: #D8AC50;
+      --ok-bg: #132420;
+      --ok-line: #1F3B32;
+      --ok-text: #4FBF8B;
+      --ok-text-hover: #6DD6A3;
+      --err-bg: #2A1917;
+      --err-line: #45241F;
+      --err-text: #E2837A;
+    }
+
     * {
       box-sizing: border-box;
+    }
+
+    html {
+      color-scheme: light;
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+    }
+
+    body,
+    .panel,
+    .topbar,
+    input,
+    select,
+    textarea {
+      transition: background-color .15s ease, border-color .15s ease, color .15s ease;
     }
 
     html,
@@ -195,6 +246,28 @@
       background: var(--bg);
     }
 
+    .theme-toggle {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg);
+      border-color: var(--accent);
+    }
+
     .hr-pill .dot-live {
       width: 7px;
       height: 7px;
@@ -274,13 +347,13 @@
 
     .field .hint {
       font-weight: 400;
-      color: #9BA1AC;
+      color: var(--muted);
       margin-left: 6px;
     }
 
     .hint {
       font-weight: 400;
-      color: #9BA1AC;
+      color: var(--muted);
       font-size: 12.5px;
     }
 
@@ -302,7 +375,7 @@
       font-family: 'Inter', sans-serif;
       font-size: 14px;
       color: var(--ink);
-      background: #FCFCFD;
+      background: var(--input-bg);
       transition: border-color .15s, box-shadow .15s;
     }
 
@@ -318,7 +391,7 @@
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--accent-soft);
-      background: #fff;
+      background: var(--surface);
     }
 
     input.field-invalid,
@@ -368,13 +441,13 @@
     }
 
     .btn-primary {
-      background: var(--ink);
-      color: #fff;
+      background: var(--btn-primary-bg);
+      color: var(--btn-primary-text);
       width: 100%;
     }
 
     .btn-primary:hover {
-      background: #000;
+      background: var(--btn-primary-bg-hover);
     }
 
     .btn-ghost {
@@ -383,7 +456,7 @@
     }
 
     .btn-ghost:hover {
-      background: #E2E0FA;
+      background: var(--accent-soft-strong);
     }
 
     .btn-ok {
@@ -392,7 +465,7 @@
     }
 
     .btn-ok:hover {
-      background: #126B3B;
+      background: var(--ok-text-hover);
     }
 
     .btn-ok:disabled {
@@ -603,7 +676,7 @@
     .items-list li {
       font-size: 13.8px;
       line-height: 1.7;
-      color: #33363D;
+      color: var(--ink);
       padding: 6px 0 6px 4px;
     }
 
@@ -749,7 +822,7 @@
       width: 44px;
       height: 44px;
       border-radius: 12px;
-      background: var(--ink);
+      background: var(--accent);
       color: #fff;
       display: flex;
       align-items: center;
@@ -823,7 +896,7 @@
       width: 44px;
       height: 44px;
       border-radius: 12px;
-      background: var(--ink);
+      background: var(--accent);
       color: #fff;
       display: flex;
       align-items: center;
@@ -898,7 +971,7 @@
     }
 
     .tab-btn.active {
-      background: var(--ink);
+      background: var(--accent);
       color: #fff;
     }
 
@@ -955,7 +1028,7 @@
       color: var(--muted);
       font-weight: 700;
       padding: 11px 14px;
-      background: #FAFAFB;
+      background: var(--row-alt);
       border-bottom: 1px solid var(--line);
       white-space: nowrap;
     }
@@ -971,7 +1044,7 @@
     }
 
     table.req-table tbody tr:hover {
-      background: #FBFBFD;
+      background: var(--row-alt);
     }
 
     table.req-table td.id-cell {
@@ -1080,7 +1153,7 @@
     }
 
     tr.detail-row td {
-      background: #FAFAFB;
+      background: var(--row-alt);
       padding: 14px 24px;
       border-bottom: 1px solid var(--line);
     }
@@ -1089,7 +1162,7 @@
       margin: 0;
       padding-left: 18px;
       font-size: 12.8px;
-      color: #33363D;
+      color: var(--ink);
       line-height: 1.7;
     }
 
@@ -1119,7 +1192,7 @@
 
     .footer-note {
       text-align: center;
-      color: #A2A8B4;
+      color: var(--muted);
       font-size: 12px;
       margin-top: 22px;
     }
@@ -1212,6 +1285,41 @@
       background: var(--accent-soft);
       color: var(--accent);
       white-space: nowrap;
+    }
+
+    .team-chip-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 10px;
+    }
+
+    .team-chip-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-start;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
+    .team-chip,
+    .skillset-chip {
+      display: inline-flex;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1.5px solid var(--line);
+      background: var(--surface);
+      white-space: nowrap;
+    }
+
+    .skillset-chip {
+      font-weight: 600;
+      opacity: .85;
     }
 
     .staff-grid {
@@ -2008,6 +2116,15 @@
 </head>
 
 <body>
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('pv_theme');
+        var theme = saved === 'dark' || saved === 'light' ? saved : 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { }
+    })();
+  </script>
 
   <div id="app">
     <div class="gate-shell">
@@ -2026,6 +2143,28 @@
     const SETTINGS_TABLE = 'app_settings';
     const SESSION_STORAGE_KEY = 'pv_hr_session_token';
     const RETURN_HASH_KEY = 'pv_return_hash';
+    const THEME_STORAGE_KEY = 'pv_theme';
+
+    function getTheme() {
+      return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    }
+    function setTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (e) { }
+    }
+    function toggleTheme() {
+      setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+      const app = document.getElementById('app');
+      if (app) {
+        const btn = document.getElementById('themeToggleBtn');
+        if (btn) { btn.innerHTML = themeToggleIcon(); btn.setAttribute('aria-label', getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'); }
+      }
+    }
+    function themeToggleIcon() {
+      return getTheme() === 'dark'
+        ? '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.6M12 18.9v2.6M4.4 4.4l1.85 1.85M17.75 17.75l1.85 1.85M2.5 12h2.6M18.9 12h2.6M4.4 19.6l1.85-1.85M17.75 6.25l1.85-1.85"></path></svg>' // sun
+        : '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7Z"></path></svg>'; // moon
+    }
 
     const PERMISSION_LABELS = {
       'dashboard.view': 'View dashboard',
@@ -2626,6 +2765,13 @@
     async function assignUserTeamSkillset(robloxUserId, robloxUsername, teamId, skillsetId) {
       await callHrData('assign_user_team_skillset', { robloxUserId, robloxUsername, teamId, skillsetId });
     }
+    async function removeUserTeamAssignment(robloxUserId, teamId) {
+      await callHrData('remove_user_team_assignment', { robloxUserId, teamId });
+    }
+    async function listUserTeamAssignments(robloxUserId) {
+      const json = await callHrData('list_user_team_assignments', { robloxUserId });
+      return json.data || [];
+    }
     async function listUserWarnings(robloxUserId) {
       const json = await callHrData('list_user_warnings', { robloxUserId });
       return json;
@@ -2890,12 +3036,14 @@
     <div class="topbar">
       <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
+        <button class="theme-toggle" id="themeToggleBtn" type="button" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${isHrAuthed
           ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}
              <details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
                  ${canSeeManage ? `<a href="#/manage">Manage</a><div class="acct-menu-divider"></div>` : ''}
+                 <a href="#/my">My teams &amp; skillsets</a>
                  <a href="#/tos">Terms of Service</a>
                  <a href="#/aup">Acceptable Use Policy</a>
                  <a href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a>
@@ -2911,6 +3059,8 @@
     function wireTopbarSignOut() {
       const btn = document.getElementById('signOutBtn');
       if (btn) btn.addEventListener('click', hrSignOut);
+      const themeBtn = document.getElementById('themeToggleBtn');
+      if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     }
 
     function renderHrGate() {
@@ -2947,6 +3097,7 @@
       </div>
     </div>`;
 
+      wireTopbarSignOut();
       const btn = document.getElementById('robloxSignInBtn');
       if (btn) btn.addEventListener('click', () => beginLogin('#/dashboard'));
     }
@@ -3423,6 +3574,9 @@
       let myBroadcasts = [];
       let myBroadcastsLoading = true;
 
+      let myTeams = [];
+      let myTeamsLoading = true;
+
       function paint() {
         const totals = (summary && summary.totals) || {};
         const pendingRequests = summary ? summary.requests.filter(r => r.status === 'pending') : [];
@@ -3506,6 +3660,22 @@
             <button class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
           `}
         </div>
+      </div>
+
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">Where you fit in</span>
+        <h1>My teams &amp; skillsets</h1>
+      </div>
+      <div class="panel">
+        ${myTeamsLoading ? `<div class="dash-loading">Loading your teams...</div>` : myTeams.length === 0 ? `<div class="empty-note">You haven't joined any teams yet. Ask whoever invited you for an invite link.</div>` : `
+          <div class="team-chip-grid">
+            ${myTeams.map(a => `
+              <div class="team-chip-card">
+                ${a.team ? `<span class="team-chip" style="border-color:${esc(a.team.color || 'var(--line)')};color:${esc(a.team.color || 'var(--ink)')};">${esc(a.team.name)}</span>` : `<span class="team-chip">No team</span>`}
+                ${a.skillset ? `<span class="skillset-chip" style="border-color:${esc(a.skillset.color || 'var(--line)')};color:${esc(a.skillset.color || 'var(--ink)')};">${esc(a.skillset.name)}</span>` : ''}
+              </div>`).join('')}
+          </div>
+        `}
       </div>
 
       <div class="heading-block" style="margin-top:36px;">
@@ -3652,12 +3822,25 @@
         paint();
       }
 
+      async function loadMyTeamsData() {
+        myTeamsLoading = true; paint();
+        try {
+          myTeams = await getMyAssignment();
+        } catch (err) {
+          myTeams = [];
+        }
+        if (myGen !== renderGen) return;
+        myTeamsLoading = false;
+        paint();
+      }
+
       paint();
       loadSummary();
       loadMethod();
       loadEligibility();
       loadWarnings();
       loadMyBroadcastsData();
+      loadMyTeamsData();
     }
 
     function renderManagePanel() {
@@ -4726,32 +4909,41 @@
       let loadError = null;
       let busyStepId = null;
       let stepMessage = {};
-      let myAssignment = null;
+      let myAssignment = [];
 
       function renderTeamInfoBody(s) {
-        const team = myAssignment && myAssignment.team;
-        const skillset = myAssignment && myAssignment.skillset;
-        if (!team && !skillset) {
+        const assignments = myAssignment || [];
+        if (!assignments.length) {
           return `<div class="empty-note" style="margin-top:10px;">You haven't been assigned to a team yet. Ask whoever invited you for an invite link, or check back later.</div>`;
         }
         return `
           <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
-            ${team ? `
+            ${assignments.map(a => {
+          const team = a.team;
+          const skillset = a.skillset;
+          if (!team && !skillset) return '';
+          return `
             <div class="panel" style="margin:0;padding:14px 16px;">
-              <div class="preview-label" style="margin-bottom:2px;">Team</div>
-              <strong style="font-size:15px;color:${esc(team.color || 'var(--ink)')};">${esc(team.name)}</strong>
-              ${team.info ? `<p class="sub" style="margin:8px 0 0;white-space:pre-wrap;">${esc(team.info)}</p>` : ''}
-              <div style="display:flex;gap:8px;margin-top:12px;">
-                ${team.discord_url ? `<a class="btn btn-primary btn-sm btn-equal" href="${esc(team.discord_url)}" target="_blank" rel="noopener">Join Discord</a>` : ''}
-                ${team.roblox_group_url ? `<a class="btn btn-ghost btn-sm btn-equal" href="${esc(team.roblox_group_url)}" target="_blank" rel="noopener">Roblox group</a>` : ''}
+              <div style="display:flex;flex-wrap:wrap;gap:16px;">
+                ${team ? `
+                <div style="flex:1;min-width:160px;">
+                  <div class="preview-label" style="margin-bottom:2px;">Team</div>
+                  <strong style="font-size:15px;color:${esc(team.color || 'var(--ink)')};">${esc(team.name)}</strong>
+                  ${team.info ? `<p class="sub" style="margin:8px 0 0;white-space:pre-wrap;">${esc(team.info)}</p>` : ''}
+                  <div style="display:flex;gap:8px;margin-top:12px;">
+                    ${team.discord_url ? `<a class="btn btn-primary btn-sm btn-equal" href="${esc(team.discord_url)}" target="_blank" rel="noopener">Join Discord</a>` : ''}
+                    ${team.roblox_group_url ? `<a class="btn btn-ghost btn-sm btn-equal" href="${esc(team.roblox_group_url)}" target="_blank" rel="noopener">Roblox group</a>` : ''}
+                  </div>
+                </div>` : ''}
+                ${skillset ? `
+                <div style="flex:1;min-width:160px;">
+                  <div class="preview-label" style="margin-bottom:2px;">Skillset</div>
+                  <strong style="font-size:15px;color:${esc(skillset.color || 'var(--ink)')};">${esc(skillset.name)}</strong>
+                  ${skillset.description ? `<p class="sub" style="margin:8px 0 0;">${esc(skillset.description)}</p>` : ''}
+                </div>` : ''}
               </div>
-            </div>` : ''}
-            ${skillset ? `
-            <div class="panel" style="margin:0;padding:14px 16px;">
-              <div class="preview-label" style="margin-bottom:2px;">Skillset</div>
-              <strong style="font-size:15px;color:${esc(skillset.color || 'var(--ink)')};">${esc(skillset.name)}</strong>
-              ${skillset.description ? `<p class="sub" style="margin:8px 0 0;">${esc(skillset.description)}</p>` : ''}
-            </div>` : ''}
+            </div>`;
+        }).join('')}
           </div>`;
       }
 
@@ -4886,10 +5078,13 @@
       let modalMode = 'view';
       let teamsList = [];
       let skillsetsList = [];
+      let currentAssignments = [];
+      let currentAssignmentsLoading = false;
       let configTeamId = '';
       let configSkillsetId = '';
       let configBusy = false;
       let configMsg = null;
+      let removeBusyTeamId = null;
       let warnings = [];
       let bannedInfo = null;
       let warnBusy = false;
@@ -4923,10 +5118,13 @@
       }
 
       function fallbackAvatar() {
+        const dark = getTheme() === 'dark';
+        const bg = dark ? '23222E' : 'EEEDFB';
+        const fg = dark ? '7C76E8' : '3730D9';
         return "data:image/svg+xml;utf8," + encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
-      <rect width="150" height="150" fill="#EEEDFB"/>
-      <text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#3730D9" text-anchor="middle">?</text>
+      <rect width="150" height="150" fill="#${bg}"/>
+      <text x="50%" y="56%" font-family="Inter,sans-serif" font-size="60" fill="#${fg}" text-anchor="middle">?</text>
     </svg>
   `);
       }
@@ -5019,6 +5217,8 @@
           : 0;
 
         if (modalMode === 'config') {
+          const joinedTeamIds = new Set(currentAssignments.map(a => String(a.teamId)));
+          const availableTeams = teamsList.filter(t => !joinedTeamIds.has(String(t.id)));
           return `
     <div class="modal-scrim" id="staffModalScrim">
       <div class="modal-card">
@@ -5030,24 +5230,40 @@
         </div>
         <div class="modal-body">
           <div class="modal-section">
-            <div class="modal-section-title">Team & skillset</div>
+            <div class="modal-section-title">Teams &amp; skillsets</div>
             ${configMsg ? `<div class="${configMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(configMsg.text)}</span></div>` : ''}
+
+            ${currentAssignmentsLoading ? `<div class="dash-loading">Loading current teams...</div>` : currentAssignments.length === 0 ? `<div class="empty-note" style="margin-bottom:12px;">Not on any team yet.</div>` : `
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+                ${currentAssignments.map(a => `
+                  <div class="role-row" style="margin:0;">
+                    <div class="role-row-top">
+                      <div>
+                        <strong style="color:${esc((a.team && a.team.color) || 'var(--ink)')};">${esc(a.team ? a.team.name : 'No team')}</strong>
+                        ${a.skillset ? `<div class="role-meta">${esc(a.skillset.name)}</div>` : ''}
+                      </div>
+                      <button class="btn btn-ghost btn-sm" data-remove-team="${esc(a.teamId)}" ${removeBusyTeamId === a.teamId ? 'disabled' : ''}>${removeBusyTeamId === a.teamId ? 'Removing...' : 'Remove'}</button>
+                    </div>
+                  </div>`).join('')}
+              </div>
+            `}
+
             <div class="field">
-              <label>Team</label>
+              <label>Add to team</label>
               <select id="cfgTeam">
-                <option value="">No team</option>
-                ${teamsList.map(t => `<option value="${esc(t.id)}" ${String(configTeamId) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+                <option value="">${availableTeams.length ? 'Select a team' : 'No more teams to add'}</option>
+                ${availableTeams.map(t => `<option value="${esc(t.id)}" ${String(configTeamId) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
               </select>
             </div>
             <div class="field">
-              <label>Skillset</label>
+              <label>Skillset on this team</label>
               <select id="cfgSkillset">
                 <option value="">No skillset</option>
                 ${skillsetsList.map(sk => `<option value="${esc(sk.id)}" ${String(configSkillsetId) === String(sk.id) ? 'selected' : ''}>${esc(sk.name)}</option>`).join('')}
               </select>
             </div>
             <div style="display:flex;gap:8px;margin-top:8px;">
-              <button class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId ? 'disabled' : ''}>${configBusy ? 'Saving...' : 'Save assignment'}</button>
+              <button class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId || !availableTeams.length ? 'disabled' : ''}>${configBusy ? 'Adding...' : 'Add team'}</button>
               <button class="btn btn-ghost btn-sm btn-equal" id="cfgBackBtn">Back</button>
             </div>
           </div>
@@ -5252,6 +5468,11 @@
         modalMode = 'config';
         configMsg = null;
         configBusy = false;
+        configTeamId = '';
+        configSkillsetId = '';
+        currentAssignments = [];
+        currentAssignmentsLoading = true;
+        paintModal();
         try {
           const [t, sk] = await Promise.all([listTeams(), listSkillsets()]);
           teamsList = t;
@@ -5260,10 +5481,12 @@
           teamsList = [];
           skillsetsList = [];
         }
-        const matchTeam = teamsList.find(t => t.name === activeProfile.team);
-        const matchSk = skillsetsList.find(sk => sk.name === activeProfile.skillset);
-        configTeamId = matchTeam ? matchTeam.id : '';
-        configSkillsetId = matchSk ? matchSk.id : '';
+        try {
+          currentAssignments = activeProfile.robloxUserId ? await listUserTeamAssignments(activeProfile.robloxUserId) : [];
+        } catch (e) {
+          currentAssignments = [];
+        }
+        currentAssignmentsLoading = false;
         paintModal();
       }
 
@@ -5377,33 +5600,62 @@
           const skEl = document.getElementById('cfgSkillset');
           configTeamId = teamEl ? teamEl.value : '';
           configSkillsetId = skEl ? skEl.value : '';
+          if (!configTeamId) { configMsg = { ok: false, text: 'Pick a team to add.' }; paintModal(); return; }
           configBusy = true; configMsg = null; paintModal();
           try {
             await assignUserTeamSkillset(
               activeProfile.robloxUserId,
               activeProfile.robloxUsername,
-              configTeamId || null,
+              configTeamId,
               configSkillsetId || null
             );
-            const tName = teamsList.find(t => String(t.id) === String(configTeamId));
-            const sName = skillsetsList.find(sk => String(sk.id) === String(configSkillsetId));
-            activeProfile.team = tName ? tName.name : null;
-            activeProfile.skillset = sName ? sName.name : null;
+            currentAssignments = await listUserTeamAssignments(activeProfile.robloxUserId);
+            const teamNames = currentAssignments.map(a => a.team && a.team.name).filter(Boolean);
+            const skillsetNames = [...new Set(currentAssignments.map(a => a.skillset && a.skillset.name).filter(Boolean))];
+            activeProfile.team = teamNames.join(', ') || null;
+            activeProfile.skillset = skillsetNames.join(', ') || null;
             const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
             if (idx >= 0) {
               staff[idx].team = activeProfile.team;
               staff[idx].skillset = activeProfile.skillset;
             }
+            configTeamId = ''; configSkillsetId = '';
             configBusy = false;
-            configMsg = { ok: true, text: 'Assignment saved.' };
+            configMsg = { ok: true, text: 'Team added.' };
             paintModal();
             paintTable();
           } catch (err) {
             configBusy = false;
-            configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not save assignment.' };
+            configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not add that team.' };
             paintModal();
           }
         });
+
+        document.querySelectorAll('[data-remove-team]').forEach(el => el.addEventListener('click', async () => {
+          const teamId = el.dataset.removeTeam;
+          removeBusyTeamId = teamId; configMsg = null; paintModal();
+          try {
+            await removeUserTeamAssignment(activeProfile.robloxUserId, teamId);
+            currentAssignments = await listUserTeamAssignments(activeProfile.robloxUserId);
+            const teamNames = currentAssignments.map(a => a.team && a.team.name).filter(Boolean);
+            const skillsetNames = [...new Set(currentAssignments.map(a => a.skillset && a.skillset.name).filter(Boolean))];
+            activeProfile.team = teamNames.join(', ') || null;
+            activeProfile.skillset = skillsetNames.join(', ') || null;
+            const idx = staff.findIndex(x => x.robloxUserId === activeProfile.robloxUserId);
+            if (idx >= 0) {
+              staff[idx].team = activeProfile.team;
+              staff[idx].skillset = activeProfile.skillset;
+            }
+            removeBusyTeamId = null;
+            configMsg = { ok: true, text: 'Team removed.' };
+            paintModal();
+            paintTable();
+          } catch (err) {
+            removeBusyTeamId = null;
+            configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not remove that team.' };
+            paintModal();
+          }
+        }));
 
         const issueWarnBtn = document.getElementById('issueWarnBtn');
         if (issueWarnBtn) issueWarnBtn.addEventListener('click', async () => {

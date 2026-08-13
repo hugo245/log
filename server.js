@@ -508,6 +508,10 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
     if (!token) return null;
     const { data: link } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
     if (!link) return null;
+    // Each row is one team membership for this user, keyed on (roblox_user_id,
+    // team_id), so claiming a link for a new team adds to their existing
+    // teams instead of replacing them. Re-claiming a link for a team they're
+    // already on just refreshes the skillset/source on that same row.
     await supabase.from('user_assignments').upsert({
         roblox_user_id: robloxUserId,
         roblox_username: robloxUsername,
@@ -515,7 +519,7 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
         skillset_id: link.skillset_id,
         source_link_token: link.token,
         assigned_at: new Date().toISOString()
-    }, { onConflict: 'roblox_user_id' });
+    }, { onConflict: 'roblox_user_id,team_id' });
     if (link.role_id) {
         const { data: role, error: roleErr } = await supabase.from('roles').select('*').eq('id', link.role_id).maybeSingle();
         if (roleErr) throw roleErr;
@@ -541,6 +545,34 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
     }
     await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
     return link;
+}
+
+// Every team a given user belongs to, with the team and skillset details
+// resolved. Replaces the old "single assignment" model - a user can now be
+// on any number of teams at once.
+async function getUserTeamAssignments(robloxUserId) {
+    const { data: rows, error } = await supabase
+        .from('user_assignments')
+        .select('*')
+        .eq('roblox_user_id', robloxUserId)
+        .order('assigned_at', { ascending: true });
+    if (error) throw error;
+    const list = rows || [];
+    const teamIds = [...new Set(list.filter(r => r.team_id != null).map(r => r.team_id))];
+    const skillsetIds = [...new Set(list.filter(r => r.skillset_id != null).map(r => r.skillset_id))];
+    const [teamsRes, skillsetsRes] = await Promise.all([
+        teamIds.length ? supabase.from('teams').select('*').in('id', teamIds) : Promise.resolve({ data: [] }),
+        skillsetIds.length ? supabase.from('skillsets').select('*').in('id', skillsetIds) : Promise.resolve({ data: [] })
+    ]);
+    const teamById = {}; (teamsRes.data || []).forEach(t => { teamById[t.id] = t; });
+    const skillsetById = {}; (skillsetsRes.data || []).forEach(s => { skillsetById[s.id] = s; });
+    return list.map(r => ({
+        teamId: r.team_id,
+        skillsetId: r.skillset_id,
+        team: r.team_id != null ? (teamById[r.team_id] || null) : null,
+        skillset: r.skillset_id != null ? (skillsetById[r.skillset_id] || null) : null,
+        assignedAt: r.assigned_at
+    }));
 }
 
 async function isUserBanned(robloxUserId) {
@@ -874,12 +906,15 @@ app.post('/hr-data', async (req, res) => {
         });
 
         let rolesByUserId = {};
-        let assignByUserId = {};
+        let assignsByUserId = {};
         let teamNameById = {};
         let skillsetNameById = {};
         if (userIds.length) {
             (sessionRolesRes.data || []).forEach(s => { rolesByUserId[s.roblox_user_id] = s.roles || []; });
-            (assignmentsRes.data || []).forEach(a => { assignByUserId[a.roblox_user_id] = a; });
+            (assignmentsRes.data || []).forEach(a => {
+                if (!assignsByUserId[a.roblox_user_id]) assignsByUserId[a.roblox_user_id] = [];
+                assignsByUserId[a.roblox_user_id].push(a);
+            });
 
             const teamIds = [...new Set((assignmentsRes.data || []).filter(a => a.team_id != null).map(a => a.team_id))];
             const skillsetIds = [...new Set((assignmentsRes.data || []).filter(a => a.skillset_id != null).map(a => a.skillset_id))];
@@ -898,9 +933,13 @@ app.post('/hr-data', async (req, res) => {
             r.payment_method = m ? { method: m.method, details: m.details || {} } : null;
 
             r.requester_roles = r.roblox_user_id != null ? (rolesByUserId[r.roblox_user_id] || []) : [];
-            const assign = r.roblox_user_id != null ? assignByUserId[r.roblox_user_id] : null;
-            r.requester_team = assign && assign.team_id != null ? (teamNameById[assign.team_id] || null) : null;
-            r.requester_skillset = assign && assign.skillset_id != null ? (skillsetNameById[assign.skillset_id] || null) : null;
+            // A requester can belong to several teams now, so join their team
+            // names/skillset names together rather than picking just one.
+            const assigns = r.roblox_user_id != null ? (assignsByUserId[r.roblox_user_id] || []) : [];
+            const teamNames = [...new Set(assigns.filter(a => a.team_id != null).map(a => teamNameById[a.team_id]).filter(Boolean))];
+            const skillsetNames = [...new Set(assigns.filter(a => a.skillset_id != null).map(a => skillsetNameById[a.skillset_id]).filter(Boolean))];
+            r.requester_team = teamNames.length ? teamNames.join(', ') : null;
+            r.requester_skillset = skillsetNames.length ? skillsetNames.join(', ') : null;
         });
 
         res.json({ ok: true, data: rows });
@@ -1461,7 +1500,11 @@ app.post('/hr-data', async (req, res) => {
             ]);
             const teamNameById = {}; (teamsLookupRes.data || []).forEach(t => { teamNameById[t.id] = t.name; });
             const skillsetNameById = {}; (skillsetsLookupRes.data || []).forEach(s => { skillsetNameById[s.id] = s.name; });
-            const teamAssignByUserId = {}; (teamAssignRes.data || []).forEach(a => { teamAssignByUserId[a.roblox_user_id] = a; });
+            const teamAssignsByUserId = {};
+            (teamAssignRes.data || []).forEach(a => {
+                if (!teamAssignsByUserId[a.roblox_user_id]) teamAssignsByUserId[a.roblox_user_id] = [];
+                teamAssignsByUserId[a.roblox_user_id].push(a);
+            });
 
             const totalRequiredSteps = ONBOARDING_STEPS.filter(s => s.required).length;
             const requiredStepIds = new Set(ONBOARDING_STEPS.filter(s => s.required).map(s => s.id));
@@ -1487,6 +1530,7 @@ app.post('/hr-data', async (req, res) => {
                         onboardingCompleted: 0,
                         team: null,
                         skillset: null,
+                        teams: [],
                         warnCount: 0,
                         isBanned: false
                     });
@@ -1532,11 +1576,17 @@ app.post('/hr-data', async (req, res) => {
             byKey.forEach((row, key) => {
                 row.onboardingCompleted = progressByUser.get(key) || 0;
                 row.onboardingRequired = totalRequiredSteps;
-                const ta = row.robloxUserId != null ? teamAssignByUserId[row.robloxUserId] : null;
-                if (ta) {
-                    row.team = ta.team_id != null ? (teamNameById[ta.team_id] || null) : null;
-                    row.skillset = ta.skillset_id != null ? (skillsetNameById[ta.skillset_id] || null) : null;
-                }
+                const tas = row.robloxUserId != null ? (teamAssignsByUserId[row.robloxUserId] || []) : [];
+                row.teams = tas.map(ta => ({
+                    teamId: ta.team_id,
+                    teamName: ta.team_id != null ? (teamNameById[ta.team_id] || null) : null,
+                    skillsetId: ta.skillset_id,
+                    skillsetName: ta.skillset_id != null ? (skillsetNameById[ta.skillset_id] || null) : null
+                })).filter(t => t.teamName || t.skillsetName);
+                // Kept for backward compatibility with anything still reading
+                // a single team/skillset off a staff row (e.g. quick display).
+                row.team = row.teams.map(t => t.teamName).filter(Boolean).join(', ') || null;
+                row.skillset = [...new Set(row.teams.map(t => t.skillsetName).filter(Boolean))].join(', ') || null;
             });
 
             const warnCountByUser = {};
@@ -1729,15 +1779,14 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'list_my_broadcasts') {
         try {
-            const { data: ua } = await supabase
+            const { data: uas } = await supabase
                 .from('user_assignments')
                 .select('team_id')
-                .eq('roblox_user_id', session.roblox_user_id)
-                .maybeSingle();
-            const teamId = ua && ua.team_id != null ? ua.team_id : null;
+                .eq('roblox_user_id', session.roblox_user_id);
+            const teamIds = [...new Set((uas || []).filter(a => a.team_id != null).map(a => a.team_id))];
 
             const orParts = ["type.eq.global"];
-            if (teamId != null) orParts.push(`and(type.eq.team,team_id.eq.${teamId})`);
+            teamIds.forEach(teamId => orParts.push(`and(type.eq.team,team_id.eq.${teamId})`));
 
             const { data, error } = await supabase
                 .from('broadcasts')
@@ -1837,15 +1886,13 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'get_my_assignment') {
+        // Returns an array now - a user can be on any number of teams, each
+        // with its own skillset, instead of just one.
         try {
-            const { data: ua } = await supabase.from('user_assignments').select('*').eq('roblox_user_id', session.roblox_user_id).maybeSingle();
-            if (!ua) { res.json({ ok: true, data: null }); return; }
-            let team = null, skillset = null;
-            if (ua.team_id) { const { data } = await supabase.from('teams').select('*').eq('id', ua.team_id).maybeSingle(); team = data || null; }
-            if (ua.skillset_id) { const { data } = await supabase.from('skillsets').select('*').eq('id', ua.skillset_id).maybeSingle(); skillset = data || null; }
-            res.json({ ok: true, data: { team, skillset } });
+            const assignments = await getUserTeamAssignments(session.roblox_user_id);
+            res.json({ ok: true, data: assignments });
         } catch (e) {
-            res.status(500).json({ ok: false, error: 'Could not load your team assignment.' });
+            res.status(500).json({ ok: false, error: 'Could not load your team assignments.' });
         }
         return;
     }
@@ -1871,10 +1918,15 @@ app.post('/hr-data', async (req, res) => {
 
 
     if (action === 'assign_user_team_skillset') {
+        // Adds (or updates the skillset on) one team membership for the
+        // user. Since a user can now be on multiple teams at once, this no
+        // longer touches their other team memberships - it only ever
+        // upserts the single (user, team) row identified by teamId.
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         const robloxUserId = Number(payload.robloxUserId);
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
         const teamId = payload.teamId === '' || payload.teamId == null ? null : Number(payload.teamId);
+        if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
         const skillsetId = payload.skillsetId === '' || payload.skillsetId == null ? null : Number(payload.skillsetId);
         let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
         if (!username) {
@@ -1887,9 +1939,34 @@ app.post('/hr-data', async (req, res) => {
             team_id: teamId,
             skillset_id: skillsetId,
             assigned_at: new Date().toISOString()
-        }, { onConflict: 'roblox_user_id' });
+        }, { onConflict: 'roblox_user_id,team_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'remove_user_team_assignment') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        const teamId = payload.teamId === '' || payload.teamId == null ? null : Number(payload.teamId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
+        const { error } = await supabase.from('user_assignments').delete().eq('roblox_user_id', robloxUserId).eq('team_id', teamId);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_user_team_assignments') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        try {
+            const assignments = await getUserTeamAssignments(robloxUserId);
+            res.json({ ok: true, data: assignments });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load that user\'s team assignments.' });
+        }
         return;
     }
 
