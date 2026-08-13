@@ -3107,10 +3107,16 @@
 
       if (isHrAuthed) {
         app.innerHTML = `${topbar()}<div class="gate-shell"><div class="gate-card"><div class="gate-icon">PV</div><h2>Joining...</h2><p>Setting up your team and skillset.</p></div></div>`;
+        let claimFailed = false;
         try {
           await claimOnboardingLinkToken(token);
-        } catch (e) { }
+        } catch (e) { claimFailed = true; }
         clearPendingRef();
+        if (claimFailed) {
+          app.innerHTML = `${topbar()}<div class="gate-shell"><div class="gate-card"><div class="gate-icon">PV</div><h2>Couldn't join that team</h2><div class="error-box"><span>This invite link is invalid, expired, or something went wrong applying it. You can try the link again or ask whoever sent it for a new one.</span></div></div></div>`;
+          wireTopbarSignOut();
+          return;
+        }
         window.location.hash = '#/onboarding';
         return;
       }
