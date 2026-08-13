@@ -260,15 +260,24 @@ async function getDevexRate() {
 // still-pending Robux requests can't actually be paid out that way, so we
 // convert them to a USD amount (using the current DevEx rate) automatically
 // instead of leaving them stuck in a currency that no longer matches how
-// they get paid. Requests that are already paid/rejected, or already in
-// USD, are left alone.
+// they get paid. Symmetrically, if they switch back to the Robux/DevEx
+// payout method, any still-pending USD requests get converted back to
+// Robux. Requests that are already paid/rejected, or already in the
+// matching currency, are left alone.
 async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, method) {
-    if (method !== 'PAYPAL' && method !== 'VENMO') return;
+    let fromCurrency, toCurrency;
+    if (method === 'PAYPAL' || method === 'VENMO') {
+        fromCurrency = 'ROBUX'; toCurrency = 'USD';
+    } else if (method === 'DEVEX_ROBUX') {
+        fromCurrency = 'USD'; toCurrency = 'ROBUX';
+    } else {
+        return;
+    }
     try {
         let query = supabase
             .from('payment_requests')
             .select('id, payment, currency, status, paid')
-            .eq('currency', 'ROBUX')
+            .eq('currency', fromCurrency)
             .eq('paid', false);
         if (robloxUserId != null) {
             query = query.eq('roblox_user_id', robloxUserId);
@@ -287,8 +296,10 @@ async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, m
         if (!(rate > 0)) return;
 
         await Promise.all(pendingRows.map(row => {
-            const usdAmount = Math.round((Number(row.payment) || 0) * rate * 100) / 100;
-            return supabase.from('payment_requests').update({ payment: usdAmount, currency: 'USD' }).eq('id', row.id);
+            const amount = toCurrency === 'USD'
+                ? Math.round((Number(row.payment) || 0) * rate * 100) / 100
+                : Math.round((Number(row.payment) || 0) / rate);
+            return supabase.from('payment_requests').update({ payment: amount, currency: toCurrency }).eq('id', row.id);
         }));
     } catch (e) {
         // Best-effort - if this fails, the payment method itself was still saved successfully.
