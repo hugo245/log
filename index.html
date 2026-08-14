@@ -5,7 +5,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PlayVerse Payment Log</title>
-  <link rel="icon" type="image/x-icon" href="/images/favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
@@ -2083,6 +2082,191 @@
       box-shadow: 0 0 0 3px var(--accent-soft);
     }
 
+    .explore-panel {
+      display: flex;
+      align-items: stretch;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 22px;
+    }
+
+    .explore-sidebar {
+      width: 230px;
+      flex: 0 0 230px;
+      padding: 18px 16px 20px;
+      border-right: 1px solid var(--line);
+      background: var(--row-alt);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .explore-panel-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    .explore-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .explore-field>label {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+
+    .explore-select {
+      width: 100%;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      padding: 0 10px;
+      font-size: 12.5px;
+      font-family: inherit;
+      font-weight: 500;
+      color: var(--ink);
+      background: var(--surface);
+    }
+
+    .explore-range-select {
+      width: auto;
+      min-width: 150px;
+    }
+
+    .explore-chart-types {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .explore-chart-type-btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink-soft);
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 11.5px;
+      padding: 9px 6px;
+      border-radius: 8px;
+      cursor: pointer;
+      text-align: center;
+      line-height: 1.3;
+    }
+
+    .explore-chart-type-full {
+      width: 100%;
+      margin-top: 6px;
+    }
+
+    .explore-chart-type-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .explore-radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .explore-radio {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .explore-radio input {
+      accent-color: var(--accent);
+    }
+
+    .explore-radio-disabled {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    .explore-main {
+      flex: 1;
+      min-width: 0;
+      padding: 18px 20px 20px;
+    }
+
+    .explore-main-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .explore-metric-title {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .explore-metric-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .explore-big-number {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--ink);
+      letter-spacing: -.4px;
+      margin-top: 8px;
+    }
+
+    .explore-chart-area {
+      position: relative;
+      height: 320px;
+    }
+
+    .explore-table-wrap {
+      margin-bottom: 0;
+    }
+
+    @media (max-width:860px) {
+      .explore-panel {
+        flex-direction: column;
+      }
+
+      .explore-sidebar {
+        width: auto;
+        flex: none;
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+        flex-direction: row;
+        flex-wrap: wrap;
+      }
+
+      .explore-sidebar .explore-field {
+        flex: 1 1 160px;
+      }
+
+      .explore-chart-area {
+        height: 260px;
+      }
+    }
+
     .autocomplete-list {
       position: absolute;
       top: calc(100% + 4px);
@@ -3759,8 +3943,49 @@
       let search = '';
       let groupBy = 'game';
 
-      let earningsChartInstance = null;
-      let breakdownChartInstance = null;
+      let exploreChartInstance = null;
+
+      let chartMetric = 'paid_usd';
+      let chartInterval = 'day';
+      let chartBreakdown = 'none';
+      let chartType = 'line';
+      let chartSmoothing = 'none';
+      let chartOverlay = 'none';
+      let chartRange = '56';
+
+      const METRICS = {
+        paid_usd: { label: 'Paid amount', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r) },
+        pending_usd: { label: 'Pending amount', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending', value: r => usdEquivalent(r) },
+        tasks_completed: { label: 'Tasks completed', unit: 'count', dateField: 'paidAt', match: r => r.status === 'paid', value: () => 1 },
+        requests_submitted: { label: 'Requests submitted', unit: 'count', dateField: 'createdAt', match: () => true, value: () => 1 },
+        avg_payment: { label: 'Average payment', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r), isAverage: true }
+      };
+
+      const BREAKDOWN_DIMS = {
+        none: { label: 'None', fn: null },
+        game: { label: 'Game', fn: r => [r.game || '(no game)'] },
+        team: { label: 'Team', fn: r => splitList(r.requesterTeam).length ? splitList(r.requesterTeam) : ['(no team)'] },
+        skillset: { label: 'Skillset', fn: r => splitList(r.requesterSkillset).length ? splitList(r.requesterSkillset) : ['(no skillset)'] },
+        role: { label: 'Role', fn: r => (r.requesterRoles && r.requesterRoles.length) ? r.requesterRoles : ['(no role)'] },
+        user: { label: 'Person', fn: r => [r.robloxUsername || '(unknown)'] }
+      };
+
+      const CHART_TYPES = [
+        { key: 'line', label: 'Line chart' },
+        { key: 'hbar', label: 'Horizontal bar' },
+        { key: 'stacked', label: 'Stacked column' },
+        { key: 'pie', label: 'Pie chart' },
+        { key: 'table', label: 'Table' }
+      ];
+
+      const CHART_RANGES = [
+        { key: '7', label: 'Last 7 days' },
+        { key: '14', label: 'Last 14 days' },
+        { key: '30', label: 'Last 30 days' },
+        { key: '56', label: 'Last 56 days' },
+        { key: '90', label: 'Last 90 days' },
+        { key: 'all', label: 'All time' }
+      ];
 
       function usdEquivalent(r) {
         const amt = Number(r.payment) || 0;
@@ -3819,18 +4044,6 @@
         return rows;
       }
 
-      function computeMonthlySeries(rows) {
-        const map = new Map();
-        rows.filter(r => r.status === 'paid' && r.paidAt).forEach(r => {
-          const d = new Date(r.paidAt);
-          const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-          const cur = map.get(key) || { usdEq: 0, sortKey: d.getFullYear() * 12 + d.getMonth(), label: d.toLocaleString(undefined, { month: 'short', year: 'numeric' }) };
-          cur.usdEq += usdEquivalent(r);
-          map.set(key, cur);
-        });
-        return Array.from(map.values()).sort((a, b) => a.sortKey - b.sortKey);
-      }
-
       function computeBreakdown(rows, dimension) {
         const map = new Map();
         rows.forEach(r => {
@@ -3875,39 +4088,195 @@
 
       const GROUP_LABELS = { game: 'game', skillset: 'skillset', role: 'role', team: 'team', user: 'person' };
 
-      function paintShell() {
-        if (loading || loadError) {
-          app.innerHTML = `
-    ${topbar()}
-    <div class="dash-shell">
-      <div class="dash-head">
-        <div>
-          <span class="eyebrow">HR dashboard</span>
-          <h1 style="margin-bottom:4px;">Analytics</h1>
-          <p class="sub">Who's owed what, who's earned what, and where the money's going.</p>
-        </div>
-      </div>
-      ${loading ? `<div class="dash-loading">Loading payment requests...</div>` : `
-      <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>`}
-    </div>`;
-          wireTopbarSignOut();
-          const retryBtn = document.getElementById('retryBtn');
-          if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
-          return;
+      function bucketDate(ts, interval) {
+        const d = new Date(ts);
+        if (interval === 'week') {
+          const monday = new Date(d);
+          monday.setHours(0, 0, 0, 0);
+          monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+          return { key: monday.toISOString().slice(0, 10), sort: monday.getTime(), label: monday.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) };
+        }
+        if (interval === 'month') {
+          const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+          return { key, sort: d.getFullYear() * 12 + d.getMonth(), label: d.toLocaleString(undefined, { month: 'short', year: '2-digit' }) };
+        }
+        const day = new Date(d); day.setHours(0, 0, 0, 0);
+        return { key: day.toISOString().slice(0, 10), sort: day.getTime(), label: day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) };
+      }
+
+      function fmtMetric(metric, n) {
+        return metric.unit === 'usd' ? fmtUsd(n) : Math.round(n).toLocaleString();
+      }
+
+      function movingAverage(data, window) {
+        return data.map((_, i) => {
+          const start = Math.max(0, i - window + 1);
+          const slice = data.slice(start, i + 1);
+          return slice.reduce((a, b) => a + b, 0) / slice.length;
+        });
+      }
+
+      function chartRangeWindow() {
+        if (chartRange === 'all') return null;
+        const days = Number(chartRange);
+        const to = Date.now();
+        return { from: to - days * 24 * 60 * 60 * 1000, to };
+      }
+
+      function buildChartData(rows) {
+        const metric = METRICS[chartMetric];
+        const dim = BREAKDOWN_DIMS[chartBreakdown];
+        let eligible = rows.filter(metric.match).filter(r => r[metric.dateField]);
+        const win = chartRangeWindow();
+        if (win) eligible = eligible.filter(r => r[metric.dateField] >= win.from && r[metric.dateField] <= win.to);
+
+        let categories;
+        if (!dim.fn) {
+          categories = ['Total'];
+        } else {
+          const totals = new Map();
+          eligible.forEach(r => dim.fn(r).forEach(l => totals.set(l, (totals.get(l) || 0) + metric.value(r))));
+          const sorted = Array.from(totals.entries()).sort((a, b) => b[1] - a[1]).map(([l]) => l);
+          categories = sorted.slice(0, 6);
+          if (sorted.length > 6) categories = [...categories, 'Other'];
         }
 
-        const rows = getFilteredRows();
-        const pendingRows = rows.filter(r => r.status === 'pending');
-        const paidRows = rows.filter(r => r.status === 'paid');
-        const pendingRobux = pendingRows.filter(r => r.currency === 'ROBUX').reduce((s, r) => s + (Number(r.payment) || 0), 0);
-        const pendingUsd = pendingRows.filter(r => r.currency === 'USD').reduce((s, r) => s + (Number(r.payment) || 0), 0);
-        const paidUsdEquiv = paidRows.reduce((s, r) => s + usdEquivalent(r), 0);
+        const bucketMap = new Map();
+        eligible.forEach(r => {
+          const b = bucketDate(r[metric.dateField], chartInterval);
+          let entry = bucketMap.get(b.key);
+          if (!entry) { entry = { sort: b.sort, label: b.label, cats: new Map() }; bucketMap.set(b.key, entry); }
+          const labels = dim.fn ? dim.fn(r) : ['Total'];
+          const val = metric.value(r);
+          labels.forEach(l => {
+            const catKey = categories.includes(l) ? l : (categories.includes('Other') ? 'Other' : null);
+            if (!catKey) return;
+            const cur = entry.cats.get(catKey) || { sum: 0, count: 0 };
+            cur.sum += val; cur.count += 1;
+            entry.cats.set(catKey, cur);
+          });
+        });
 
-        const owedRows = computeOwed(rows);
-        const earningsRows = computeEarnings(rows);
-        const breakdownRows = computeBreakdown(rows, groupBy);
-        const monthly = computeMonthlySeries(rows);
+        const buckets = Array.from(bucketMap.values()).sort((a, b) => a.sort - b.sort);
+        const labels = buckets.map(b => b.label);
+        const series = categories.map(cat => ({
+          label: cat,
+          data: buckets.map(b => {
+            const c = b.cats.get(cat);
+            if (!c) return 0;
+            return metric.isAverage ? (c.count ? c.sum / c.count : 0) : c.sum;
+          })
+        }));
 
+        const totalsPerCat = categories.map(cat => {
+          let sum = 0, count = 0;
+          buckets.forEach(b => { const c = b.cats.get(cat); if (c) { sum += c.sum; count += c.count; } });
+          return { label: cat, value: metric.isAverage ? (count ? sum / count : 0) : sum, count };
+        });
+
+        const overallValue = metric.isAverage
+          ? (eligible.length ? eligible.reduce((s, r) => s + metric.value(r), 0) / eligible.length : 0)
+          : eligible.reduce((s, r) => s + metric.value(r), 0);
+
+        return { labels, series, categories, totalsPerCat, overallValue, eligibleCount: eligible.length };
+      }
+
+      function computePreviousPeriodSeries(bucketCount) {
+        const win = chartRangeWindow();
+        if (!win) return null;
+        const span = win.to - win.from;
+        const prevTo = win.from - 1;
+        const prevFrom = prevTo - span;
+        const metric = METRICS[chartMetric];
+        const prevRows = allRequests.filter(metric.match).filter(r => r[metric.dateField] && r[metric.dateField] >= prevFrom && r[metric.dateField] <= prevTo);
+        const bucketMap = new Map();
+        prevRows.forEach(r => {
+          const b = bucketDate(r[metric.dateField], chartInterval);
+          const cur = bucketMap.get(b.key) || { sort: b.sort, sum: 0, count: 0 };
+          cur.sum += metric.value(r); cur.count += 1;
+          bucketMap.set(b.key, cur);
+        });
+        const buckets = Array.from(bucketMap.values()).sort((a, b) => a.sort - b.sort);
+        const values = buckets.map(b => metric.isAverage ? (b.count ? b.sum / b.count : 0) : b.sum);
+        const aligned = [];
+        for (let i = 0; i < bucketCount; i++) aligned.push(values[i] !== undefined ? values[i] : 0);
+        return aligned;
+      }
+
+      function renderChartTableHtml(chartData) {
+        if (!chartData.labels.length) return `<div class="chart-empty">No data for this metric in the selected range.</div>`;
+        const metric = METRICS[chartMetric];
+        return `<div class="table-wrap an-table-wrap explore-table-wrap"><div class="table-scroll"><table class="an-table">
+          <thead><tr><th>Period</th>${chartData.series.map(s => `<th class="num-cell">${esc(s.label)}</th>`).join('')}</tr></thead>
+          <tbody>${chartData.labels.map((lab, i) => `<tr><td>${esc(lab)}</td>${chartData.series.map(s => `<td class="num-cell">${fmtMetric(metric, s.data[i])}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table></div></div>`;
+      }
+
+      function renderExplorePanelHtml(chartData) {
+        const metric = METRICS[chartMetric];
+        return `
+      <div class="explore-panel">
+        <div class="explore-sidebar">
+          <div class="explore-panel-title">Configure chart</div>
+          <div class="explore-field">
+            <label>Metric</label>
+            <select id="chartMetricSelect" class="explore-select">
+              ${Object.entries(METRICS).map(([k, m]) => `<option value="${k}" ${chartMetric === k ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="explore-field">
+            <label>Time interval</label>
+            <select id="chartIntervalSelect" class="explore-select">
+              <option value="day" ${chartInterval === 'day' ? 'selected' : ''}>Days</option>
+              <option value="week" ${chartInterval === 'week' ? 'selected' : ''}>Weeks</option>
+              <option value="month" ${chartInterval === 'month' ? 'selected' : ''}>Months</option>
+            </select>
+          </div>
+          <div class="explore-field">
+            <label>Breakdown by</label>
+            <select id="chartBreakdownSelect" class="explore-select">
+              ${Object.entries(BREAKDOWN_DIMS).map(([k, d]) => `<option value="${k}" ${chartBreakdown === k ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="explore-field">
+            <label>Chart type</label>
+            <div class="explore-chart-types">
+              ${CHART_TYPES.filter(c => c.key !== 'table').map(c => `<button type="button" class="explore-chart-type-btn ${chartType === c.key ? 'active' : ''}" data-chart-type="${c.key}">${esc(c.label)}</button>`).join('')}
+            </div>
+            <button type="button" class="explore-chart-type-btn explore-chart-type-full ${chartType === 'table' ? 'active' : ''}" data-chart-type="table">Table</button>
+          </div>
+          <div class="explore-field">
+            <label>Smoothing</label>
+            <div class="explore-radio-group">
+              <label class="explore-radio"><input type="radio" name="chartSmoothing" value="none" ${chartSmoothing === 'none' ? 'checked' : ''}> None</label>
+              <label class="explore-radio"><input type="radio" name="chartSmoothing" value="ma7" ${chartSmoothing === 'ma7' ? 'checked' : ''}> 7-period moving avg</label>
+            </div>
+          </div>
+          <div class="explore-field">
+            <label>Overlay</label>
+            <div class="explore-radio-group">
+              <label class="explore-radio"><input type="radio" name="chartOverlay" value="none" ${chartOverlay === 'none' ? 'checked' : ''}> None</label>
+              <label class="explore-radio ${chartBreakdown !== 'none' ? 'explore-radio-disabled' : ''}"><input type="radio" name="chartOverlay" value="previous" ${chartOverlay === 'previous' ? 'checked' : ''} ${chartBreakdown !== 'none' ? 'disabled' : ''}> Previous period</label>
+            </div>
+          </div>
+        </div>
+        <div class="explore-main">
+          <div class="explore-main-head">
+            <div>
+              <div class="explore-metric-title">${esc(metric.label)}${chartBreakdown !== 'none' ? ` by ${esc(BREAKDOWN_DIMS[chartBreakdown].label.toLowerCase())}` : ''}</div>
+              <div class="explore-metric-sub">Total over selected period</div>
+              <div class="explore-big-number">${fmtMetric(metric, chartData.overallValue)}</div>
+            </div>
+            <select id="chartRangeSelect" class="explore-select explore-range-select">
+              ${CHART_RANGES.map(o => `<option value="${o.key}" ${chartRange === o.key ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+            </select>
+          </div>
+          ${chartType === 'table' ? renderChartTableHtml(chartData) : (chartData.eligibleCount ? `<div class="explore-chart-area"><canvas id="exploreChart"></canvas></div>` : `<div class="chart-empty">No data for this metric in the selected range.</div>`)}
+        </div>
+      </div>`;
+      }
+
+      function renderLoadingOrError() {
         app.innerHTML = `
     ${topbar()}
     <div class="dash-shell">
@@ -3915,30 +4284,30 @@
         <div>
           <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Analytics</h1>
-          <p class="sub">Who's owed what, who's earned what, and where the money's going. Filters below apply to everything on this page.</p>
+          <p class="sub">Payment activity, filterable and broken down any way you need.</p>
+        </div>
+      </div>
+      ${loading ? `<div class="dash-loading">Loading payment requests...</div>` : `
+      <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>`}
+    </div>`;
+        wireTopbarSignOut();
+        const retryBtn = document.getElementById('retryBtn');
+        if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
+      }
+
+      function renderShell() {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        <div>
+          <span class="eyebrow">HR dashboard</span>
+          <h1 style="margin-bottom:4px;">Analytics</h1>
+          <p class="sub">Payment activity, filterable and broken down any way you need.</p>
         </div>
         <div class="dash-toolbar">
           <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
           <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
-        </div>
-      </div>
-
-      <div class="stat-strip">
-        <div class="strip-card">
-          <div class="strip-label">Pending Robux</div>
-          <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${fmtRobux(pendingRobux)}</div>
-        </div>
-        <div class="strip-card">
-          <div class="strip-label">Pending USD</div>
-          <div class="strip-value">${fmtUsd(pendingUsd)}</div>
-        </div>
-        <div class="strip-card">
-          <div class="strip-label">Paid out (USD equiv.)</div>
-          <div class="strip-value">${fmtUsd(paidUsdEquiv)}</div>
-        </div>
-        <div class="strip-card">
-          <div class="strip-label">Tasks completed</div>
-          <div class="strip-value">${paidRows.length}</div>
         </div>
       </div>
 
@@ -3989,31 +4358,39 @@
         </div>
       </div>
 
-      <div class="an-grid">
-        <div class="chart-card">
-          <div class="chart-card-head">
-            <div>
-              <div class="chart-card-title">Earnings over time</div>
-              <div class="chart-card-sub">Paid requests by month, converted to USD${personFilter.trim() ? ` &middot; matching "${esc(personFilter.trim())}"` : ' &middot; everyone matching the filters'}</div>
-            </div>
-          </div>
-          ${monthly.length ? `<div class="chart-canvas-wrap"><canvas id="earningsChart"></canvas></div>` : `<div class="chart-empty">No paid requests match these filters yet.</div>`}
-        </div>
+      <div id="anContent"></div>
 
-        <div class="chart-card">
-          <div class="chart-card-head">
-            <div>
-              <div class="chart-card-title">Breakdown by ${esc(GROUP_LABELS[groupBy])}</div>
-              <div class="chart-card-sub">Total value (USD equiv.) of matching requests</div>
-            </div>
-            <div class="an-toggle-group">
-              ${['game', 'skillset', 'role', 'team', 'user'].map(g => `<button class="an-toggle-btn ${groupBy === g ? 'active' : ''}" data-group="${g}">${GROUP_LABELS[g].charAt(0).toUpperCase() + GROUP_LABELS[g].slice(1)}</button>`).join('')}
-            </div>
-          </div>
-          ${breakdownRows.length ? `<div class="chart-canvas-wrap"><canvas id="breakdownChart"></canvas></div>` : `<div class="chart-empty">No requests match these filters yet.</div>`}
-          ${(groupBy === 'team' || groupBy === 'skillset' || groupBy === 'role') ? `<div class="chart-card-sub" style="margin:6px 0 4px;">A request counts toward every ${esc(GROUP_LABELS[groupBy])} its requester has, so totals can add up to more than the overall total.</div>` : ''}
+      <div class="footer-note">Robux amounts are converted to USD for charts and totals using the current DevEx rate (${(DEVEX_RATE * 10000).toFixed(2)} USD per 10,000 Robux). Tables show raw amounts per currency.</div>
+    </div>`;
+
+        wireTopbarSignOut();
+        wireShellEvents();
+        paintContent();
+      }
+
+      function buildContentHtml(data) {
+        const { pendingRobux, pendingUsd, paidUsdEquiv, paidCount, chartData, breakdownRows, owedRows, earningsRows } = data;
+        return `
+      <div class="stat-strip">
+        <div class="strip-card">
+          <div class="strip-label">Pending Robux</div>
+          <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${fmtRobux(pendingRobux)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Pending USD</div>
+          <div class="strip-value">${fmtUsd(pendingUsd)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Paid out (USD equiv.)</div>
+          <div class="strip-value">${fmtUsd(paidUsdEquiv)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Tasks completed</div>
+          <div class="strip-value">${paidCount}</div>
         </div>
       </div>
+
+      ${renderExplorePanelHtml(chartData)}
 
       <div class="an-section-title">Who's owed what (pending requests)</div>
       <div class="table-wrap an-table-wrap">
@@ -4052,33 +4429,47 @@
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing to show</h3><p>No requests match these filters.</p></div>`}
         </div>
-      </div>
-
-      <div class="footer-note">Robux amounts are converted to USD for charts and totals using the current DevEx rate (${(DEVEX_RATE * 10000).toFixed(2)} USD per 10,000 Robux). Tables show raw amounts per currency.</div>
-    </div>`;
-
-        wireTopbarSignOut();
-        wireEvents();
-        drawCharts(monthly, breakdownRows);
+      </div>`;
       }
 
-      function wireEvents() {
-        const retryBtn = document.getElementById('retryBtn');
-        if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
+      function paintContent() {
+        const contentEl = document.getElementById('anContent');
+        if (!contentEl) return;
 
+        const rows = getFilteredRows();
+        const pendingRows = rows.filter(r => r.status === 'pending');
+        const paidRows = rows.filter(r => r.status === 'paid');
+        const pendingRobux = pendingRows.filter(r => r.currency === 'ROBUX').reduce((s, r) => s + (Number(r.payment) || 0), 0);
+        const pendingUsd = pendingRows.filter(r => r.currency === 'USD').reduce((s, r) => s + (Number(r.payment) || 0), 0);
+        const paidUsdEquiv = paidRows.reduce((s, r) => s + usdEquivalent(r), 0);
+
+        const owedRows = computeOwed(rows);
+        const earningsRows = computeEarnings(rows);
+        const breakdownRows = computeBreakdown(rows, groupBy);
+        const chartData = buildChartData(rows);
+
+        contentEl.innerHTML = buildContentHtml({ pendingRobux, pendingUsd, paidUsdEquiv, paidCount: paidRows.length, chartData, breakdownRows, owedRows, earningsRows });
+
+        document.querySelectorAll('.an-toggle-btn').forEach(b => b.addEventListener('click', () => { groupBy = b.dataset.group; paintContent(); }));
+        wireExploreEvents();
+
+        drawExploreChart(chartData);
+      }
+
+      function wireShellEvents() {
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) refreshBtn.addEventListener('click', () => { load(); });
 
         const searchInput = document.getElementById('searchInput');
-        if (searchInput) searchInput.addEventListener('input', () => { search = searchInput.value; paintShell(); });
+        if (searchInput) searchInput.addEventListener('input', () => { search = searchInput.value; paintContent(); });
+
+        const personFilterInput = document.getElementById('personFilterInput');
+        if (personFilterInput) personFilterInput.addEventListener('input', () => { personFilter = personFilterInput.value; paintContent(); });
 
         const bind = (id, setter) => {
           const el = document.getElementById(id);
-          if (el) el.addEventListener('change', () => { setter(el.value); paintShell(); });
+          if (el) el.addEventListener('change', () => { setter(el.value); paintContent(); });
         };
-        const personFilterInput = document.getElementById('personFilterInput');
-        if (personFilterInput) personFilterInput.addEventListener('input', () => { personFilter = personFilterInput.value; paintShell(); });
-
         bind('statusFilterSelect', v => statusFilter = v);
         bind('gameFilterSelect', v => gameFilter = v);
         bind('teamFilterSelect', v => teamFilter = v);
@@ -4087,78 +4478,129 @@
         bind('currencyFilterSelect', v => currencyFilter = v);
         bind('dateFromInput', v => dateFrom = v);
         bind('dateToInput', v => dateTo = v);
-
-        document.querySelectorAll('.an-toggle-btn').forEach(b => b.addEventListener('click', () => { groupBy = b.dataset.group; paintShell(); }));
       }
 
-      function drawCharts(monthly, breakdownRows) {
-        if (typeof Chart === 'undefined') return;
+      function wireExploreEvents() {
+        const bindChart = (id, setter) => {
+          const el = document.getElementById(id);
+          if (el) el.addEventListener('change', () => { setter(el.value); paintContent(); });
+        };
+        bindChart('chartMetricSelect', v => chartMetric = v);
+        bindChart('chartIntervalSelect', v => chartInterval = v);
+        bindChart('chartBreakdownSelect', v => { chartBreakdown = v; if (v !== 'none') chartOverlay = 'none'; });
+        bindChart('chartRangeSelect', v => chartRange = v);
 
-        if (earningsChartInstance) { earningsChartInstance.destroy(); earningsChartInstance = null; }
-        if (breakdownChartInstance) { breakdownChartInstance.destroy(); breakdownChartInstance = null; }
+        document.querySelectorAll('.explore-chart-type-btn').forEach(b => b.addEventListener('click', () => { chartType = b.dataset.chartType; paintContent(); }));
+        document.querySelectorAll('input[name="chartSmoothing"]').forEach(r => r.addEventListener('change', () => { chartSmoothing = r.value; paintContent(); }));
+        document.querySelectorAll('input[name="chartOverlay"]').forEach(r => r.addEventListener('change', () => { if (!r.disabled) { chartOverlay = r.value; paintContent(); } }));
+      }
 
+      function drawExploreChart(chartData) {
+        if (exploreChartInstance) { exploreChartInstance.destroy(); exploreChartInstance = null; }
+        if (chartType === 'table' || typeof Chart === 'undefined') return;
+
+        const canvas = document.getElementById('exploreChart');
+        if (!canvas || !chartData.eligibleCount) return;
+
+        const metric = METRICS[chartMetric];
         const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--line').trim() || '#E4E7ED';
         const inkColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-soft').trim() || '#5B616E';
-        const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#3730D9';
+        const valueTick = v => metric.unit === 'usd' ? '$' + v : v;
 
-        const earningsCanvas = document.getElementById('earningsChart');
-        if (earningsCanvas && monthly.length) {
-          earningsChartInstance = new Chart(earningsCanvas, {
-            type: 'line',
+        if (chartType === 'pie') {
+          const top = chartData.totalsPerCat;
+          exploreChartInstance = new Chart(canvas, {
+            type: 'pie',
             data: {
-              labels: monthly.map(m => m.label),
+              labels: top.map(t => t.label),
               datasets: [{
-                label: 'Paid (USD equiv.)',
-                data: monthly.map(m => Number(m.usdEq.toFixed(2))),
-                borderColor: accent,
-                backgroundColor: accent + '33',
-                fill: true,
-                tension: 0.3,
-                pointRadius: 3
+                data: top.map(t => Number(t.value.toFixed(2))),
+                backgroundColor: top.map((_, i) => AN_PALETTE[i % AN_PALETTE.length])
               }]
             },
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              plugins: { legend: { display: false } },
-              scales: {
-                x: { grid: { color: gridColor }, ticks: { color: inkColor } },
-                y: { grid: { color: gridColor }, ticks: { color: inkColor, callback: v => '$' + v } }
-              }
+              plugins: { legend: { position: 'bottom', labels: { color: inkColor, boxWidth: 11, font: { size: 11 } } } }
             }
           });
+          return;
         }
 
-        const breakdownCanvas = document.getElementById('breakdownChart');
-        if (breakdownCanvas && breakdownRows.length) {
-          const top = breakdownRows.slice(0, 12);
-          breakdownChartInstance = new Chart(breakdownCanvas, {
+        if (chartType === 'hbar') {
+          const top = chartData.totalsPerCat.slice(0, 12);
+          exploreChartInstance = new Chart(canvas, {
             type: 'bar',
             data: {
-              labels: top.map(b => b.label),
+              labels: top.map(t => t.label),
               datasets: [{
-                label: 'Total (USD equiv.)',
-                data: top.map(b => Number(b.amount.toFixed(2))),
+                data: top.map(t => Number(t.value.toFixed(2))),
                 backgroundColor: top.map((_, i) => AN_PALETTE[i % AN_PALETTE.length]),
                 borderRadius: 6,
-                maxBarThickness: 46
+                maxBarThickness: 26
               }]
             },
             options: {
+              indexAxis: 'y',
               responsive: true,
               maintainAspectRatio: false,
               plugins: { legend: { display: false } },
               scales: {
-                x: { grid: { display: false }, ticks: { color: inkColor } },
-                y: { grid: { color: gridColor }, ticks: { color: inkColor, callback: v => '$' + v } }
+                x: { grid: { color: gridColor }, ticks: { color: inkColor, callback: valueTick } },
+                y: { grid: { display: false }, ticks: { color: inkColor } }
               }
             }
           });
+          return;
         }
+
+        const stacked = chartType === 'stacked';
+        const datasets = chartData.series.map((s, i) => ({
+          label: s.label,
+          data: chartSmoothing === 'ma7' && chartType === 'line' ? movingAverage(s.data, 7) : s.data,
+          borderColor: AN_PALETTE[i % AN_PALETTE.length],
+          backgroundColor: stacked ? AN_PALETTE[i % AN_PALETTE.length] : AN_PALETTE[i % AN_PALETTE.length] + (chartData.series.length === 1 ? '33' : '00'),
+          fill: chartType === 'line' ? chartData.series.length === 1 : true,
+          tension: .3,
+          borderWidth: 2,
+          pointRadius: chartData.labels.length > 40 ? 0 : 3,
+          maxBarThickness: 46
+        }));
+
+        if (chartType === 'line' && chartOverlay === 'previous' && chartBreakdown === 'none') {
+          const prev = computePreviousPeriodSeries(chartData.labels.length);
+          if (prev) {
+            datasets.push({
+              label: 'Previous period',
+              data: prev,
+              borderColor: inkColor,
+              backgroundColor: 'transparent',
+              borderDash: [5, 4],
+              fill: false,
+              tension: .3,
+              borderWidth: 2,
+              pointRadius: 0
+            });
+          }
+        }
+
+        exploreChartInstance = new Chart(canvas, {
+          type: chartType === 'stacked' ? 'bar' : 'line',
+          data: { labels: chartData.labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: datasets.length > 1, position: 'bottom', labels: { color: inkColor, boxWidth: 11, font: { size: 11 } } } },
+            scales: {
+              x: { grid: { color: gridColor }, ticks: { color: inkColor }, stacked },
+              y: { grid: { color: gridColor }, ticks: { color: inkColor, callback: valueTick }, stacked }
+            }
+          }
+        });
       }
 
       async function load() {
-        loading = true; loadError = null; paintShell();
+        loading = true; loadError = null; renderLoadingOrError();
         try {
           allRequests = await loadAllRequests();
         } catch (err) {
@@ -4166,7 +4608,7 @@
         }
         if (myGen !== renderGen) return;
         loading = false;
-        paintShell();
+        if (loadError) { renderLoadingOrError(); } else { renderShell(); }
       }
 
       load();
