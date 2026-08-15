@@ -4067,9 +4067,13 @@
           else if (dimension === 'skillset') labels = splitList(r.requesterSkillset).length ? splitList(r.requesterSkillset) : ['(no skillset)'];
           else labels = (r.requesterRoles && r.requesterRoles.length) ? r.requesterRoles : ['(no role)'];
           const amt = usdEquivalent(r);
+          const robuxAmt = r.currency === 'ROBUX' ? (Number(r.payment) || 0) : 0;
+          const usdAmt = r.currency === 'USD' ? (Number(r.payment) || 0) : 0;
           labels.forEach(l => {
-            const cur = map.get(l) || { amount: 0, count: 0 };
+            const cur = map.get(l) || { amount: 0, robux: 0, usd: 0, count: 0 };
             cur.amount += amt;
+            cur.robux += robuxAmt;
+            cur.usd += usdAmt;
             cur.count += 1;
             map.set(l, cur);
           });
@@ -4447,9 +4451,9 @@
         <div class="table-scroll">
           ${breakdownRows.length ? `
           <table class="an-table">
-            <thead><tr><th>${esc(GROUP_LABELS[groupBy].charAt(0).toUpperCase() + GROUP_LABELS[groupBy].slice(1))}</th><th class="num-cell">Total (USD equiv.)</th><th class="num-cell">Requests</th></tr></thead>
+            <thead><tr><th>${esc(GROUP_LABELS[groupBy].charAt(0).toUpperCase() + GROUP_LABELS[groupBy].slice(1))}</th><th class="num-cell">Total (USD equiv.)</th><th class="num-cell">Robux</th><th class="num-cell">USD</th><th class="num-cell">Requests</th></tr></thead>
             <tbody>
-              ${breakdownRows.map(b => `<tr><td>${esc(b.label)}</td><td class="num-cell">${fmtUsd(b.amount)}</td><td class="num-cell">${b.count}</td></tr>`).join('')}
+              ${breakdownRows.map(b => `<tr><td>${esc(b.label)}</td><td class="num-cell"><strong>${fmtUsd(b.amount)}</strong></td><td class="num-cell">${b.robux ? fmtRobux(b.robux) : '-'}</td><td class="num-cell">${b.usd ? fmtUsd(b.usd) : '-'}</td><td class="num-cell">${b.count}</td></tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing to show</h3><p>No requests match these filters.</p></div>`}
         </div>
