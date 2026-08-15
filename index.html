@@ -3967,11 +3967,15 @@
       let chartRange = '56';
 
       const METRICS = {
-        paid_usd: { label: 'Paid amount', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r) },
-        pending_usd: { label: 'Pending amount', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending', value: r => usdEquivalent(r) },
+        paid_usd: { label: 'Paid amount (USD equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r) },
+        paid_usd_only: { label: 'Paid amount ($ requests only)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid' && r.currency === 'USD', value: r => Number(r.payment) || 0 },
+        paid_robux: { label: 'Paid amount (Robux requests only)', unit: 'robux', dateField: 'paidAt', match: r => r.status === 'paid' && r.currency === 'ROBUX', value: r => Number(r.payment) || 0 },
+        pending_usd: { label: 'Pending amount (USD equiv.)', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending', value: r => usdEquivalent(r) },
+        pending_usd_only: { label: 'Pending amount ($ requests only)', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending' && r.currency === 'USD', value: r => Number(r.payment) || 0 },
+        pending_robux: { label: 'Pending amount (Robux requests only)', unit: 'robux', dateField: 'createdAt', match: r => r.status === 'pending' && r.currency === 'ROBUX', value: r => Number(r.payment) || 0 },
         tasks_completed: { label: 'Tasks completed', unit: 'count', dateField: 'paidAt', match: r => r.status === 'paid', value: () => 1 },
         requests_submitted: { label: 'Requests submitted', unit: 'count', dateField: 'createdAt', match: () => true, value: () => 1 },
-        avg_payment: { label: 'Average payment', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r), isAverage: true }
+        avg_payment: { label: 'Average payment (USD equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r), isAverage: true }
       };
 
       const BREAKDOWN_DIMS = {
@@ -4125,7 +4129,9 @@
       }
 
       function fmtMetric(metric, n) {
-        return metric.unit === 'usd' ? fmtUsd(n) : Math.round(n).toLocaleString();
+        if (metric.unit === 'usd') return fmtUsd(n);
+        if (metric.unit === 'robux') return fmtRobux(n) + ' R$';
+        return Math.round(n).toLocaleString();
       }
 
       function movingAverage(data, window) {
@@ -4535,7 +4541,7 @@
         const metric = METRICS[chartMetric];
         const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--line').trim() || '#E4E7ED';
         const inkColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-soft').trim() || '#5B616E';
-        const valueTick = v => metric.unit === 'usd' ? '$' + v : v;
+        const valueTick = v => metric.unit === 'usd' ? '$' + v : (metric.unit === 'robux' ? v + ' R$' : v);
 
         if (chartType === 'pie') {
           const top = chartData.totalsPerCat;
