@@ -2734,6 +2734,7 @@
       return {
         id: row.id,
         requestedBy: row.requested_by || '',
+        robloxUserId: row.roblox_user_id != null ? row.roblox_user_id : null,
         robloxUsername: row.roblox_username || '',
         taskName: row.task_name || '',
         game: row.game || '',
@@ -2905,6 +2906,11 @@
 
     async function reopenRequest(id) {
       await callHrData('reopen_request', { id });
+    }
+
+    async function markAllPaid(robloxUserId, robloxUsername) {
+      const json = await callHrData('mark_all_paid', { robloxUserId, robloxUsername });
+      return json.count || 0;
     }
 
     async function deleteRequest(id) {
@@ -3943,6 +3949,9 @@
       let allRequests = [];
       let loading = true;
       let loadError = null;
+      let lastOwedRows = [];
+
+      const canMarkPaid = hasPermission('dashboard.mark_paid');
 
       let statusFilter = 'all';
       let gameFilter = 'all';
@@ -4085,29 +4094,45 @@
         return Array.from(map.entries()).map(([label, v]) => ({ label, ...v })).sort((a, b) => b.amount - a.amount);
       }
 
+      // A person can show up with roblox_user_id set on some requests and
+      // null on others (e.g. requests logged before their id was on file),
+      // and Roblox usernames can change over time. Grouping by the raw
+      // username string alone splits one person into several rows, so
+      // prefer the stable numeric id and only fall back to a
+      // case-insensitive username when no id is present.
+      function ownerKey(r) {
+        return r.robloxUserId != null ? ('id:' + r.robloxUserId) : ('name:' + (r.robloxUsername || '').toLowerCase());
+      }
+
       function computeOwed(rows) {
         const map = new Map();
         rows.filter(r => r.status === 'pending').forEach(r => {
-          const cur = map.get(r.robloxUsername) || { robux: 0, usd: 0, count: 0, paymentMethod: null };
+          const key = ownerKey(r);
+          const cur = map.get(key) || { robloxUserId: r.robloxUserId, robloxUsername: null, robux: 0, usd: 0, count: 0, paymentMethod: null };
           if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
           cur.count += 1;
           // rows arrive newest-first, so the first request we see for a person
-          // reflects their current payment method rather than an old one.
+          // reflects their current username/payment method rather than an old one.
+          if (!cur.robloxUsername && r.robloxUsername) cur.robloxUsername = r.robloxUsername;
           if (!cur.paymentMethod && r.paymentMethod) cur.paymentMethod = r.paymentMethod;
-          map.set(r.robloxUsername, cur);
+          if (cur.robloxUserId == null && r.robloxUserId != null) cur.robloxUserId = r.robloxUserId;
+          map.set(key, cur);
         });
-        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v, total: v.robux * DEVEX_RATE + v.usd })).sort((a, b) => b.total - a.total);
+        return Array.from(map.values()).map(v => ({ ...v, user: v.robloxUsername || '(unknown)', total: v.robux * DEVEX_RATE + v.usd })).sort((a, b) => b.total - a.total);
       }
 
       function computeEarnings(rows) {
         const map = new Map();
         rows.filter(r => r.status === 'paid').forEach(r => {
-          const cur = map.get(r.robloxUsername) || { robux: 0, usd: 0, tasks: 0 };
+          const key = ownerKey(r);
+          const cur = map.get(key) || { robloxUserId: r.robloxUserId, robloxUsername: null, robux: 0, usd: 0, tasks: 0 };
           if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
           cur.tasks += 1;
-          map.set(r.robloxUsername, cur);
+          if (!cur.robloxUsername && r.robloxUsername) cur.robloxUsername = r.robloxUsername;
+          if (cur.robloxUserId == null && r.robloxUserId != null) cur.robloxUserId = r.robloxUserId;
+          map.set(key, cur);
         });
-        return Array.from(map.entries()).map(([user, v]) => ({ user, ...v, total: v.robux * DEVEX_RATE + v.usd })).sort((a, b) => b.total - a.total);
+        return Array.from(map.values()).map(v => ({ ...v, user: v.robloxUsername || '(unknown)', total: v.robux * DEVEX_RATE + v.usd })).sort((a, b) => b.total - a.total);
       }
 
       const GROUP_LABELS = { game: 'game', skillset: 'skillset', role: 'role', team: 'team', user: 'person' };
@@ -4431,9 +4456,9 @@
         <div class="table-scroll">
           ${owedRows.length ? `
           <table class="an-table">
-            <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th></tr></thead>
+            <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th>${canMarkPaid ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${owedRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<span class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}</span>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td></tr>`).join('')}
+              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<span class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}</span>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -4483,10 +4508,28 @@
         const earningsRows = computeEarnings(rows);
         const breakdownRows = computeBreakdown(rows, groupBy);
         const chartData = buildChartData(rows);
+        lastOwedRows = owedRows;
 
         contentEl.innerHTML = buildContentHtml({ pendingRobux, pendingUsd, paidRobux, paidUsd, paidUsdEquiv, paidCount: paidRows.length, chartData, breakdownRows, owedRows, earningsRows });
 
         document.querySelectorAll('.an-toggle-btn').forEach(b => b.addEventListener('click', () => { groupBy = b.dataset.group; paintContent(); }));
+        document.querySelectorAll('[data-mark-all-paid]').forEach(b => b.addEventListener('click', async (e) => {
+          const idx = Number(b.dataset.markAllPaid);
+          const o = lastOwedRows[idx];
+          if (!o) return;
+          if (!confirm(`Mark all ${o.count} pending request${o.count === 1 ? '' : 's'} for ${o.user} as paid?`)) return;
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
+          try {
+            await markAllPaid(o.robloxUserId, o.robloxUsername);
+            await load();
+          } catch (err) {
+            btn.disabled = false;
+            btn.textContent = 'Mark all paid';
+            alert('Could not save. Check your connection and try again.');
+          }
+        }));
         wireExploreEvents();
 
         drawExploreChart(chartData);

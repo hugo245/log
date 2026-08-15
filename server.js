@@ -970,6 +970,35 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'mark_all_paid') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        // Same "match by user id, fall back to username" pattern used
+        // elsewhere - a person can have some older requests logged before
+        // they had a roblox_user_id on file, or under a since-changed
+        // username, so matching on username alone would miss those.
+        const robloxUserId = payload.robloxUserId != null && payload.robloxUserId !== '' ? Number(payload.robloxUserId) : null;
+        const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : '';
+        if (robloxUserId == null && !robloxUsername) { res.status(400).json({ ok: false, error: 'missing_user' }); return; }
+
+        let query = supabase.from('payment_requests').select('id').eq('status', 'pending');
+        query = robloxUserId != null
+            ? query.eq('roblox_user_id', robloxUserId)
+            : query.is('roblox_user_id', null).ilike('roblox_username', robloxUsername);
+
+        const { data: rows, error } = await query;
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const ids = (rows || []).map(r => r.id);
+        if (!ids.length) { res.json({ ok: true, count: 0 }); return; }
+
+        const { error: updateError } = await supabase
+            .from('payment_requests')
+            .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
+            .in('id', ids);
+        if (updateError) { res.status(500).json({ ok: false, error: updateError.message }); return; }
+        res.json({ ok: true, count: ids.length });
+        return;
+    }
+
     if (action === 'reject_request') {
         if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
         const id = payload.id;
