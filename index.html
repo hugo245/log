@@ -1081,6 +1081,19 @@
       color: var(--warn-text);
     }
 
+    .an-table .method-note {
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .an-table .method-note.has-method {
+      color: var(--ok-text);
+    }
+
+    .an-table .method-note.missing-method {
+      color: var(--warn-text);
+    }
+
     table.req-table td.task-cell {
       max-width: 240px;
     }
@@ -1752,7 +1765,7 @@
 
     .stat-strip {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 12px;
       margin-bottom: 22px;
     }
@@ -4067,9 +4080,12 @@
       function computeOwed(rows) {
         const map = new Map();
         rows.filter(r => r.status === 'pending').forEach(r => {
-          const cur = map.get(r.robloxUsername) || { robux: 0, usd: 0, count: 0 };
+          const cur = map.get(r.robloxUsername) || { robux: 0, usd: 0, count: 0, paymentMethod: null };
           if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
           cur.count += 1;
+          // rows arrive newest-first, so the first request we see for a person
+          // reflects their current payment method rather than an old one.
+          if (!cur.paymentMethod && r.paymentMethod) cur.paymentMethod = r.paymentMethod;
           map.set(r.robloxUsername, cur);
         });
         return Array.from(map.entries()).map(([user, v]) => ({ user, ...v, total: v.robux * DEVEX_RATE + v.usd })).sort((a, b) => b.total - a.total);
@@ -4369,7 +4385,7 @@
       }
 
       function buildContentHtml(data) {
-        const { pendingRobux, pendingUsd, paidUsdEquiv, paidCount, chartData, breakdownRows, owedRows, earningsRows } = data;
+        const { pendingRobux, pendingUsd, paidRobux, paidUsd, paidUsdEquiv, paidCount, chartData, breakdownRows, owedRows, earningsRows } = data;
         return `
       <div class="stat-strip">
         <div class="strip-card">
@@ -4379,6 +4395,14 @@
         <div class="strip-card">
           <div class="strip-label">Pending USD</div>
           <div class="strip-value">${fmtUsd(pendingUsd)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Paid Robux</div>
+          <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${fmtRobux(paidRobux)}</div>
+        </div>
+        <div class="strip-card">
+          <div class="strip-label">Paid USD</div>
+          <div class="strip-value">${fmtUsd(paidUsd)}</div>
         </div>
         <div class="strip-card">
           <div class="strip-label">Paid out (USD equiv.)</div>
@@ -4397,9 +4421,9 @@
         <div class="table-scroll">
           ${owedRows.length ? `
           <table class="an-table">
-            <thead><tr><th>Person</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th></tr></thead>
+            <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th></tr></thead>
             <tbody>
-              ${owedRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td></tr>`).join('')}
+              ${owedRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<span class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}</span>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td></tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -4441,6 +4465,8 @@
         const paidRows = rows.filter(r => r.status === 'paid');
         const pendingRobux = pendingRows.filter(r => r.currency === 'ROBUX').reduce((s, r) => s + (Number(r.payment) || 0), 0);
         const pendingUsd = pendingRows.filter(r => r.currency === 'USD').reduce((s, r) => s + (Number(r.payment) || 0), 0);
+        const paidRobux = paidRows.filter(r => r.currency === 'ROBUX').reduce((s, r) => s + (Number(r.payment) || 0), 0);
+        const paidUsd = paidRows.filter(r => r.currency === 'USD').reduce((s, r) => s + (Number(r.payment) || 0), 0);
         const paidUsdEquiv = paidRows.reduce((s, r) => s + usdEquivalent(r), 0);
 
         const owedRows = computeOwed(rows);
@@ -4448,7 +4474,7 @@
         const breakdownRows = computeBreakdown(rows, groupBy);
         const chartData = buildChartData(rows);
 
-        contentEl.innerHTML = buildContentHtml({ pendingRobux, pendingUsd, paidUsdEquiv, paidCount: paidRows.length, chartData, breakdownRows, owedRows, earningsRows });
+        contentEl.innerHTML = buildContentHtml({ pendingRobux, pendingUsd, paidRobux, paidUsd, paidUsdEquiv, paidCount: paidRows.length, chartData, breakdownRows, owedRows, earningsRows });
 
         document.querySelectorAll('.an-toggle-btn').forEach(b => b.addEventListener('click', () => { groupBy = b.dataset.group; paintContent(); }));
         wireExploreEvents();
