@@ -2733,6 +2733,16 @@
         d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
     }
 
+    function debounce(fn, wait) {
+      let timer = null;
+      return function debounced() {
+        const args = arguments;
+        const ctx = this;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => { timer = null; fn.apply(ctx, args); }, wait);
+      };
+    }
+
     // Renders a clickable username that opens the global user menu.
     // Falls back to plain text (no click) if there's nothing to identify the user by.
     function userLink(userId, username) {
@@ -7354,7 +7364,7 @@
           <h1 style="margin-bottom:4px;">Audit logs</h1>
           <p class="sub">Every payment, moderation, and backup action taken in the tool, with who did it and who it was done to.</p>
         </div>
-        <div class="dash-toolbar"> 
+        <div class="dash-toolbar">
           ${hasPermission('dashboard.view') ? `<a class="btn btn-ghost btn-sm" href="#/dashboard">Dashboard</a>` : ''}
           ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
           <button type="button" class="btn btn-ghost btn-sm" id="refreshAuditBtn">Refresh</button>
