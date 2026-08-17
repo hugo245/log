@@ -3393,7 +3393,7 @@
     <div class="topbar">
       <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
-        <button class="theme-toggle" id="themeToggleBtn" type="button" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
+        <button type="button" class="theme-toggle" id="themeToggleBtn" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${isHrAuthed
           ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeAnalytics() ? `<a class="hr-pill" href="#/analytics">Analytics</a>` : ''}
              <details class="acct-menu">
@@ -3405,7 +3405,7 @@
                  <a href="#/aup">Acceptable Use Policy</a>
                  <a href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a>
                  <div class="acct-menu-divider"></div>
-                 <button id="signOutBtn">Sign out</button>
+                 <button type="button" id="signOutBtn">Sign out</button>
                </div>
              </details>`
           : `<a class="link" href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a><a class="hr-pill" href="#/hr">Sign in</a>`}
@@ -3447,7 +3447,7 @@
         <p>Sign in with your Roblox account. You'll need to be in the studio group at the required rank. What you can do here depends on the role tied to your rank or account.</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         ${message ? `<div class="error-box"><span>${esc(message)}</span></div>` : ''}
-        <button class="btn btn-primary roblox-btn" id="robloxSignInBtn" ${configError ? 'disabled' : ''}>
+        <button type="button" class="btn btn-primary roblox-btn" id="robloxSignInBtn" ${configError ? 'disabled' : ''}>
           Sign in with Roblox
         </button>
         <div class="gate-note">You need a Roblox account and studio group access at the required rank to use this tool.</div>
@@ -3492,7 +3492,7 @@
             ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
           </div>`}
         ${joinError ? `<div class="error-box"><span>${esc(joinError)}</span></div>` : ''}
-        ${!loadFailed ? `<button class="btn btn-primary" id="joinTeamBtn" ${joining ? 'disabled' : ''}>${joining ? 'Joining...' : 'Join'}</button>` : ''}
+        ${!loadFailed ? `<button type="button" class="btn btn-primary" id="joinTeamBtn" ${joining ? 'disabled' : ''}>${joining ? 'Joining...' : 'Join'}</button>` : ''}
       </div>
     </div>`;
           wireTopbarSignOut();
@@ -3530,7 +3530,7 @@
             ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
           </div>`}
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
-        <button class="btn btn-primary roblox-btn" id="joinSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
+        <button type="button" class="btn btn-primary roblox-btn" id="joinSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
         <div class="gate-note">Signing in will assign you to this team and skillset automatically.</div>
       </div>
     </div>`;
@@ -3600,7 +3600,7 @@
         const statusLabel = r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending';
         const rowHtml = `
             <tr>
-              <td><button class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
+              <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
               <td class="id-cell mono">${esc(r.id)}</td>
               <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${esc(r.robloxUsername || '-')}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}</div></td>
@@ -3610,10 +3610,10 @@
               <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
               <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
               <td class="actions-cell">
-                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
-                ${r.status === 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
-                ${r.status !== 'pending' && canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
-                ${canMarkPaid ? `<button class="btn btn-ghost btn-sm" data-delete-request="${esc(r.id)}">Delete Request</button>` : ''}
+                ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
+                ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
+                ${r.status !== 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
+                ${canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-delete-request="${esc(r.id)}">Delete Request</button>` : ''}
               </td>
             </tr>`;
         const cacheEntry = eligibilityCache[r.robloxUsername];
@@ -3624,7 +3624,7 @@
                 ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
                 <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
                   <div style="font-size:10.5px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.6px;margin-bottom:8px;">Payout eligibility</div>
-                  ${cacheEntry ? renderEligibilityList(cacheEntry) : (canSubmitRequests() ? `<button class="btn btn-ghost btn-sm" data-check-elig="${esc(r.robloxUsername)}" ${isElLoading ? 'disabled' : ''}>${isElLoading ? 'Checking...' : 'Check eligibility'}</button>` : `<div class="empty-note">You don't have permission to check eligibility.</div>`)}
+                  ${cacheEntry ? renderEligibilityList(cacheEntry) : (canSubmitRequests() ? `<button type="button" class="btn btn-ghost btn-sm" data-check-elig="${esc(r.robloxUsername)}" ${isElLoading ? 'disabled' : ''}>${isElLoading ? 'Checking...' : 'Check eligibility'}</button>` : `<div class="empty-note">You don't have permission to check eligibility.</div>`)}
                 </div>
               </td>
             </tr>` : '';
@@ -3653,7 +3653,7 @@
       function tableHtml() {
         const rows = getRows();
         return loading ? `<div class="dash-loading">Loading payment requests...</div>` : loadError ? `
-          <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>
+          <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>
         ` : rows.length === 0 ? `
           <div class="dash-empty"><h3>Nothing here</h3><p>No matching payment requests.</p></div>
         ` : `
@@ -3705,6 +3705,8 @@
         }));
 
         document.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           const id = b.dataset.paid;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
@@ -3724,6 +3726,8 @@
         }));
 
         document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           const id = b.dataset.reject;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
@@ -3745,6 +3749,8 @@
         }));
 
         document.querySelectorAll('[data-reopen]').forEach(b => b.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           const id = b.dataset.reopen;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
@@ -3765,6 +3771,8 @@
         }));
 
         document.querySelectorAll('[data-delete-request]').forEach(b => b.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           const id = b.dataset.deleteRequest;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
@@ -3817,8 +3825,8 @@
           ${canSeeAnalytics() ? `<a class="btn btn-ghost btn-sm" href="#/analytics">Analytics</a>` : ''}
           ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
           ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
-          <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
-          ${canExport ? `<button class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
+          <button type="button" class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
+          ${canExport ? `<button type="button" class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button type="button" class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
         </div>
       </div>
 
@@ -3843,10 +3851,10 @@
 
       <div class="filter-bar">
         <div class="tabs">
-          <button class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (${counts.all})</button>
-          <button class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (${counts.pending})</button>
-          <button class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (${counts.paid})</button>
-          <button class="tab-btn ${filter === 'rejected' ? 'active' : ''}" data-filter="rejected">Rejected (${counts.rejected})</button>
+          <button type="button" class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (${counts.all})</button>
+          <button type="button" class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (${counts.pending})</button>
+          <button type="button" class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (${counts.paid})</button>
+          <button type="button" class="tab-btn ${filter === 'rejected' ? 'active' : ''}" data-filter="rejected">Rejected (${counts.rejected})</button>
         </div>
         <div class="search-input-wrap">
           <input type="text" id="searchInput" placeholder="Search by username, task, or game" value="${esc(search)}">
@@ -4339,7 +4347,7 @@
         </div>
       </div>
       ${loading ? `<div class="dash-loading">Loading payment requests...</div>` : `
-      <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>`}
+      <div class="dash-empty"><h3>Could not load requests</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryBtn">Try again</button></div>`}
     </div>`;
         wireTopbarSignOut();
         const retryBtn = document.getElementById('retryBtn');
@@ -4358,7 +4366,7 @@
         </div>
         <div class="dash-toolbar">
           <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
-          <button class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
         </div>
       </div>
 
@@ -4458,7 +4466,7 @@
           <table class="an-table">
             <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th>${canMarkPaid ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<span class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}</span>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
+              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<span class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}</span>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -4514,6 +4522,8 @@
 
         document.querySelectorAll('.an-toggle-btn').forEach(b => b.addEventListener('click', () => { groupBy = b.dataset.group; paintContent(); }));
         document.querySelectorAll('[data-mark-all-paid]').forEach(b => b.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           const idx = Number(b.dataset.markAllPaid);
           const o = lastOwedRows[idx];
           if (!o) return;
@@ -4801,7 +4811,7 @@
                 </label>`).join('')}
             </div>
             <div id="methodFieldsSlot"></div>
-            <button class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
+            <button type="button" class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
           `}
         </div>
       </div>
@@ -5079,7 +5089,7 @@
 
       ${manageTabDefs.length > 1 ? `
       <div class="tabs" style="margin-bottom:28px;">
-        ${manageTabDefs.map(t => `<button class="tab-btn ${manageTab === t.id ? 'active' : ''}" data-manage-tab="${t.id}">${esc(t.label)}</button>`).join('')}
+        ${manageTabDefs.map(t => `<button type="button" class="tab-btn ${manageTab === t.id ? 'active' : ''}" data-manage-tab="${t.id}">${esc(t.label)}</button>`).join('')}
       </div>` : ''}
 
       ${manageTab === 'access' ? `
@@ -5097,7 +5107,7 @@
             <div class="field"><label>Roblox group ID</label><input type="number" id="baseGroupId" placeholder="e.g. 123456" value="${baseAccess.groupId != null ? esc(baseAccess.groupId) : ''}"></div>
             <div class="field"><label>Minimum rank <span class="hint">(optional, 0-255)</span></label><input type="number" id="baseMinRank" min="0" max="255" placeholder="e.g. 1" value="${baseAccess.minRank != null ? esc(baseAccess.minRank) : ''}"></div>
           </div>
-          <button class="btn btn-primary" id="saveBaseAccessBtn" ${savingBaseAccess ? 'disabled' : ''}>${savingBaseAccess ? 'Saving...' : 'Save sign-in requirement'}</button>
+          <button type="button" class="btn btn-primary" id="saveBaseAccessBtn" ${savingBaseAccess ? 'disabled' : ''}>${savingBaseAccess ? 'Saving...' : 'Save sign-in requirement'}</button>
         `}
       </div>` : ''}
       ` : ''}
@@ -5120,7 +5130,7 @@
             <label>USD per 10,000 Robux</label>
             <input type="number" id="ratePer10k" min="0" step="0.01" value="${(DEVEX_RATE * 10000).toFixed(2)}">
           </div>
-          <button class="btn btn-primary" id="saveRateBtn" ${savingRate ? 'disabled' : ''}>${savingRate ? 'Saving...' : 'Save rate'}</button>
+          <button type="button" class="btn btn-primary" id="saveRateBtn" ${savingRate ? 'disabled' : ''}>${savingRate ? 'Saving...' : 'Save rate'}</button>
         </div>` : ''}
 
         ${canManageGames ? `
@@ -5139,7 +5149,7 @@
             <label>Add a game</label>
             <input type="text" id="newGameName" placeholder="e.g. Tower Defense Tycoon">
           </div>
-          <button class="btn btn-ok" id="addGameBtn" ${addingGame ? 'disabled' : ''}>${addingGame ? 'Adding...' : 'Add game'}</button>
+          <button type="button" class="btn btn-ok" id="addGameBtn" ${addingGame ? 'disabled' : ''}>${addingGame ? 'Adding...' : 'Add game'}</button>
         </div>` : ''}
       </div>
       ` : ''}
@@ -5172,7 +5182,7 @@
                 <strong>${esc(g.name)}</strong>
                 <div class="role-meta">Group ID ${esc(g.roblox_group_id)}</div>
               </div>
-              <button class="btn btn-ghost btn-sm" data-del-group="${esc(g.id)}">Remove</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-del-group="${esc(g.id)}">Remove</button>
             </div>
           </div>`).join('')}
 
@@ -5183,7 +5193,7 @@
             <div class="field"><label>Roblox group ID</label><input type="number" id="newGroupId" placeholder="e.g. 123456"></div>
             <div class="field"><label>Display name</label><input type="text" id="newGroupName" placeholder="e.g. PlayVerse Studio"></div>
           </div>
-          <button class="btn btn-ok" id="addGroupBtn" ${addingGroup ? 'disabled' : ''}>${addingGroup ? 'Adding...' : 'Add group'}</button>
+          <button type="button" class="btn btn-ok" id="addGroupBtn" ${addingGroup ? 'disabled' : ''}>${addingGroup ? 'Adding...' : 'Add group'}</button>
         </div>
       </div>` : ''}
       ` : ''}
@@ -5211,8 +5221,8 @@
                   <div class="role-meta">${r.link_only ? `Link only${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ''}` : r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
                 <div style="display:flex;gap:6px;">
-                  <button class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
-                  <button class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
+                  <button type="button" class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
+                  <button type="button" class="btn btn-ghost btn-sm" data-del-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
                 </div>
               </div>
               <div class="perm-chip-wrap">
@@ -5240,7 +5250,7 @@
                       <label class="perm-check-item"><input type="checkbox" class="editRolePerm" data-role-id="${esc(r.id)}" value="${p}" ${(r.permissions || []).includes(p) ? 'checked' : ''}> ${esc(PERMISSION_LABELS[p])}</label>`).join('')}
                   </div>
                 </div>
-                <button class="btn btn-primary btn-sm" data-save-role="${esc(r.id)}" ${savingRoleEdit ? 'disabled' : ''}>${savingRoleEdit ? 'Saving...' : 'Save role'}</button>
+                <button type="button" class="btn btn-primary btn-sm" data-save-role="${esc(r.id)}" ${savingRoleEdit ? 'disabled' : ''}>${savingRoleEdit ? 'Saving...' : 'Save role'}</button>
               </div>` : ''}
             </div>`;
                 }).join('')}
@@ -5267,7 +5277,7 @@
                   <label class="perm-check-item"><input type="checkbox" class="newRolePerm" value="${p}"> ${esc(PERMISSION_LABELS[p])}</label>`).join('')}
               </div>
             </div>
-            <button class="btn btn-ok" id="addRoleBtn" ${addingRole ? 'disabled' : ''}>${addingRole ? 'Adding...' : 'Add role'}</button>
+            <button type="button" class="btn btn-ok" id="addRoleBtn" ${addingRole ? 'disabled' : ''}>${addingRole ? 'Adding...' : 'Add role'}</button>
           </div>
         </div>
 
@@ -5280,7 +5290,7 @@
                   return `
             <div class="assignment-row">
               <span>${esc(a.roblox_username || a.roblox_user_id)} &rarr; <strong>${esc((a.roles && a.roles.name) || 'Unknown role')}</strong></span>
-              <button class="btn btn-ghost btn-sm" data-del-assignment="${esc(a.id)}" ${canManageThisAssignment ? '' : 'disabled'} title="${canManageThisAssignment ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-del-assignment="${esc(a.id)}" ${canManageThisAssignment ? '' : 'disabled'} title="${canManageThisAssignment ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
             </div>`;
                 }).join('')}
 
@@ -5295,7 +5305,7 @@
                 ${roles.filter(r => (Number(r.hierarchy) || 0) < hrMaxHierarchy).map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}
               </select>
             </div>
-            <button class="btn btn-primary" id="addAssignmentBtn" ${addingAssignment || roles.filter(r => (Number(r.hierarchy) || 0) < hrMaxHierarchy).length === 0 ? 'disabled' : ''}>${addingAssignment ? 'Assigning...' : 'Assign role'}</button>
+            <button type="button" class="btn btn-primary" id="addAssignmentBtn" ${addingAssignment || roles.filter(r => (Number(r.hierarchy) || 0) < hrMaxHierarchy).length === 0 ? 'disabled' : ''}>${addingAssignment ? 'Assigning...' : 'Assign role'}</button>
           </div>
         </div>
       </div>` : ''}
@@ -5322,8 +5332,8 @@
                 <div class="role-meta">${t.discord_url ? 'Discord linked' : 'No Discord linked'}${t.roblox_group_url ? ' &middot; Roblox group linked' : ''}</div>
               </div>
               <div style="display:flex;gap:6px;">
-                <button class="btn btn-ghost btn-sm" data-edit-team="${esc(t.id)}">${isEditing ? 'Close' : 'Edit'}</button>
-                <button class="btn btn-ghost btn-sm" data-del-team="${esc(t.id)}">Remove</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-edit-team="${esc(t.id)}">${isEditing ? 'Close' : 'Edit'}</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-del-team="${esc(t.id)}">Remove</button>
               </div>
             </div>
             <div class="perm-chip-wrap">
@@ -5345,7 +5355,7 @@
                   ${skillsets.length ? skillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="editTeamSkillset" data-team-id="${esc(t.id)}" value="${esc(s.id)}" ${(t.skillsetIds || []).includes(s.id) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('') : `<span class="empty-note">No skillsets created yet.</span>`}
                 </div>
               </div>
-              <button class="btn btn-primary btn-sm" data-save-team="${esc(t.id)}" ${savingTeamEdit ? 'disabled' : ''}>${savingTeamEdit ? 'Saving...' : 'Save team'}</button>
+              <button type="button" class="btn btn-primary btn-sm" data-save-team="${esc(t.id)}" ${savingTeamEdit ? 'disabled' : ''}>${savingTeamEdit ? 'Saving...' : 'Save team'}</button>
             </div>` : ''}
           </div>`;
                 }).join('')}
@@ -5366,7 +5376,7 @@
                 ${skillsets.length ? skillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="newTeamSkillset" value="${esc(s.id)}"> ${esc(s.name)}</label>`).join('') : `<span class="empty-note">No skillsets yet, add one on the right first (optional).</span>`}
               </div>
             </div>
-            <button class="btn btn-ok" id="addTeamBtn" ${addingTeam ? 'disabled' : ''}>${addingTeam ? 'Adding...' : 'Add team'}</button>
+            <button type="button" class="btn btn-ok" id="addTeamBtn" ${addingTeam ? 'disabled' : ''}>${addingTeam ? 'Adding...' : 'Add team'}</button>
           </div>
         </div>
 
@@ -5380,7 +5390,7 @@
                   <strong style="color:${esc(s.color || 'var(--ink)')};">${esc(s.name)}</strong>
                   ${s.description ? `<div class="role-meta">${esc(s.description)}</div>` : ''}
                 </div>
-                <button class="btn btn-ghost btn-sm" data-del-skillset="${esc(s.id)}">Remove</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-del-skillset="${esc(s.id)}">Remove</button>
               </div>
             </div>`).join('')}
 
@@ -5391,7 +5401,7 @@
               <div class="field"><label>Color <span class="hint">(optional, hex)</span></label><input type="text" id="newSkillsetColor" placeholder="#178A4C"></div>
             </div>
             <div class="field"><label>Description <span class="hint">(optional)</span></label><input type="text" id="newSkillsetDescription" placeholder="What this skillset covers"></div>
-            <button class="btn btn-ok" id="addSkillsetBtn" ${addingSkillset ? 'disabled' : ''}>${addingSkillset ? 'Adding...' : 'Add skillset'}</button>
+            <button type="button" class="btn btn-ok" id="addSkillsetBtn" ${addingSkillset ? 'disabled' : ''}>${addingSkillset ? 'Adding...' : 'Add skillset'}</button>
           </div>
         </div>
       </div>
@@ -5411,8 +5421,8 @@
                 <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:4px;word-break:break-all;">${esc(l.url)}</div>
               </div>
               <div style="display:flex;gap:6px;">
-                <button class="btn btn-ghost btn-sm" data-copy-link="${esc(l.url)}">Copy link</button>
-                <button class="btn btn-ghost btn-sm" data-del-link="${esc(l.token)}">Remove</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-copy-link="${esc(l.url)}">Copy link</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-del-link="${esc(l.token)}">Remove</button>
               </div>
             </div>
           </div>`).join('')}
@@ -5445,7 +5455,7 @@
             </div>
           </div>
           <div class="field"><label>Label <span class="hint">(optional)</span></label><input type="text" id="newLinkLabel" placeholder="e.g. August builders batch"></div>
-          <button class="btn btn-primary" id="createLinkBtn" ${addingLink ? 'disabled' : ''}>${addingLink ? 'Creating...' : 'Create link'}</button>
+          <button type="button" class="btn btn-primary" id="createLinkBtn" ${addingLink ? 'disabled' : ''}>${addingLink ? 'Creating...' : 'Create link'}</button>
         </div>
       </div>` : ''}
 
@@ -5486,7 +5496,7 @@
           </select>
         </div>` : ''}
         <div class="field"><label>Message</label><textarea id="newBroadcastMessage" placeholder="What do you want people to see?"></textarea></div>
-        <button class="btn btn-ok" id="addBroadcastBtn" ${addingBroadcast ? 'disabled' : ''}>${addingBroadcast ? 'Sending...' : 'Send broadcast'}</button>
+        <button type="button" class="btn btn-ok" id="addBroadcastBtn" ${addingBroadcast ? 'disabled' : ''}>${addingBroadcast ? 'Sending...' : 'Send broadcast'}</button>
       </div>
 
       <div class="heading-block" style="margin-top:36px;">
@@ -5502,7 +5512,7 @@
                 <div class="role-meta">${b.type === 'global' ? 'Global' : `Team &middot; ${esc((b.teams && b.teams.name) || 'Unknown team')}`} &middot; ${esc(b.created_by || 'Unknown')} &middot; ${esc(fmtDate(b.created_at || Date.now()))}</div>
                 <div style="margin-top:4px;">${esc(b.message)}</div>
               </div>
-              <button class="btn btn-ghost btn-sm" data-del-broadcast="${esc(b.id)}">Remove</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-del-broadcast="${esc(b.id)}">Remove</button>
             </div>
           </div>`).join('')}
       </div>
@@ -6011,7 +6021,7 @@
       </div>
       <div class="table-wrap">
         ${loading ? `<div class="dash-loading">Loading...</div>` : loadError ? `
-          <div class="dash-empty"><h3>Could not load this policy</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryPolicyBtn">Try again</button></div>
+          <div class="dash-empty"><h3>Could not load this policy</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryPolicyBtn">Try again</button></div>
         ` : `
         <div class="panel" style="margin:18px;">
           ${step.description ? `<p class="sub" style="margin:0 0 10px;">${esc(step.description)}</p>` : ''}
@@ -6113,7 +6123,7 @@
 
       <div class="table-wrap">
         ${loading ? `<div class="dash-loading">Loading...</div>` : loadError ? `
-          <div class="dash-empty"><h3>Could not load onboarding</h3><p>${esc(loadError)}</p><button class="btn btn-ghost btn-sm" id="retryOnboardingBtn">Try again</button></div>
+          <div class="dash-empty"><h3>Could not load onboarding</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryOnboardingBtn">Try again</button></div>
         ` : `
         <div style="display:flex;flex-direction:column;gap:12px;padding:18px;">
           ${steps.map(s => {
@@ -6131,7 +6141,7 @@
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
                 ${done ? `<span class="perm-chip" style="background:var(--ok-bg);color:var(--ok-text);border-color:var(--ok-line);">Completed</span>` : `
-                  <button class="btn btn-primary btn-sm" data-complete-step="${esc(s.id)}" ${busyStepId === s.id ? 'disabled' : ''}>
+                  <button type="button" class="btn btn-primary btn-sm" data-complete-step="${esc(s.id)}" ${busyStepId === s.id ? 'disabled' : ''}>
                     ${busyStepId === s.id ? 'Saving...' : (s.type === 'tos' || s.type === 'aup') ? 'I agree' : 'Got it, continue'}
                   </button>`}
               </div>
@@ -6300,7 +6310,7 @@
       <div class="dash-empty">
         <h3>Could not load the staff database</h3>
         <p>${esc(loadError)}</p>
-        <button class="btn btn-ghost btn-sm" id="retryStaffBtn">Try again</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="retryStaffBtn">Try again</button>
       </div>
     `;
         }
@@ -6366,7 +6376,7 @@
           return `
     <div class="modal-scrim" id="staffModalScrim">
       <div class="modal-card">
-        <button class="modal-close" id="staffModalClose">&times;</button>
+        <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
           <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
           <h2>Configure ${esc(s.robloxUsername || 'Unknown')}</h2>
@@ -6386,7 +6396,7 @@
                         <strong style="color:${esc((a.team && a.team.color) || 'var(--ink)')};">${esc(a.team ? a.team.name : 'No team')}</strong>
                         ${a.skillset ? `<div class="role-meta">${esc(a.skillset.name)}</div>` : ''}
                       </div>
-                      <button class="btn btn-ghost btn-sm" data-remove-team="${esc(a.teamId)}" ${removeBusyTeamId === a.teamId ? 'disabled' : ''}>${removeBusyTeamId === a.teamId ? 'Removing...' : 'Remove'}</button>
+                      <button type="button" class="btn btn-ghost btn-sm" data-remove-team="${esc(a.teamId)}" ${removeBusyTeamId === a.teamId ? 'disabled' : ''}>${removeBusyTeamId === a.teamId ? 'Removing...' : 'Remove'}</button>
                     </div>
                   </div>`).join('')}
               </div>
@@ -6407,8 +6417,8 @@
               </select>
             </div>
             <div style="display:flex;gap:8px;margin-top:8px;">
-              <button class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId || !availableTeams.length ? 'disabled' : ''}>${configBusy ? 'Adding...' : 'Add team'}</button>
-              <button class="btn btn-ghost btn-sm btn-equal" id="cfgBackBtn">Back</button>
+              <button type="button" class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId || !availableTeams.length ? 'disabled' : ''}>${configBusy ? 'Adding...' : 'Add team'}</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-equal" id="cfgBackBtn">Back</button>
             </div>
           </div>
         </div>
@@ -6421,7 +6431,7 @@
           return `
     <div class="modal-scrim" id="staffModalScrim">
       <div class="modal-card">
-        <button class="modal-close" id="staffModalClose">&times;</button>
+        <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
           <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
           <h2>Payment method</h2>
@@ -6444,8 +6454,8 @@
             </div>
             <div id="adminMethodFieldsSlot"></div>
             <div style="display:flex;gap:8px;margin-top:14px;">
-              <button class="btn btn-primary btn-sm btn-equal" id="savePaymentBtn" ${paymentBusy ? 'disabled' : ''}>${paymentBusy ? 'Saving...' : 'Save payment method'}</button>
-              <button class="btn btn-ghost btn-sm btn-equal" id="paymentBackBtn">Back</button>
+              <button type="button" class="btn btn-primary btn-sm btn-equal" id="savePaymentBtn" ${paymentBusy ? 'disabled' : ''}>${paymentBusy ? 'Saving...' : 'Save payment method'}</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-equal" id="paymentBackBtn">Back</button>
             </div>
             `}
           </div>
@@ -6458,7 +6468,7 @@
           return `
     <div class="modal-scrim" id="staffModalScrim">
       <div class="modal-card">
-        <button class="modal-close" id="staffModalClose">&times;</button>
+        <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
           <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
           <h2>Moderation</h2>
@@ -6479,7 +6489,7 @@
           <div class="error-box" style="margin-bottom:14px;">
             <span>This account is banned and cannot sign in again. ${bannedInfo && bannedInfo.reason ? esc(bannedInfo.reason) : 'Reached 3 warnings.'}</span>
           </div>
-          <button class="btn btn-ghost btn-sm" id="unbanBtn" ${warnBusy || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>Lift ban</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="unbanBtn" ${warnBusy || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>Lift ban</button>
           ` : `
           <div class="modal-section">
             <div class="modal-section-title">Issue a warning</div>
@@ -6489,7 +6499,7 @@
               <label>Reason</label>
               <textarea id="warnReasonInput" placeholder="Describe the issue" rows="3">${esc(warnReason)}</textarea>
             </div>
-            <button class="btn btn-primary btn-sm" id="issueWarnBtn" ${warnBusy || !s.robloxUserId || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>${warnBusy ? 'Saving...' : 'Issue warning'}</button>
+            <button type="button" class="btn btn-primary btn-sm" id="issueWarnBtn" ${warnBusy || !s.robloxUserId || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>${warnBusy ? 'Saving...' : 'Issue warning'}</button>
           </div>
           `}
           <div class="modal-section" style="margin-top:18px;">
@@ -6498,11 +6508,11 @@
               <div class="modal-info-row">
                 <span class="label">${esc(fmtDate(w.created_at))}${w.warned_by ? ' by ' + esc(w.warned_by) : ''}</span>
                 <span class="value" style="max-width:52%;text-align:right;">${esc(w.reason || '')}</span>
-                <button class="btn btn-ghost btn-sm remove-warn-btn" data-warning-id="${esc(w.id)}" ${warnBusy || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>Remove</button>
+                <button type="button" class="btn btn-ghost btn-sm remove-warn-btn" data-warning-id="${esc(w.id)}" ${warnBusy || (Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'disabled' : ''}>Remove</button>
               </div>
             `).join('')}
           </div>
-          <button class="btn btn-ghost btn-sm" id="modBackBtn" style="margin-top:12px;">Back</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="modBackBtn" style="margin-top:12px;">Back</button>
         </div>
       </div>
     </div>`;
@@ -6511,7 +6521,7 @@
         return `
     <div class="modal-scrim" id="staffModalScrim">
       <div class="modal-card">
-        <button class="modal-close" id="staffModalClose">&times;</button>
+        <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
           <div class="avatar-wrap">
             <img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}">
@@ -6528,9 +6538,9 @@
         </div>
         <div class="modal-body">
           <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-            ${canAssign && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openConfigBtn">Configure</button>` : ''}
-            ${canModerate && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openModBtn">Moderation</button>` : ''}
-            ${canModerate && s.robloxUserId ? `<button class="btn btn-ghost btn-sm" id="openPaymentBtn">Payment method</button>` : ''}
+            ${canAssign && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openConfigBtn">Configure</button>` : ''}
+            ${canModerate && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openModBtn">Moderation</button>` : ''}
+            ${canModerate && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openPaymentBtn">Payment method</button>` : ''}
           </div>
           <div class="modal-section">
             <div class="modal-section-title">Activity</div>
@@ -6898,7 +6908,7 @@
         </div>
         <div class="dash-toolbar">
           <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
-          <button class="btn btn-ghost btn-sm" id="refreshStaffBtn">Refresh</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="refreshStaffBtn">Refresh</button>
         </div>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center;">
@@ -6950,7 +6960,7 @@
         <h2>Sign in to continue</h2>
         <p>Sign in with your Roblox account and be in the studio group at the required rank to log a payment request.</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
-        <button class="btn btn-primary roblox-btn" id="lockSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
+        <button type="button" class="btn btn-primary roblox-btn" id="lockSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
         <div class="lock-note">You can't log a request until you sign in.</div>
       </div>
     </div>`;
@@ -7020,7 +7030,7 @@
         <div class="icon">&#10003;</div>
         <div class="txt"><strong>Request submitted</strong><span>HR can see it on the dashboard now, and the developer will see it under their payments.</span></div>
       </div>
-      <button class="btn btn-ghost" id="anotherBtn" style="margin-bottom:26px;">Log another request</button>
+      <button type="button" class="btn btn-ghost" id="anotherBtn" style="margin-bottom:26px;">Log another request</button>
       ` : ''}
 
       <div class="create-grid">
@@ -7069,7 +7079,7 @@
           <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
           <div class="field" id="usdEquivSlot" style="margin-top:-10px;${robuxEquivalentLabel(currentData()) ? '' : 'display:none;'}"><span class="hint" style="margin-left:0;">${robuxEquivalentLabel(currentData())}</span></div>
           <div class="field"><label>Submitted by (you)</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
-          <button class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
+          <button type="button" class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
         </div>
 
         <div>
