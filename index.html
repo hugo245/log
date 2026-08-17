@@ -7355,8 +7355,8 @@
           <p class="sub">Every payment, moderation, and backup action taken in the tool, with who did it and who it was done to.</p>
         </div>
         <div class="dash-toolbar">
+          ${hasPermission('dashboard.view') ? `<a class="btn btn-ghost btn-sm" href="#/dashboard">Dashboard</a>` : ''}
           ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
-          ${canSeeDashboard() ? '' : ''}
           <button type="button" class="btn btn-ghost btn-sm" id="refreshAuditBtn">Refresh</button>
         </div>
       </div>
