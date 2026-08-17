@@ -4527,13 +4527,14 @@
           const idx = Number(b.dataset.markAllPaid);
           const o = lastOwedRows[idx];
           if (!o) return;
-          if (!confirm(`Mark all ${o.count} pending request${o.count === 1 ? '' : 's'} for ${o.user} as paid?`)) return;
           const btn = e.currentTarget;
           btn.disabled = true;
           btn.textContent = 'Saving...';
           try {
             await markAllPaid(o.robloxUserId, o.robloxUsername);
-            await load();
+            allRequests = await loadAllRequests();
+            if (myGen !== renderGen) return;
+            paintContent();
           } catch (err) {
             btn.disabled = false;
             btn.textContent = 'Mark all paid';
