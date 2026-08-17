@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
@@ -43,7 +44,10 @@ const PERMISSIONS = [
     'roles.manage',
     'staff.view_database',
     'staff.moderate',
-    'broadcasts.manage'
+    'broadcasts.manage',
+    'audit.view',
+    'audit.revert',
+    'backups.manage'
 ];
 
 const TOS_CONTENT = `Last updated: August 2026
@@ -621,6 +625,162 @@ function requireHigherHierarchy(res, session, targetHierarchy) {
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Audit log
+//
+// Every meaningful write (payments, moderation, backups) is recorded to the
+// `audit_logs` table. `revert` (when provided) describes how to undo the
+// action - it's interpreted by revertAuditLog() below. Logging is
+// best-effort: a logging failure never blocks the underlying action.
+//
+// Expected schema (create in Supabase):
+//   create table audit_logs (
+//     id uuid primary key default gen_random_uuid(),
+//     category text not null,           -- 'payments' | 'moderation' | 'backups'
+//     action text not null,             -- e.g. 'mark_paid', 'add_user_warning'
+//     actor_user_id bigint,
+//     actor_username text,
+//     target_user_id bigint,
+//     target_username text,
+//     details jsonb,
+//     revert_data jsonb,
+//     reverted boolean not null default false,
+//     reverted_by text,
+//     reverted_at timestamptz,
+//     created_at timestamptz not null default now()
+//   );
+// ---------------------------------------------------------------------------
+async function logAudit(session, { category, action, targetUserId, targetUsername, details, revert }) {
+    try {
+        const { data, error } = await supabase.from('audit_logs').insert({
+            category,
+            action,
+            actor_user_id: session ? session.roblox_user_id : null,
+            actor_username: session ? session.roblox_username : (details && details.actor) || 'system',
+            target_user_id: targetUserId != null ? targetUserId : null,
+            target_username: targetUsername || null,
+            details: details || {},
+            revert_data: revert || null,
+            reverted: false,
+            created_at: new Date().toISOString()
+        }).select('id').maybeSingle();
+        if (error) { console.error('audit log insert failed:', error.message); return null; }
+        return data ? data.id : null;
+    } catch (e) {
+        console.error('audit log insert failed:', e.message);
+        return null;
+    }
+}
+
+// Applies the inverse of a previously logged action. Returns { ok, error? }.
+async function applyRevert(revert) {
+    if (!revert || !revert.type) return { ok: false, error: 'nothing_to_revert' };
+    switch (revert.type) {
+        case 'unmark_paid': {
+            const { error } = await supabase.from('payment_requests')
+                .update({ paid: false, paid_at: null, status: 'pending', status_note: null })
+                .eq('id', revert.id);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'unmark_paid_bulk': {
+            const { error } = await supabase.from('payment_requests')
+                .update({ paid: false, paid_at: null, status: 'pending', status_note: null })
+                .in('id', revert.ids || []);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'reopen_request': {
+            const { error } = await supabase.from('payment_requests')
+                .update({ status: 'pending', status_note: null })
+                .eq('id', revert.id);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'delete_payment_request': {
+            const { error } = await supabase.from('payment_requests').delete().eq('id', revert.id);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'restore_payment_request': {
+            const { error } = await supabase.from('payment_requests').upsert(revert.row);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'remove_warning': {
+            const { error } = await supabase.from('staff_warnings').delete().eq('id', revert.warningId);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'restore_warning': {
+            const { error } = await supabase.from('staff_warnings').upsert(revert.row);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'unban_user': {
+            const { error } = await supabase.from('banned_users').delete().eq('roblox_user_id', revert.robloxUserId);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'reban_user': {
+            const { error } = await supabase.from('banned_users').upsert(revert.row, { onConflict: 'roblox_user_id' });
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        default:
+            return { ok: false, error: 'unknown_revert_type' };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Backups
+//
+// Expected schema (create in Supabase):
+//   create table backups (
+//     id uuid primary key default gen_random_uuid(),
+//     created_by text,
+//     trigger text not null,           -- 'manual' | 'scheduled'
+//     tables jsonb,
+//     row_counts jsonb,
+//     size_bytes integer,
+//     data_gz text,                    -- gzip+base64 compact JSON dump
+//     created_at timestamptz not null default now()
+//   );
+// ---------------------------------------------------------------------------
+const BACKUP_TABLES = [
+    'payment_requests', 'payment_methods', 'staff_warnings', 'banned_users',
+    'roles', 'user_role_assignments', 'teams', 'skillsets', 'user_assignments',
+    'games', 'audit_logs'
+];
+
+async function runBackup(trigger, actorUsername) {
+    const dump = {};
+    const rowCounts = {};
+    for (const table of BACKUP_TABLES) {
+        const { data, error } = await supabase.from(table).select('*');
+        if (error) { dump[table] = []; rowCounts[table] = 0; continue; }
+        dump[table] = data || [];
+        rowCounts[table] = (data || []).length;
+    }
+    const json = JSON.stringify({ tables: BACKUP_TABLES, dump, created_at: new Date().toISOString() });
+    const gz = zlib.gzipSync(Buffer.from(json, 'utf8'));
+    const dataGz = gz.toString('base64');
+
+    const { data, error } = await supabase.from('backups').insert({
+        created_by: actorUsername || 'system',
+        trigger,
+        tables: BACKUP_TABLES,
+        row_counts: rowCounts,
+        size_bytes: gz.length,
+        data_gz: dataGz,
+        created_at: new Date().toISOString()
+    }).select('id, created_by, trigger, tables, row_counts, size_bytes, created_at').maybeSingle();
+
+    if (error) throw new Error(error.message);
+    return data;
+}
+
+// Runs a scheduled backup every 6 hours. A first scheduled backup runs
+// shortly after startup so a recent snapshot always exists.
+const BACKUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+setTimeout(() => {
+    runBackup('scheduled', 'system').catch(e => console.error('scheduled backup failed:', e.message));
+}, 60 * 1000);
+setInterval(() => {
+    runBackup('scheduled', 'system').catch(e => console.error('scheduled backup failed:', e.message));
+}, BACKUP_INTERVAL_MS);
+
 async function getSession(req) {
     const token = getBearerToken(req);
     if (!token) return null;
@@ -882,6 +1042,12 @@ app.post('/hr-data', async (req, res) => {
         });
 
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'payments', action: 'submit_request',
+            targetUserId: recipientUserId, targetUsername: robloxUsername,
+            details: { id, taskName, game, payment, currency },
+            revert: { type: 'delete_payment_request', id }
+        });
         res.json({ ok: true, id });
         return;
     }
@@ -961,11 +1127,18 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: existing } = await supabase.from('payment_requests').select('roblox_user_id, roblox_username').eq('id', id).maybeSingle();
         const { error } = await supabase
             .from('payment_requests')
             .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'payments', action: 'mark_paid',
+            targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
+            details: { id },
+            revert: { type: 'unmark_paid', id }
+        });
         res.json({ ok: true });
         return;
     }
@@ -995,6 +1168,12 @@ app.post('/hr-data', async (req, res) => {
             .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
             .in('id', ids);
         if (updateError) { res.status(500).json({ ok: false, error: updateError.message }); return; }
+        logAudit(session, {
+            category: 'payments', action: 'mark_all_paid',
+            targetUserId: robloxUserId, targetUsername: robloxUsername || null,
+            details: { count: ids.length, ids },
+            revert: { type: 'unmark_paid_bulk', ids }
+        });
         res.json({ ok: true, count: ids.length });
         return;
     }
@@ -1004,11 +1183,18 @@ app.post('/hr-data', async (req, res) => {
         const id = payload.id;
         const note = payload.note ? String(payload.note).trim() : '';
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: existing } = await supabase.from('payment_requests').select('roblox_user_id, roblox_username').eq('id', id).maybeSingle();
         const { error } = await supabase
             .from('payment_requests')
             .update({ paid: false, paid_at: null, status: 'rejected', status_note: note || null })
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'payments', action: 'reject_request',
+            targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
+            details: { id, note },
+            revert: { type: 'reopen_request', id }
+        });
         res.json({ ok: true });
         return;
     }
@@ -1017,11 +1203,17 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: existing } = await supabase.from('payment_requests').select('roblox_user_id, roblox_username').eq('id', id).maybeSingle();
         const { error } = await supabase
             .from('payment_requests')
             .update({ paid: false, paid_at: null, status: 'pending', status_note: null })
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'payments', action: 'reopen_request',
+            targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
+            details: { id }
+        });
         res.json({ ok: true });
         return;
     }
@@ -1030,8 +1222,15 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
         const { error } = await supabase.from('payment_requests').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'payments', action: 'delete_request',
+            targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
+            details: { id },
+            revert: existing ? { type: 'restore_payment_request', row: existing } : null
+        });
         res.json({ ok: true });
         return;
     }
@@ -2054,13 +2253,13 @@ app.post('/hr-data', async (req, res) => {
             const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
             if (lookupRes.ok) username = (await lookupRes.json()).name;
         }
-        const { error } = await supabase.from('staff_warnings').insert({
+        const { data: insertedWarning, error } = await supabase.from('staff_warnings').insert({
             roblox_user_id: robloxUserId,
             roblox_username: username,
             reason,
             warned_by: session.roblox_username,
             created_at: new Date().toISOString()
-        });
+        }).select('id').maybeSingle();
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
 
         const count = await getWarnCount(robloxUserId);
@@ -2075,7 +2274,19 @@ app.post('/hr-data', async (req, res) => {
             }, { onConflict: 'roblox_user_id' });
             await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
             banned = true;
+            logAudit(session, {
+                category: 'moderation', action: 'auto_ban',
+                targetUserId: robloxUserId, targetUsername: username,
+                details: { reason: 'Reached 3 warnings' },
+                revert: { type: 'unban_user', robloxUserId }
+            });
         }
+        logAudit(session, {
+            category: 'moderation', action: 'add_user_warning',
+            targetUserId: robloxUserId, targetUsername: username,
+            details: { reason, warnCount: count },
+            revert: insertedWarning ? { type: 'remove_warning', warningId: insertedWarning.id } : null
+        });
         res.json({ ok: true, warnCount: count, banned });
         return;
     }
@@ -2086,7 +2297,7 @@ app.post('/hr-data', async (req, res) => {
         if (!warningId) { res.status(400).json({ ok: false, error: 'missing_warning_id' }); return; }
         const { data: warning, error: warningErr } = await supabase
             .from('staff_warnings')
-            .select('roblox_user_id')
+            .select('*')
             .eq('id', warningId)
             .maybeSingle();
         if (warningErr) { res.status(500).json({ ok: false, error: warningErr.message }); return; }
@@ -2096,6 +2307,12 @@ app.post('/hr-data', async (req, res) => {
         const { error } = await supabase.from('staff_warnings').delete().eq('id', warningId);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         const count = await getWarnCount(warning.roblox_user_id);
+        logAudit(session, {
+            category: 'moderation', action: 'remove_user_warning',
+            targetUserId: warning.roblox_user_id, targetUsername: warning.roblox_username,
+            details: { warningId, reason: warning.reason },
+            revert: { type: 'restore_warning', row: warning }
+        });
         res.json({ ok: true, warnCount: count });
         return;
     }
@@ -2106,8 +2323,237 @@ app.post('/hr-data', async (req, res) => {
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
         const targetHierarchy = await getUserHierarchy(robloxUserId);
         if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
+        const { data: banRow } = await supabase.from('banned_users').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
         await supabase.from('banned_users').delete().eq('roblox_user_id', robloxUserId);
+        logAudit(session, {
+            category: 'moderation', action: 'unban_user',
+            targetUserId: robloxUserId, targetUsername: banRow ? banRow.roblox_username : null,
+            details: {},
+            revert: banRow ? { type: 'reban_user', row: banRow } : null
+        });
         res.json({ ok: true });
+        return;
+    }
+
+    // -----------------------------------------------------------------------
+    // Audit logs
+    // -----------------------------------------------------------------------
+    if (action === 'list_audit_logs') {
+        if (!requirePermission(res, session, 'audit.view')) return;
+        const category = payload.category && payload.category !== 'all' ? String(payload.category) : null;
+        const search = payload.search ? String(payload.search).trim().toLowerCase() : '';
+        let query = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(300);
+        if (category) query = query.eq('category', category);
+        const { data, error } = await query;
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        let rows = data || [];
+        if (search) {
+            rows = rows.filter(r =>
+                (r.actor_username || '').toLowerCase().includes(search) ||
+                (r.target_username || '').toLowerCase().includes(search) ||
+                (r.action || '').toLowerCase().includes(search)
+            );
+        }
+        res.json({ ok: true, data: rows });
+        return;
+    }
+
+    if (action === 'revert_audit_log') {
+        if (!requirePermission(res, session, 'audit.revert')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: log, error: logErr } = await supabase.from('audit_logs').select('*').eq('id', id).maybeSingle();
+        if (logErr) { res.status(500).json({ ok: false, error: logErr.message }); return; }
+        if (!log) { res.status(404).json({ ok: false, error: 'log_not_found' }); return; }
+        if (log.reverted) { res.status(400).json({ ok: false, error: 'already_reverted' }); return; }
+        if (!log.revert_data) { res.status(400).json({ ok: false, error: 'not_revertible' }); return; }
+
+        const result = await applyRevert(log.revert_data);
+        if (!result.ok) { res.status(500).json({ ok: false, error: result.error }); return; }
+
+        await supabase.from('audit_logs').update({
+            reverted: true, reverted_by: session.roblox_username, reverted_at: new Date().toISOString()
+        }).eq('id', id);
+
+        logAudit(session, {
+            category: log.category, action: 'revert',
+            targetUserId: log.target_user_id, targetUsername: log.target_username,
+            details: { reverted_log_id: id, original_action: log.action }
+        });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'quick_moderate') {
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        const type = payload.type;
+        const reason = payload.reason ? String(payload.reason).trim() : '';
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        if (!['warn', 'ban', 'unban', 'note'].includes(type)) { res.status(400).json({ ok: false, error: 'invalid_type' }); return; }
+        const targetHierarchy = await getUserHierarchy(robloxUserId);
+        if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
+
+        if (type === 'note') {
+            if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
+            await logAudit(session, {
+                category: 'moderation', action: 'note',
+                targetUserId: robloxUserId, targetUsername: robloxUsername,
+                details: { reason }
+            });
+            res.json({ ok: true });
+            return;
+        }
+
+        if (type === 'warn') {
+            if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
+            const { data: insertedWarning, error } = await supabase.from('staff_warnings').insert({
+                roblox_user_id: robloxUserId,
+                roblox_username: robloxUsername,
+                reason,
+                warned_by: session.roblox_username,
+                created_at: new Date().toISOString()
+            }).select('id').maybeSingle();
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            const count = await getWarnCount(robloxUserId);
+            let banned = false;
+            if (count >= 3) {
+                await supabase.from('banned_users').upsert({
+                    roblox_user_id: robloxUserId, roblox_username: robloxUsername,
+                    reason: 'Reached 3 warnings', banned_by: session.roblox_username,
+                    banned_at: new Date().toISOString()
+                }, { onConflict: 'roblox_user_id' });
+                await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+                banned = true;
+            }
+            await logAudit(session, {
+                category: 'moderation', action: 'quick_warn',
+                targetUserId: robloxUserId, targetUsername: robloxUsername,
+                details: { reason, warnCount: count },
+                revert: insertedWarning ? { type: 'remove_warning', warningId: insertedWarning.id } : null
+            });
+            res.json({ ok: true, warnCount: count, banned });
+            return;
+        }
+
+        if (type === 'ban') {
+            await supabase.from('banned_users').upsert({
+                roblox_user_id: robloxUserId, roblox_username: robloxUsername,
+                reason: reason || 'Quick moderation action', banned_by: session.roblox_username,
+                banned_at: new Date().toISOString()
+            }, { onConflict: 'roblox_user_id' });
+            await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+            await logAudit(session, {
+                category: 'moderation', action: 'quick_ban',
+                targetUserId: robloxUserId, targetUsername: robloxUsername,
+                details: { reason },
+                revert: { type: 'unban_user', robloxUserId }
+            });
+            res.json({ ok: true });
+            return;
+        }
+
+        if (type === 'unban') {
+            const { data: banRow } = await supabase.from('banned_users').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
+            await supabase.from('banned_users').delete().eq('roblox_user_id', robloxUserId);
+            await logAudit(session, {
+                category: 'moderation', action: 'quick_unban',
+                targetUserId: robloxUserId, targetUsername: robloxUsername,
+                details: { reason },
+                revert: banRow ? { type: 'reban_user', row: banRow } : null
+            });
+            res.json({ ok: true });
+            return;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Backups
+    // -----------------------------------------------------------------------
+    if (action === 'backup_all_data') {
+        if (!requirePermission(res, session, 'backups.manage')) return;
+        try {
+            const backup = await runBackup('manual', session.roblox_username);
+            logAudit(session, {
+                category: 'backups', action: 'backup_created',
+                details: { id: backup.id, row_counts: backup.row_counts, size_bytes: backup.size_bytes }
+            });
+            res.json({ ok: true, data: backup });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+        return;
+    }
+
+    if (action === 'list_backups') {
+        if (!requirePermission(res, session, 'backups.manage')) return;
+        const { data, error } = await supabase
+            .from('backups')
+            .select('id, created_by, trigger, tables, row_counts, size_bytes, created_at')
+            .order('created_at', { ascending: false })
+            .limit(50);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data || [] });
+        return;
+    }
+
+    if (action === 'load_backup') {
+        if (!requirePermission(res, session, 'backups.manage')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data, error } = await supabase.from('backups').select('*').eq('id', id).maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (!data) { res.status(404).json({ ok: false, error: 'backup_not_found' }); return; }
+        let parsed = null;
+        try {
+            const buf = Buffer.from(data.data_gz, 'base64');
+            const json = zlib.gunzipSync(buf).toString('utf8');
+            parsed = JSON.parse(json);
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not decode this backup.' });
+            return;
+        }
+        logAudit(session, { category: 'backups', action: 'backup_loaded', details: { id } });
+        res.json({ ok: true, data: parsed, meta: { id, created_by: data.created_by, trigger: data.trigger, created_at: data.created_at, row_counts: data.row_counts } });
+        return;
+    }
+
+    if (action === 'restore_backup') {
+        if (!requirePermission(res, session, 'backups.manage')) return;
+        if (!requirePermission(res, session, 'roles.manage')) return; // extra guard: destructive action
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data, error } = await supabase.from('backups').select('*').eq('id', id).maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (!data) { res.status(404).json({ ok: false, error: 'backup_not_found' }); return; }
+
+        let parsed = null;
+        try {
+            const buf = Buffer.from(data.data_gz, 'base64');
+            const json = zlib.gunzipSync(buf).toString('utf8');
+            parsed = JSON.parse(json);
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not decode this backup.' });
+            return;
+        }
+
+        // Restore is an additive upsert per table (matched on primary key) -
+        // it never deletes rows that exist now but weren't in the backup,
+        // to avoid silently wiping newer data.
+        const summary = {};
+        for (const table of (parsed.tables || [])) {
+            const rows = (parsed.dump && parsed.dump[table]) || [];
+            if (!rows.length) { summary[table] = { restored: 0 }; continue; }
+            const { error: upsertErr } = await supabase.from(table).upsert(rows);
+            summary[table] = upsertErr ? { restored: 0, error: upsertErr.message } : { restored: rows.length };
+        }
+
+        logAudit(session, {
+            category: 'backups', action: 'restore_backup',
+            details: { id, summary }
+        });
+        res.json({ ok: true, summary });
         return;
     }
 

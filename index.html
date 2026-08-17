@@ -2457,6 +2457,106 @@
     ::selection {
       background: var(--accent-soft);
     }
+
+    .user-link {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      font: inherit;
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .user-link:hover {
+      text-decoration: underline;
+    }
+
+    .category-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--muted);
+      text-transform: capitalize;
+      white-space: nowrap;
+    }
+
+    .category-chip.payments {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+      border-color: var(--ok-line);
+    }
+
+    .category-chip.moderation {
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border-color: var(--warn-line);
+    }
+
+    .category-chip.backups {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-color: var(--line);
+    }
+
+    .audit-reverted-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--err-text);
+      margin-left: 8px;
+    }
+
+    table.req-table td.audit-details-cell {
+      max-width: 320px;
+      white-space: normal;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .backup-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+
+    .backup-card .backup-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .backup-card .backup-meta .mono {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .um-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, .45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 16px;
+    }
   </style>
 </head>
 
@@ -2479,6 +2579,8 @@
       </div>
     </div>
   </div>
+
+  <div id="globalUserMenuRoot"></div>
 
   <script>
     const SUPABASE_URL = 'https://tixfcxypoyedqbkiwbtx.supabase.co';
@@ -2524,7 +2626,10 @@
       'roles.manage': 'Manage roles and access',
       'staff.view_database': 'View staff database',
       'staff.moderate': 'Warn and ban staff',
-      'broadcasts.manage': 'Send broadcasts'
+      'broadcasts.manage': 'Send broadcasts',
+      'audit.view': 'View audit logs',
+      'audit.revert': 'Revert audit log actions',
+      'backups.manage': 'Create, load, and restore database backups'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
 
@@ -2620,6 +2725,20 @@
     function fmtDate(ts) {
       const d = new Date(ts);
       return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function fmtDateTime(ts) {
+      const d = new Date(ts);
+      return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' +
+        d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Renders a clickable username that opens the global user menu.
+    // Falls back to plain text (no click) if there's nothing to identify the user by.
+    function userLink(userId, username) {
+      const label = esc(username || (userId ? `ID ${userId}` : 'Unknown'));
+      if (!userId && !username) return `<span class="hint">Unknown</span>`;
+      return `<button type="button" class="user-link" data-user-link data-user-id="${esc(userId || '')}" data-user-name="${esc(username || '')}">${label}</button>`;
     }
 
     function hslToHex(h, s, l) {
@@ -3157,6 +3276,182 @@
       return json.data || [];
     }
 
+    // --- Audit logs / quick moderation / backups -----------------------
+    async function listAuditLogs(category, search) {
+      const json = await callHrData('list_audit_logs', { category, search });
+      return json.data || [];
+    }
+    async function revertAuditLog(id) {
+      await callHrData('revert_audit_log', { id });
+    }
+    async function quickModerateUser(robloxUserId, robloxUsername, type, reason) {
+      return await callHrData('quick_moderate', { robloxUserId, robloxUsername, type, reason });
+    }
+    async function backupAllData() {
+      const json = await callHrData('backup_all_data');
+      return json.data;
+    }
+    async function listBackups() {
+      const json = await callHrData('list_backups');
+      return json.data || [];
+    }
+    async function loadBackupData(id) {
+      const json = await callHrData('load_backup', { id });
+      return json;
+    }
+    async function restoreBackupData(id) {
+      const json = await callHrData('restore_backup', { id });
+      return json;
+    }
+
+    // --- Global "user menu" (clickable users everywhere -> quick profile
+    // + quick moderation). Rendered into #globalUserMenuRoot, which sits
+    // outside #app so it survives page repaints. -----------------------
+    let umTarget = null;      // { id, username }
+    let umLoading = false;
+    let umWarnings = [];
+    let umBanned = null;
+    let umBusy = false;
+    let umMsg = null;
+    let umReason = '';
+
+    function openUserMenu(robloxUserId, robloxUsername) {
+      if (!robloxUserId && !robloxUsername) return;
+      umTarget = { id: robloxUserId || null, username: robloxUsername || null };
+      umLoading = true; umWarnings = []; umBanned = null; umMsg = null; umReason = ''; umBusy = false;
+      paintUserMenu();
+      refreshUserMenuData();
+    }
+
+    function closeUserMenu() {
+      umTarget = null;
+      paintUserMenu();
+    }
+
+    async function refreshUserMenuData() {
+      if (!umTarget || !umTarget.id) { umLoading = false; paintUserMenu(); return; }
+      try {
+        const res = await listUserWarnings(umTarget.id);
+        umWarnings = res.data || [];
+        umBanned = res.banned || null;
+      } catch (e) {
+        umWarnings = []; umBanned = null;
+      }
+      umLoading = false;
+      paintUserMenu();
+    }
+
+    function userMenuHtml() {
+      if (!umTarget) return '';
+      const canModerate = hasPermission('staff.moderate');
+      return `
+    <div class="um-scrim" id="umScrim">
+      <div class="modal-card">
+        <button type="button" class="modal-close" id="umClose">&times;</button>
+        <div class="modal-header">
+          <h2>${esc(umTarget.username || 'Unknown user')}</h2>
+          ${umTarget.id ? `<div class="modal-id mono">Roblox ID: ${esc(umTarget.id)}</div>` : ''}
+          ${umLoading ? '' : `
+          <div style="margin-top:8px;">
+            <span class="status-chip ${umBanned ? '' : 'pending'}" style="${umBanned ? 'background:var(--err-bg);color:var(--err-text);border-color:var(--err-line);' : ''}">
+              ${umBanned ? 'Banned' : `${umWarnings.length} / 3 warnings`}
+            </span>
+          </div>`}
+        </div>
+        <div class="modal-body">
+          ${umLoading ? `<div class="dash-loading">Loading user...</div>` : `
+          ${umMsg ? `<div class="${umMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(umMsg.text)}</span></div>` : ''}
+          ${!umTarget.id ? `<div class="empty-note" style="margin-bottom:12px;">This entry has no linked Roblox ID, so quick moderation isn't available here.</div>` : ''}
+          ${canModerate && umTarget.id ? `
+          <div class="modal-section">
+            <div class="modal-section-title">Quick moderation</div>
+            <div class="field">
+              <label>Reason (required for note / warning)</label>
+              <textarea id="umReasonInput" placeholder="Describe the issue" rows="2">${esc(umReason)}</textarea>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+              <button type="button" class="btn btn-ghost btn-sm" id="umNoteBtn" ${umBusy ? 'disabled' : ''}>Add note</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="umWarnBtn" ${umBusy || umBanned ? 'disabled' : ''}>Issue warning</button>
+              ${umBanned
+              ? `<button type="button" class="btn btn-primary btn-sm" id="umUnbanBtn" ${umBusy ? 'disabled' : ''}>Lift ban</button>`
+              : `<button type="button" class="btn btn-danger btn-sm" id="umBanBtn" ${umBusy ? 'disabled' : ''} style="background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);">Ban user</button>`}
+            </div>
+          </div>
+          <div class="modal-section">
+            <div class="modal-section-title">Warning history</div>
+            ${umWarnings.length === 0 ? `<div class="hint">No warnings on record.</div>` : umWarnings.map(w => `
+              <div class="modal-info-row">
+                <span class="label">${esc(fmtDate(w.created_at))}${w.warned_by ? ' by ' + esc(w.warned_by) : ''}</span>
+                <span class="value" style="max-width:60%;text-align:right;">${esc(w.reason || '')}</span>
+              </div>
+            `).join('')}
+          </div>
+          ` : ''}
+          `}
+        </div>
+      </div>
+    </div>`;
+    }
+
+    function paintUserMenu() {
+      const root = document.getElementById('globalUserMenuRoot');
+      if (!root) return;
+      root.innerHTML = userMenuHtml();
+      wireUserMenuEvents();
+    }
+
+    function wireUserMenuEvents() {
+      const scrim = document.getElementById('umScrim');
+      const closeBtn = document.getElementById('umClose');
+      if (scrim) scrim.addEventListener('click', (e) => { if (e.target === scrim) closeUserMenu(); });
+      if (closeBtn) closeBtn.addEventListener('click', closeUserMenu);
+
+      const reasonInput = document.getElementById('umReasonInput');
+      if (reasonInput) reasonInput.addEventListener('input', () => { umReason = reasonInput.value; });
+
+      const noteBtn = document.getElementById('umNoteBtn');
+      if (noteBtn) noteBtn.addEventListener('click', () => runQuickModeration('note'));
+      const warnBtn = document.getElementById('umWarnBtn');
+      if (warnBtn) warnBtn.addEventListener('click', () => runQuickModeration('warn'));
+      const banBtn = document.getElementById('umBanBtn');
+      if (banBtn) banBtn.addEventListener('click', () => runQuickModeration('ban'));
+      const unbanBtn = document.getElementById('umUnbanBtn');
+      if (unbanBtn) unbanBtn.addEventListener('click', () => runQuickModeration('unban'));
+    }
+
+    async function runQuickModeration(type) {
+      if (!umTarget || !umTarget.id) return;
+      const reason = umReason.trim();
+      if ((type === 'note' || type === 'warn') && !reason) {
+        umMsg = { ok: false, text: 'Enter a reason first.' };
+        paintUserMenu();
+        return;
+      }
+      if (type === 'ban' && !confirm(`Ban ${umTarget.username || 'this user'}? They will not be able to sign in again.`)) return;
+      umBusy = true; umMsg = null; paintUserMenu();
+      try {
+        const res = await quickModerateUser(umTarget.id, umTarget.username, type, reason);
+        const labels = { note: 'Note added.', warn: `Warning issued.${res && res.banned ? ' User reached 3 warnings and was banned.' : ''}`, ban: 'User banned.', unban: 'Ban lifted.' };
+        umMsg = { ok: true, text: labels[type] || 'Done.' };
+        umReason = '';
+        await refreshUserMenuData();
+      } catch (e) {
+        umMsg = { ok: false, text: e.message || 'That action failed.' };
+      }
+      umBusy = false;
+      paintUserMenu();
+      if (typeof window.__refreshCurrentAuditPage === 'function') window.__refreshCurrentAuditPage();
+    }
+
+    // Delegated click handler: any element with data-user-link (and a
+    // data-user-id and/or data-user-name attribute) opens the user menu.
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-user-link]');
+      if (!el) return;
+      e.preventDefault();
+      openUserMenu(el.dataset.userId || null, el.dataset.userName || null);
+    });
+
     function rowToTSV(d) {
       const items = parseWorkLines(d.workRaw || '');
       const work = items.map(i => i.rest ? `${i.lead} ${i.rest}` : i.lead).join(' | ');
@@ -3371,6 +3666,8 @@
         if (isHrAuthed) renderOnboarding(); else renderHrGate();
       } else if (path === '#/staff') {
         if (isHrAuthed) renderStaffDatabase(); else renderHrGate();
+      } else if (path === '#/audit') {
+        if (isHrAuthed) renderAuditLogs(); else renderHrGate();
       } else {
         if (isHrAuthed) {
           renderMyPayments();
@@ -3395,7 +3692,7 @@
       <div class="topbar-right">
         <button type="button" class="theme-toggle" id="themeToggleBtn" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${isHrAuthed
-          ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeAnalytics() ? `<a class="hr-pill" href="#/analytics">Analytics</a>` : ''}
+          ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeAnalytics() ? `<a class="hr-pill" href="#/analytics">Analytics</a>` : ''}${hasPermission('audit.view') ? `<a class="hr-pill" href="#/audit">Audit logs</a>` : ''}
              <details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
@@ -3602,7 +3899,7 @@
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
               <td class="id-cell mono">${esc(r.id)}</td>
-              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${esc(r.robloxUsername || '-')}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${userLink(r.robloxUserId, r.robloxUsername)}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}</div></td>
               <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
               <td>${esc(r.timeWorked || '-')}</td>
@@ -3824,6 +4121,7 @@
           ${canSubmitRequests() ? `<a class="btn btn-ghost btn-sm" href="#/new">New request</a>` : ''}
           ${canSeeAnalytics() ? `<a class="btn btn-ghost btn-sm" href="#/analytics">Analytics</a>` : ''}
           ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
+          ${hasPermission('audit.view') ? `<a class="btn btn-ghost btn-sm" href="#/audit">Audit logs</a>` : ''}
           ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
           <button type="button" class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
           ${canExport ? `<button type="button" class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button type="button" class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
@@ -5290,7 +5588,7 @@
                   const canManageThisAssignment = roleHierarchy < hrMaxHierarchy;
                   return `
             <div class="assignment-row">
-              <span>${esc(a.roblox_username || a.roblox_user_id)} &rarr; <strong>${esc((a.roles && a.roles.name) || 'Unknown role')}</strong></span>
+              <span>${userLink(a.roblox_user_id, a.roblox_username)} &rarr; <strong>${esc((a.roles && a.roles.name) || 'Unknown role')}</strong></span>
               <button type="button" class="btn btn-ghost btn-sm" data-del-assignment="${esc(a.id)}" ${canManageThisAssignment ? '' : 'disabled'} title="${canManageThisAssignment ? '' : "You can't manage a role at or above your own hierarchy level"}">Remove</button>
             </div>`;
                 }).join('')}
@@ -6947,6 +7245,263 @@
       }
 
       load();
+    }
+
+    function renderAuditLogs() {
+      if (!hasPermission('audit.view')) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+      const myGen = renderGen;
+      const canRevert = hasPermission('audit.revert');
+      const canBackup = hasPermission('backups.manage');
+
+      let tab = 'logs'; // 'logs' | 'backups'
+
+      let logs = [];
+      let logsLoading = true;
+      let logsError = null;
+      let category = 'all';
+      let search = '';
+      let revertBusyId = null;
+
+      let backups = [];
+      let backupsLoading = false;
+      let backupsError = null;
+      let backupAllBusy = false;
+      let backupMsg = null;
+      let backupBusyId = null; // id currently being loaded/restored
+
+      window.__refreshCurrentAuditPage = () => { if (renderGen === myGen && tab === 'logs') loadLogs(); };
+
+      function actionLabel(a) {
+        return String(a || '').replace(/_/g, ' ');
+      }
+
+      function detailsSummary(row) {
+        const d = row.details || {};
+        const parts = [];
+        if (d.reason) parts.push(`Reason: ${d.reason}`);
+        if (d.taskName) parts.push(`Task: ${d.taskName}`);
+        if (d.payment != null) parts.push(`Amount: ${d.payment}${d.currency ? ' ' + d.currency : ''}`);
+        if (d.warnCount != null) parts.push(`Warn count: ${d.warnCount}`);
+        if (d.row_counts) parts.push(`Tables backed up: ${Object.keys(d.row_counts).length}`);
+        if (d.original_action) parts.push(`Reverted: ${actionLabel(d.original_action)}`);
+        if (!parts.length) return '-';
+        return esc(parts.join(' · '));
+      }
+
+      function logRowHtml(row) {
+        return `
+      <tr>
+        <td class="mono" style="white-space:nowrap;">${esc(fmtDateTime(row.created_at))}</td>
+        <td><span class="category-chip ${esc(row.category)}">${esc(row.category)}</span></td>
+        <td>${esc(actionLabel(row.action))}${row.reverted ? `<span class="audit-reverted-tag">&#8634; reverted</span>` : ''}</td>
+        <td>${userLink(row.actor_user_id, row.actor_username)}</td>
+        <td>${row.target_user_id || row.target_username ? userLink(row.target_user_id, row.target_username) : '<span class="hint">-</span>'}</td>
+        <td class="audit-details-cell">${detailsSummary(row)}</td>
+        <td class="actions-cell">
+          ${canRevert && row.revert_data && !row.reverted
+            ? `<button type="button" class="btn btn-ghost btn-sm" data-revert-id="${esc(row.id)}" ${revertBusyId === row.id ? 'disabled' : ''}>${revertBusyId === row.id ? 'Reverting...' : 'Revert'}</button>`
+            : (row.reverted ? `<span class="hint">by ${esc(row.reverted_by || 'unknown')}</span>` : '')}
+        </td>
+      </tr>`;
+      }
+
+      function logsTableHtml() {
+        if (logsLoading) return `<div class="dash-loading">Loading audit logs...</div>`;
+        if (logsError) return `
+      <div class="dash-empty">
+        <h3>Could not load audit logs</h3>
+        <p>${esc(logsError)}</p>
+        <button type="button" class="btn btn-ghost btn-sm" id="retryLogsBtn">Try again</button>
+      </div>`;
+        if (!logs.length) return `<div class="dash-empty"><h3>Nothing here</h3><p>No audit log entries match.</p></div>`;
+        return `
+      <table class="req-table">
+        <thead><tr><th>Time</th><th>Category</th><th>Action</th><th>Actor</th><th>Target</th><th>Details</th><th></th></tr></thead>
+        <tbody>${logs.map(logRowHtml).join('')}</tbody>
+      </table>`;
+      }
+
+      function backupsBodyHtml() {
+        if (backupsLoading) return `<div class="dash-loading">Loading backups...</div>`;
+        if (backupsError) return `
+      <div class="dash-empty">
+        <h3>Could not load backups</h3>
+        <p>${esc(backupsError)}</p>
+        <button type="button" class="btn btn-ghost btn-sm" id="retryBackupsBtn">Try again</button>
+      </div>`;
+        if (!backups.length) return `<div class="empty-note">No backups yet. Backups are also taken automatically every 6 hours.</div>`;
+        return backups.map(b => `
+      <div class="backup-card">
+        <div class="backup-meta">
+          <strong>${esc(b.trigger === 'manual' ? 'Manual backup' : 'Scheduled backup')}</strong>
+          <span class="mono">${esc(fmtDateTime(b.created_at))} · by ${esc(b.created_by || 'system')}</span>
+          <span class="mono">${(b.tables || []).length} tables · ${Object.values(b.row_counts || {}).reduce((s, n) => s + (Number(n) || 0), 0)} rows · ${((b.size_bytes || 0) / 1024).toFixed(1)} KB</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost btn-sm" data-load-backup="${esc(b.id)}" ${backupBusyId === b.id ? 'disabled' : ''}>${backupBusyId === b.id ? 'Working...' : 'Load / inspect'}</button>
+          ${hasPermission('roles.manage') ? `<button type="button" class="btn btn-ghost btn-sm" data-restore-backup="${esc(b.id)}" ${backupBusyId === b.id ? 'disabled' : ''} style="color:var(--err-text);">Restore</button>` : ''}
+        </div>
+      </div>`).join('');
+      }
+
+      function paint() {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        <div>
+          <span class="eyebrow">HR dashboard</span>
+          <h1 style="margin-bottom:4px;">Audit logs</h1>
+          <p class="sub">Every payment, moderation, and backup action taken in the tool, with who did it and who it was done to.</p>
+        </div>
+        <div class="dash-toolbar">
+          ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
+          ${canSeeDashboard() ? '' : ''}
+          <button type="button" class="btn btn-ghost btn-sm" id="refreshAuditBtn">Refresh</button>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <div class="tabs">
+          <button type="button" class="tab-btn ${tab === 'logs' ? 'active' : ''}" data-audit-tab="logs">Logs</button>
+          ${canBackup ? `<button type="button" class="tab-btn ${tab === 'backups' ? 'active' : ''}" data-audit-tab="backups">Backups</button>` : ''}
+        </div>
+        ${tab === 'logs' ? `
+        <div class="search-input-wrap">
+          <input type="text" id="auditSearchInput" placeholder="Search by actor, target, or action" value="${esc(search)}">
+        </div>
+        <div class="filter-select-group">
+          <select id="auditCategorySelect" class="filter-select">
+            <option value="all" ${category === 'all' ? 'selected' : ''}>All categories</option>
+            <option value="payments" ${category === 'payments' ? 'selected' : ''}>Payments</option>
+            <option value="moderation" ${category === 'moderation' ? 'selected' : ''}>Moderation</option>
+            <option value="backups" ${category === 'backups' ? 'selected' : ''}>Backups</option>
+          </select>
+        </div>` : ''}
+      </div>
+
+      ${tab === 'logs' ? `
+      <div class="table-wrap" id="auditTableArea">${logsTableHtml()}</div>
+      ` : `
+      <div class="panel">
+        <div class="preview-label" style="margin-bottom:10px;">Database backups</div>
+        ${backupMsg ? `<div class="${backupMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(backupMsg.text)}</span></div>` : ''}
+        <div style="margin-bottom:14px;">
+          <button type="button" class="btn btn-primary btn-sm" id="backupAllBtn" ${backupAllBusy ? 'disabled' : ''}>${backupAllBusy ? 'Backing up...' : 'Backup All Data'}</button>
+        </div>
+        <div id="backupsListArea">${backupsBodyHtml()}</div>
+      </div>
+      `}
+      <div class="footer-note">Data is stored in a database and shared across everyone using this tool. Scheduled backups run automatically every 6 hours.</div>
+    </div>`;
+
+        wireTopbarSignOut();
+        wireEvents();
+      }
+
+      function wireEvents() {
+        document.querySelectorAll('[data-audit-tab]').forEach(b => b.addEventListener('click', () => {
+          tab = b.dataset.auditTab;
+          if (tab === 'backups' && !backups.length && !backupsLoading) loadBackups();
+          paint();
+        }));
+
+        const refreshBtn = document.getElementById('refreshAuditBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', () => { tab === 'logs' ? loadLogs() : loadBackups(); });
+
+        const searchInput = document.getElementById('auditSearchInput');
+        if (searchInput) searchInput.addEventListener('input', debounce(() => { search = searchInput.value; loadLogs(); }, 350));
+
+        const categorySelect = document.getElementById('auditCategorySelect');
+        if (categorySelect) categorySelect.addEventListener('change', () => { category = categorySelect.value; loadLogs(); });
+
+        const retryLogsBtn = document.getElementById('retryLogsBtn');
+        if (retryLogsBtn) retryLogsBtn.addEventListener('click', loadLogs);
+        const retryBackupsBtn = document.getElementById('retryBackupsBtn');
+        if (retryBackupsBtn) retryBackupsBtn.addEventListener('click', loadBackups);
+
+        document.querySelectorAll('[data-revert-id]').forEach(btn => btn.addEventListener('click', async () => {
+          const id = btn.dataset.revertId;
+          if (!confirm('Revert this action? This will undo it where possible.')) return;
+          revertBusyId = id; paint();
+          try {
+            await revertAuditLog(id);
+            await loadLogs();
+          } catch (e) {
+            alert(e.message || 'Could not revert this entry.');
+            revertBusyId = null; paint();
+          }
+        }));
+
+        const backupAllBtn = document.getElementById('backupAllBtn');
+        if (backupAllBtn) backupAllBtn.addEventListener('click', async () => {
+          backupAllBusy = true; backupMsg = null; paint();
+          try {
+            const data = await backupAllData();
+            backupMsg = { ok: true, text: `Backup created${data && data.row_counts ? ' · ' + Object.values(data.row_counts).reduce((s, n) => s + (Number(n) || 0), 0) + ' rows' : ''}.` };
+            await loadBackups();
+          } catch (e) {
+            backupMsg = { ok: false, text: e.message || 'Backup failed.' };
+          }
+          backupAllBusy = false;
+          paint();
+        });
+
+        document.querySelectorAll('[data-load-backup]').forEach(btn => btn.addEventListener('click', async () => {
+          const id = btn.dataset.loadBackup;
+          backupBusyId = id; backupMsg = null; paint();
+          try {
+            const res = await loadBackupData(id);
+            const tables = (res.meta && res.meta.row_counts) ? Object.entries(res.meta.row_counts).map(([t, n]) => `${t}: ${n}`).join(', ') : '';
+            backupMsg = { ok: true, text: `Loaded backup from ${fmtDateTime(res.meta.created_at)}. ${tables}` };
+          } catch (e) {
+            backupMsg = { ok: false, text: e.message || 'Could not load this backup.' };
+          }
+          backupBusyId = null;
+          paint();
+        }));
+
+        document.querySelectorAll('[data-restore-backup]').forEach(btn => btn.addEventListener('click', async () => {
+          const id = btn.dataset.restoreBackup;
+          if (!confirm('Restore this backup? This will upsert every row from the backup back into the live database. It will not delete newer rows.')) return;
+          backupBusyId = id; backupMsg = null; paint();
+          try {
+            const res = await restoreBackupData(id);
+            const summary = Object.entries(res.summary || {}).map(([t, s]) => `${t}: ${s.restored}`).join(', ');
+            backupMsg = { ok: true, text: `Restore complete. ${summary}` };
+          } catch (e) {
+            backupMsg = { ok: false, text: e.message || 'Restore failed.' };
+          }
+          backupBusyId = null;
+          paint();
+        }));
+      }
+
+      async function loadLogs() {
+        logsLoading = true; logsError = null; revertBusyId = null; paint();
+        try {
+          logs = await listAuditLogs(category, search);
+        } catch (e) {
+          logsError = e.message || 'Something went wrong while loading the audit log.';
+        }
+        if (myGen !== renderGen) return;
+        logsLoading = false;
+        paint();
+      }
+
+      async function loadBackups() {
+        backupsLoading = true; backupsError = null; paint();
+        try {
+          backups = await listBackups();
+        } catch (e) {
+          backupsError = e.message || 'Something went wrong while loading backups.';
+        }
+        if (myGen !== renderGen) return;
+        backupsLoading = false;
+        paint();
+      }
+
+      loadLogs();
     }
 
     function renderCreateView() {
