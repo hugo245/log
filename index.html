@@ -4336,7 +4336,7 @@
           </div>
           ${pendingImage ? `<div style="margin-bottom:8px;position:relative;display:inline-block;"><img src="${esc(pendingImage.dataUrl)}" style="max-height:80px;border-radius:6px;display:block;"><button type="button" id="statusRemoveImageBtn" style="position:absolute;top:-6px;right:-6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);border-radius:999px;width:20px;height:20px;font-size:11px;cursor:pointer;">&times;</button></div>` : ''}
           <div style="display:flex;gap:8px;align-items:flex-end;">
-            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1;">${esc(composeText)}</textarea>
+            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1 1 0%;min-width:0;width:auto;">${esc(composeText)}</textarea>
             <label class="btn btn-ghost btn-sm" style="cursor:pointer;margin-bottom:2px;">
               📎<input type="file" accept="image/*" id="statusImageInput" style="display:none;">
             </label>
@@ -4469,7 +4469,7 @@
       const canSeeAnalytics = hasPermission('recruitment.analytics');
 
       load();
-      if (canManage) loadRecruiters().then(r => { recruiters = r; if (openTicketId) paint(); }).catch(() => { });
+      if (canManage) loadRecruiters().then(r => { recruiters = r; if (openTicketId) paintModal(); }).catch(() => { });
 
       async function load() {
         loading = true; loadError = null; paint();
@@ -4484,11 +4484,11 @@
       async function openTicket(id) {
         openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; pendingImage = null;
         nextPhaseModalOpen = false; nextPhaseError = null; nextPhaseSelectedSkillsetId = ''; allSetModalOpen = false;
-        paint();
+        paintModal();
         try {
           ticketDetail = await loadRecruitmentTicket(id);
         } catch (e) { }
-        ticketDetailLoading = false; paint();
+        ticketDetailLoading = false; paintModal();
         if (ticketPollTimer) clearInterval(ticketPollTimer);
         ticketPollTimer = setInterval(async () => {
           if (renderGen !== myGen || openTicketId !== id) { clearInterval(ticketPollTimer); return; }
@@ -4570,7 +4570,7 @@
             </table>
           </div>`}
     </div>
-    ${openTicketId ? renderTicketModal() : ''}`;
+    <div id="ticketModalContainer">${openTicketId ? renderTicketModal() : ''}</div>`;
 
         wireTopbarSignOut();
         const refreshBtn = document.getElementById('recruitRefreshBtn');
@@ -4581,6 +4581,14 @@
         document.querySelectorAll('[data-open-ticket]').forEach(el => {
           el.addEventListener('click', () => openTicket(el.dataset.openTicket));
         });
+        wireTicketModal();
+      }
+
+      function paintModal() {
+        if (renderGen !== myGen) return;
+        const container = document.getElementById('ticketModalContainer');
+        if (!container) { paint(); return; }
+        container.innerHTML = openTicketId ? renderTicketModal() : '';
         wireTicketModal();
       }
 
@@ -4714,7 +4722,7 @@
       function wireTicketModal() {
         const scrim = document.getElementById('ticketModalScrim');
         if (!scrim) return;
-        const close = () => { if (ticketPollTimer) clearInterval(ticketPollTimer); openTicketId = null; ticketDetail = null; paint(); };
+        const close = () => { if (ticketPollTimer) clearInterval(ticketPollTimer); openTicketId = null; ticketDetail = null; paintModal(); };
         document.getElementById('ticketModalClose').addEventListener('click', close);
         scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
         wireImageLightbox(document.getElementById('ticketMessages'));
@@ -4723,13 +4731,17 @@
 
         document.querySelectorAll('[data-set-status]').forEach(el => {
           el.addEventListener('click', async () => {
-            busy = true; paint();
+            busy = true; paintModal();
             try {
               await updateRecruitmentStatus(openTicketId, el.dataset.setStatus);
-              await openTicket(openTicketId);
-              await load();
+              const [detail, freshTickets] = await Promise.all([
+                loadRecruitmentTicket(openTicketId),
+                loadRecruitmentTickets(statusFilter)
+              ]);
+              ticketDetail = detail;
+              tickets = freshTickets;
             } catch (e) { }
-            busy = false;
+            busy = false; paint();
           });
         });
 
@@ -4737,8 +4749,11 @@
         if (assignSelect) assignSelect.addEventListener('change', async () => {
           const val = assignSelect.value;
           const match = recruiters.find(r => String(r.robloxUserId) === val);
-          try { await assignRecruitmentTicket(openTicketId, match ? match.robloxUserId : null, match ? match.robloxUsername : null); } catch (e) { }
-          await openTicket(openTicketId);
+          try {
+            await assignRecruitmentTicket(openTicketId, match ? match.robloxUserId : null, match ? match.robloxUsername : null);
+            ticketDetail = await loadRecruitmentTicket(openTicketId);
+          } catch (e) { }
+          paintModal();
         });
 
         const imageInput = document.getElementById('ticketImageInput');
@@ -4747,10 +4762,10 @@
           if (!file) return;
           if (file.size > 6 * 1024 * 1024) { alert('That image is too large (max 6MB).'); return; }
           pendingImage = { dataUrl: await readFileAsDataUrl(file) };
-          paint();
+          paintModal();
         });
         const removeImgBtn = document.getElementById('ticketRemoveImageBtn');
-        if (removeImgBtn) removeImgBtn.addEventListener('click', () => { pendingImage = null; paint(); });
+        if (removeImgBtn) removeImgBtn.addEventListener('click', () => { pendingImage = null; paintModal(); });
 
         const composeEl = document.getElementById('ticketComposeBody');
         if (composeEl) {
@@ -4764,25 +4779,25 @@
           const body = composeBody.trim();
           const isNote = composeIsNote;
           if (!body && !pendingImage) return;
-          busy = true; paint();
+          busy = true; paintModal();
           try {
             await addRecruitmentMessage(openTicketId, body, isNote, pendingImage ? pendingImage.dataUrl : null);
             composeBody = ''; composeIsNote = false; pendingImage = null;
-            await openTicket(openTicketId);
+            ticketDetail = await loadRecruitmentTicket(openTicketId);
           } catch (e) { }
-          busy = false;
+          busy = false; paintModal();
         });
 
         const nextPhaseBtn = document.getElementById('nextPhaseBtn');
         if (nextPhaseBtn) nextPhaseBtn.addEventListener('click', async () => {
           nextPhaseModalOpen = true; nextPhaseError = null; nextPhaseSelectedSkillsetId = '';
-          nextPhaseSkillsetsLoading = true; paint();
+          nextPhaseSkillsetsLoading = true; paintModal();
           try {
             nextPhaseSkillsets = await loadSkillsetsForNextPhase();
           } catch (e) {
             nextPhaseError = 'Could not load skillsets.';
           }
-          nextPhaseSkillsetsLoading = false; paint();
+          nextPhaseSkillsetsLoading = false; paintModal();
         });
         wireNextPhaseModal();
         wireAllSetModal();
@@ -4791,7 +4806,7 @@
       function wireNextPhaseModal() {
         const scrim = document.getElementById('nextPhaseModalScrim');
         if (!scrim) return;
-        const close = () => { nextPhaseModalOpen = false; nextPhaseError = null; paint(); };
+        const close = () => { nextPhaseModalOpen = false; nextPhaseError = null; paintModal(); };
         document.getElementById('nextPhaseModalClose').addEventListener('click', close);
         document.getElementById('nextPhaseCancelBtn').addEventListener('click', close);
         scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
@@ -4802,26 +4817,32 @@
         const confirmBtn = document.getElementById('nextPhaseConfirmBtn');
         if (confirmBtn) confirmBtn.addEventListener('click', async () => {
           const skillsetId = (document.getElementById('nextPhaseSkillsetSelect') || {}).value || nextPhaseSelectedSkillsetId;
-          if (!skillsetId) { nextPhaseError = 'Please choose a skillset.'; paint(); return; }
-          nextPhaseBusy = true; nextPhaseError = null; paint();
+          if (!skillsetId) { nextPhaseError = 'Please choose a skillset.'; paintModal(); return; }
+          nextPhaseBusy = true; nextPhaseError = null; paintModal();
           try {
             await nextPhaseRecruitmentTicket(openTicketId, skillsetId);
+            const [detail, freshTickets] = await Promise.all([
+              loadRecruitmentTicket(openTicketId),
+              loadRecruitmentTickets(statusFilter)
+            ]);
+            ticketDetail = detail;
+            tickets = freshTickets;
             nextPhaseModalOpen = false;
-            await openTicket(openTicketId);
-            await load();
+            nextPhaseBusy = false;
             allSetModalOpen = true;
             paint();
+            return;
           } catch (e) {
             nextPhaseError = e.message || 'Could not move this application to team selection.';
           }
-          nextPhaseBusy = false; paint();
+          nextPhaseBusy = false; paintModal();
         });
       }
 
       function wireAllSetModal() {
         const scrim = document.getElementById('allSetModalScrim');
         if (!scrim) return;
-        const close = () => { allSetModalOpen = false; paint(); };
+        const close = () => { allSetModalOpen = false; paintModal(); };
         document.getElementById('allSetOkBtn').addEventListener('click', close);
         scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
       }
