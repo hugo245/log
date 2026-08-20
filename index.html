@@ -3063,11 +3063,17 @@
     // -------------------------------------------------------------------
     // Recruitment: recruit-session (pre-HR-login applicant) helpers
     // -------------------------------------------------------------------
+    // localStorage (not sessionStorage) since a submitted application
+    // extends the recruit session to ~90 days server-side, so applicants
+    // can come back across browser restarts to check status/chat.
     function getRecruitToken() {
-      try { return sessionStorage.getItem(RECRUIT_TOKEN_KEY); } catch (e) { return null; }
+      try { return localStorage.getItem(RECRUIT_TOKEN_KEY); } catch (e) { return null; }
     }
     function storeRecruitToken(token) {
-      try { sessionStorage.setItem(RECRUIT_TOKEN_KEY, token); } catch (e) { }
+      try { localStorage.setItem(RECRUIT_TOKEN_KEY, token); } catch (e) { }
+    }
+    function clearRecruitToken() {
+      try { localStorage.removeItem(RECRUIT_TOKEN_KEY); } catch (e) { }
     }
 
     async function fetchRecruitSession(rt) {
@@ -3097,6 +3103,73 @@
       return json;
     }
 
+    async function fetchMyTicket(rt) {
+      const res = await fetch(EDGE_BASE + '/recruitment/my-ticket', {
+        headers: { Authorization: 'Bearer ' + rt, 'ngrok-skip-browser-warning': 'true' }
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error((json && json.error) || 'no_ticket');
+      return json.data;
+    }
+
+    async function sendMyTicketMessage(rt, body, attachmentDataUrl) {
+      const res = await fetch(EDGE_BASE + '/recruitment/my-ticket/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + rt, 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ body, attachmentDataUrl: attachmentDataUrl || null })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error((json && json.error) || 'send_failed');
+      return json;
+    }
+
+    // -------------------------------------------------------------------
+    // Recruitment: push notifications (applicant opt-in)
+    // -------------------------------------------------------------------
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const raw = atob(base64);
+      const arr = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+      return arr;
+    }
+
+    async function fetchPushPublicKey() {
+      const res = await fetch(EDGE_BASE + '/recruitment/push-public-key', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const json = await res.json().catch(() => ({}));
+      return json.publicKey || null;
+    }
+
+    async function enableRecruitPushNotifications(rt) {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('unsupported');
+      const publicKey = await fetchPushPublicKey();
+      if (!publicKey) throw new Error('not_configured');
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('permission_denied');
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      const subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+      await fetch(EDGE_BASE + '/recruitment/push-subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + rt, 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ subscription: subscription.toJSON() })
+      });
+      return true;
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
     // -------------------------------------------------------------------
     // Recruitment: staff-side (uses the normal hr_session, like everything
     // else in the app)
@@ -3109,8 +3182,8 @@
       const json = await callHrData('recruitment_get_ticket', { id });
       return json.data;
     }
-    async function addRecruitmentMessage(id, body, internalNote) {
-      await callHrData('recruitment_add_message', { id, body, internalNote: !!internalNote });
+    async function addRecruitmentMessage(id, body, internalNote, attachmentDataUrl) {
+      await callHrData('recruitment_add_message', { id, body, internalNote: !!internalNote, attachmentDataUrl: attachmentDataUrl || null });
     }
     async function updateRecruitmentStatus(id, status, reason) {
       await callHrData('recruitment_update_status', { id, status, reason: reason || null });
@@ -3750,6 +3823,8 @@
         renderRecruitGate();
       } else if (path === '#/recruit/apply') {
         renderRecruitApply();
+      } else if (path === '#/recruit/status') {
+        renderRecruitStatus();
       } else if (path === '#/recruitment') {
         if (isHrAuthed && hasPermission('recruitment.view')) renderRecruitmentDashboard();
         else if (isHrAuthed) window.location.hash = '#/';
@@ -4016,7 +4091,6 @@
       let loading = true;
       let loadFailed = false;
       let submitting = false;
-      let submitted = false;
       let submitError = err ? (RECRUIT_ERROR_MESSAGES[err] || 'Something went wrong, please try again.') : null;
       let fieldErrors = {};
 
@@ -4025,8 +4099,17 @@
         if (renderGen !== myGen) return;
         info = sessionInfo;
         recruiters = recruiterList;
-        loading = false;
-        paint();
+        // If they already have a ticket (came back later, or refreshed
+        // mid-flow), skip straight to the status/chat panel instead of
+        // showing the application form again.
+        fetchMyTicket(rt).then(() => {
+          if (renderGen !== myGen) return;
+          window.location.hash = '#/recruit/status';
+        }).catch(() => {
+          if (renderGen !== myGen) return;
+          loading = false;
+          paint();
+        });
       }).catch(() => {
         if (renderGen !== myGen) return;
         loading = false; loadFailed = true; paint();
@@ -4042,10 +4125,6 @@
           <h2>That link expired</h2>
           <p>Please sign in with Roblox again to restart your application.</p>
           <button type="button" class="btn btn-primary roblox-btn" id="applyRetryBtn">Sign in with Roblox</button>
-        ` : submitted ? `
-          <h2>Application submitted!</h2>
-          <p>Thanks, ${esc(info.robloxUsername)}. Staff will reach out on Discord once they've reviewed it.</p>
-          <a class="btn btn-ghost" href="#/">Back to home</a>
         ` : !info.discordLinked ? `
           <h2>Link your Discord</h2>
           <p>Recruitment applications need a linked Discord account.</p>
@@ -4113,9 +4192,11 @@
               position: (document.getElementById('ap_position').value || '').trim() || null,
               referredByUserId: document.getElementById('ap_referrer').value || null
             });
-            submitting = false; submitted = true; paint();
+            submitting = false;
+            window.location.hash = '#/recruit/status';
           } catch (e) {
             submitting = false;
+            if (e.message === 'application_already_open') { window.location.hash = '#/recruit/status'; return; }
             submitError = RECRUIT_ERROR_MESSAGES[e.message] || 'Could not submit your application. Please try again.';
             paint();
           }
@@ -4139,6 +4220,211 @@
       return `<span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:var(${m[1]});color:var(${m[2]});border:1px solid var(${m[3]});">${m[0]}</span>`;
     }
 
+    const RECRUIT_STATUS_BLURBS = {
+      pending: "We've got your application - it's in the queue to be reviewed.",
+      in_review: "Someone's actively looking at your application.",
+      accepted: "You're in! Someone from the team will reach out here shortly.",
+      rejected: "This one didn't work out, but you're welcome to apply again in the future.",
+      withdrawn: 'This application was marked as withdrawn.'
+    };
+
+    function chatBubble(m, isMine) {
+      return `
+        <div style="display:flex;justify-content:${isMine ? 'flex-end' : 'flex-start'};">
+          <div style="max-width:80%;padding:8px 10px;border-radius:10px;background:${isMine ? 'var(--accent)' : 'var(--row-alt)'};color:${isMine ? '#fff' : 'var(--ink)'};font-size:13px;">
+            <div style="font-weight:600;opacity:.85;font-size:11px;margin-bottom:2px;">${esc(m.author_username)}</div>
+            ${m.attachment_url ? `<img src="${esc(m.attachment_url)}" alt="attachment" style="max-width:100%;border-radius:8px;margin-bottom:${m.body && m.body !== '(image)' ? '6px' : '0'};display:block;cursor:pointer;" data-view-image="${esc(m.attachment_url)}">` : ''}
+            ${!m.attachment_url || (m.body && m.body !== '(image)') ? `<div style="white-space:pre-wrap;">${esc(m.body)}</div>` : ''}
+            <div style="opacity:.7;font-size:10px;margin-top:3px;">${new Date(m.created_at).toLocaleString()}</div>
+          </div>
+        </div>`;
+    }
+
+    function wireImageLightbox(root) {
+      (root || document).querySelectorAll('[data-view-image]').forEach(el => {
+        el.addEventListener('click', () => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:24px;';
+          overlay.innerHTML = `<img src="${esc(el.dataset.viewImage)}" style="max-width:100%;max-height:100%;border-radius:8px;">`;
+          overlay.addEventListener('click', () => overlay.remove());
+          document.body.appendChild(overlay);
+        });
+      });
+    }
+
+    // =======================================================================
+    // Recruitment: applicant "recruit panel" (#/recruit/status)
+    // =======================================================================
+
+    function renderRecruitStatus() {
+      const rt = getRecruitToken();
+      if (!rt) {
+        app.innerHTML = `${topbar()}<div class="gate-shell"><div class="gate-card"><div class="gate-icon">PV</div><h2>Sign in required</h2><p>Sign in with Roblox to check your application status.</p><button type="button" class="btn btn-primary roblox-btn" id="statusSignInBtn">Sign in with Roblox</button></div></div>`;
+        wireTopbarSignOut();
+        const btn = document.getElementById('statusSignInBtn');
+        if (btn) btn.addEventListener('click', () => beginLogin('#/'));
+        return;
+      }
+
+      const myGen = renderGen;
+      let data = null;
+      let loading = true;
+      let loadError = null;
+      let sending = false;
+      let pendingImage = null; // { dataUrl, name }
+      let pollTimer = null;
+      let notifyModalShown = false;
+      let notifyBusy = false;
+      let notifyError = null;
+
+      load(true);
+
+      async function load(showSpinner) {
+        if (showSpinner) { loading = true; paint(); }
+        try {
+          data = await fetchMyTicket(rt);
+          loading = false; loadError = null;
+        } catch (e) {
+          loading = false;
+          loadError = e.message === 'no_ticket' ? 'no_ticket' : (e.message || 'Could not load your application.');
+        }
+        if (renderGen !== myGen) return;
+        paint();
+        if (!pollTimer && data) {
+          pollTimer = setInterval(() => { if (renderGen !== myGen) { clearInterval(pollTimer); return; } load(false); }, 15000);
+        }
+      }
+
+      function maybeShowNotifyModal() {
+        if (notifyModalShown || !data) return;
+        if (!('Notification' in window) || !data.pushConfigured) return;
+        if (Notification.permission !== 'default') return;
+        const key = 'pv_recruit_notify_asked_' + data.ticket.id;
+        try { if (localStorage.getItem(key)) return; } catch (e) { }
+        notifyModalShown = true;
+        paint();
+      }
+
+      function paint() {
+        if (renderGen !== myGen) return;
+        const notifyKey = data ? 'pv_recruit_notify_asked_' + data.ticket.id : null;
+
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell" style="max-width:720px;">
+      ${loading ? `<div class="panel" style="padding:40px;text-align:center;color:var(--muted);">Loading your application...</div>`
+            : loadError === 'no_ticket' ? `
+          <div class="dash-empty"><h3>No application found</h3><p>You haven't submitted an application yet.</p><a class="btn btn-primary" href="#/recruit">Start an application</a></div>`
+              : loadError ? `<div class="dash-empty"><h3>Could not load your application</h3><p>${esc(loadError)}</p></div>`
+                : `
+        <div class="dash-head">
+          <div>
+            <span class="eyebrow">Your application</span>
+            <h1 style="margin-bottom:4px;">${esc(data.ticket.position || 'PlayVerse application')}</h1>
+            <p class="sub">${esc(RECRUIT_STATUS_BLURBS[data.ticket.status] || '')}</p>
+          </div>
+          <div class="dash-toolbar">${recruitmentStatusChip(data.ticket.status)}</div>
+        </div>
+
+        <div class="panel" style="padding:20px;margin-bottom:16px;">
+          <div class="preview-label" style="margin-bottom:10px;">Chat with staff</div>
+          <div id="statusMessages" style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;margin-bottom:12px;padding-right:4px;">
+            ${data.messages.length ? data.messages.map(m => chatBubble(m, m.author_type === 'applicant')).join('') : `<div class="empty-note">No messages yet - staff will reach out here once they review your application.</div>`}
+          </div>
+          ${pendingImage ? `<div style="margin-bottom:8px;position:relative;display:inline-block;"><img src="${esc(pendingImage.dataUrl)}" style="max-height:80px;border-radius:6px;display:block;"><button type="button" id="statusRemoveImageBtn" style="position:absolute;top:-6px;right:-6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);border-radius:999px;width:20px;height:20px;font-size:11px;cursor:pointer;">&times;</button></div>` : ''}
+          <div style="display:flex;gap:8px;align-items:flex-end;">
+            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1;"></textarea>
+            <label class="btn btn-ghost btn-sm" style="cursor:pointer;margin-bottom:2px;">
+              📎<input type="file" accept="image/*" id="statusImageInput" style="display:none;">
+            </label>
+            <button type="button" class="btn btn-primary btn-sm" id="statusSendBtn" ${sending ? 'disabled' : ''} style="margin-bottom:2px;">${sending ? 'Sending...' : 'Send'}</button>
+          </div>
+        </div>
+
+        <div class="panel" style="padding:20px;">
+          <div class="preview-label" style="margin-bottom:10px;">Application details</div>
+          ${data.ticket.portfolio_url ? `<div class="modal-info-row"><strong>Portfolio:</strong> <a href="${esc(data.ticket.portfolio_url)}" target="_blank" rel="noopener">${esc(data.ticket.portfolio_url)}</a></div>` : ''}
+          <div class="modal-info-row"><strong>Referred by:</strong> ${esc(data.ticket.referred_by_username || 'No one')}</div>
+          <div class="modal-info-row" style="white-space:pre-wrap;margin-top:8px;"><strong>Experience:</strong><br>${esc(data.ticket.experience)}</div>
+          <div class="modal-info-row" style="white-space:pre-wrap;margin-top:8px;"><strong>Why you want to join:</strong><br>${esc(data.ticket.why_join)}</div>
+          <div style="margin-top:10px;color:var(--muted);font-size:12px;">Submitted ${new Date(data.ticket.created_at).toLocaleString()}</div>
+        </div>`}
+    </div>
+    ${notifyModalShown ? `
+    <div class="modal-scrim" id="notifyModalScrim">
+      <div class="modal-card" style="max-width:420px;text-align:center;">
+        <div class="modal-body" style="padding-top:8px;">
+          <h3 style="margin-top:0;">Want a heads-up when something changes?</h3>
+          <p style="color:var(--ink-soft);">We can notify you in your browser when your application status updates or you get a new message - no need to keep checking back.</p>
+          ${notifyError ? `<div class="error-box"><span>${esc(notifyError)}</span></div>` : ''}
+          <div style="display:flex;gap:10px;justify-content:center;margin-top:14px;">
+            <button type="button" class="btn btn-primary" id="notifyEnableBtn" ${notifyBusy ? 'disabled' : ''}>${notifyBusy ? 'Enabling...' : 'Enable notifications'}</button>
+            <button type="button" class="btn btn-ghost" id="notifyDismissBtn">Not now</button>
+          </div>
+        </div>
+      </div>
+    </div>` : ''}`;
+
+        wireTopbarSignOut();
+        wireImageLightbox(document.getElementById('statusMessages'));
+
+        const imageInput = document.getElementById('statusImageInput');
+        if (imageInput) imageInput.addEventListener('change', async () => {
+          const file = imageInput.files && imageInput.files[0];
+          if (!file) return;
+          if (file.size > 6 * 1024 * 1024) { alert('That image is too large (max 6MB).'); return; }
+          pendingImage = { dataUrl: await readFileAsDataUrl(file), name: file.name };
+          paint();
+        });
+        const removeImgBtn = document.getElementById('statusRemoveImageBtn');
+        if (removeImgBtn) removeImgBtn.addEventListener('click', () => { pendingImage = null; paint(); });
+
+        const sendBtn = document.getElementById('statusSendBtn');
+        if (sendBtn) sendBtn.addEventListener('click', async () => {
+          const body = (document.getElementById('statusComposeBody').value || '').trim();
+          if (!body && !pendingImage) return;
+          sending = true; paint();
+          try {
+            await sendMyTicketMessage(rt, body, pendingImage ? pendingImage.dataUrl : null);
+            pendingImage = null;
+            await load(false);
+            maybeShowNotifyModal();
+            paint();
+          } catch (e) {
+            alert('Could not send that message. Please try again.');
+          }
+          sending = false;
+        });
+
+        const notifyEnableBtn = document.getElementById('notifyEnableBtn');
+        if (notifyEnableBtn) notifyEnableBtn.addEventListener('click', async () => {
+          notifyBusy = true; notifyError = null; paint();
+          try {
+            await enableRecruitPushNotifications(rt);
+            try { localStorage.setItem(notifyKey, '1'); } catch (e) { }
+            notifyModalShown = false;
+          } catch (e) {
+            notifyError = e.message === 'permission_denied'
+              ? "Notifications were blocked - you can turn them on later from your browser's site settings."
+              : "Couldn't enable notifications on this browser/device.";
+          }
+          notifyBusy = false; paint();
+        });
+        const notifyDismissBtn = document.getElementById('notifyDismissBtn');
+        if (notifyDismissBtn) notifyDismissBtn.addEventListener('click', () => {
+          try { localStorage.setItem(notifyKey, '1'); } catch (e) { }
+          notifyModalShown = false; paint();
+        });
+      }
+
+      // Ask about notifications a beat after the first successful load, once
+      // there's actually a ticket to attach the subscription to.
+      const notifyCheckInterval = setInterval(() => {
+        if (renderGen !== myGen) { clearInterval(notifyCheckInterval); return; }
+        if (data) { maybeShowNotifyModal(); if (notifyModalShown) { paint(); clearInterval(notifyCheckInterval); } }
+      }, 1000);
+    }
+
     function renderRecruitmentDashboard() {
       const myGen = renderGen;
       let tickets = [];
@@ -4151,7 +4437,9 @@
       let recruiters = [];
       let composeBody = '';
       let composeIsNote = false;
+      let pendingImage = null;
       let busy = false;
+      let ticketPollTimer = null;
 
       const canManage = hasPermission('recruitment.manage');
       const canRespond = hasPermission('recruitment.respond');
@@ -4171,11 +4459,16 @@
       }
 
       async function openTicket(id) {
-        openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; paint();
+        openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; pendingImage = null; paint();
         try {
           ticketDetail = await loadRecruitmentTicket(id);
         } catch (e) { }
         ticketDetailLoading = false; paint();
+        if (ticketPollTimer) clearInterval(ticketPollTimer);
+        ticketPollTimer = setInterval(async () => {
+          if (renderGen !== myGen || openTicketId !== id) { clearInterval(ticketPollTimer); return; }
+          try { ticketDetail = await loadRecruitmentTicket(id); paint(); } catch (e) { }
+        }, 15000);
       }
 
       function counts() {
@@ -4219,6 +4512,7 @@
                 <th style="padding:12px 16px;font-size:12px;color:var(--muted);">Referred by</th>
                 <th style="padding:12px 16px;font-size:12px;color:var(--muted);">Status</th>
                 <th style="padding:12px 16px;font-size:12px;color:var(--muted);">Submitted</th>
+                <th style="padding:12px 16px;font-size:12px;color:var(--muted);"></th>
               </tr></thead>
               <tbody>
                 ${tickets.map((t, i) => `
@@ -4228,6 +4522,7 @@
                   <td style="padding:12px 16px;">${esc(t.referred_by_username || '—')}</td>
                   <td style="padding:12px 16px;">${recruitmentStatusChip(t.status)}</td>
                   <td style="padding:12px 16px;color:var(--muted);font-size:13px;">${new Date(t.created_at).toLocaleString()}</td>
+                  <td style="padding:12px 16px;text-align:right;"><button type="button" class="btn btn-ghost btn-sm">💬 Chat</button></td>
                 </tr>`).join('')}
               </tbody>
             </table>
@@ -4291,22 +4586,26 @@
           </div>` : ''}
 
           <div class="modal-section">
-            <div class="modal-section-title">Notes &amp; chat</div>
-            <div style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;margin-bottom:10px;">
-              ${messages.length ? messages.map(m => `
-                <div style="padding:8px 10px;border-radius:8px;background:${m.internal_note ? 'var(--warn-bg)' : 'var(--row-alt)'};font-size:13px;">
-                  <div style="font-weight:600;">${esc(m.author_username)}${m.internal_note ? ' <span style="font-weight:400;color:var(--warn-text);">(internal note)</span>' : ''}</div>
+            <div class="modal-section-title">Chat</div>
+            <div id="ticketMessages" style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto;margin-bottom:10px;">
+              ${messages.length ? messages.map(m => m.internal_note ? `
+                <div style="padding:8px 10px;border-radius:8px;background:var(--warn-bg);font-size:13px;">
+                  <div style="font-weight:600;">${esc(m.author_username)} <span style="font-weight:400;color:var(--warn-text);">(internal note)</span></div>
                   <div style="white-space:pre-wrap;">${esc(m.body)}</div>
                   <div style="color:var(--muted);font-size:11px;margin-top:2px;">${new Date(m.created_at).toLocaleString()}</div>
-                </div>`).join('') : `<div class="empty-note">No messages yet.</div>`}
+                </div>` : chatBubble(m, m.author_type === 'staff')).join('') : `<div class="empty-note">No messages yet - start the conversation below.</div>`}
             </div>
             ${canRespond ? `
+            ${pendingImage ? `<div style="margin-bottom:8px;position:relative;display:inline-block;"><img src="${esc(pendingImage.dataUrl)}" style="max-height:80px;border-radius:6px;display:block;"><button type="button" id="ticketRemoveImageBtn" style="position:absolute;top:-6px;right:-6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);border-radius:999px;width:20px;height:20px;font-size:11px;cursor:pointer;">&times;</button></div>` : ''}
             <textarea id="ticketComposeBody" rows="2" placeholder="Write a message or note...">${esc(composeBody)}</textarea>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
               <label style="font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">
                 <input type="checkbox" id="ticketComposeNote" ${composeIsNote ? 'checked' : ''}> Internal note only
               </label>
-              <button type="button" class="btn btn-primary btn-sm" id="ticketComposeSend" ${busy ? 'disabled' : ''}>Send</button>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📎<input type="file" accept="image/*" id="ticketImageInput" style="display:none;"></label>
+                <button type="button" class="btn btn-primary btn-sm" id="ticketComposeSend" ${busy ? 'disabled' : ''}>Send</button>
+              </div>
             </div>` : ''}
           </div>
         </div>
@@ -4317,9 +4616,10 @@
       function wireTicketModal() {
         const scrim = document.getElementById('ticketModalScrim');
         if (!scrim) return;
-        const close = () => { openTicketId = null; ticketDetail = null; paint(); };
+        const close = () => { if (ticketPollTimer) clearInterval(ticketPollTimer); openTicketId = null; ticketDetail = null; paint(); };
         document.getElementById('ticketModalClose').addEventListener('click', close);
         scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+        wireImageLightbox(document.getElementById('ticketMessages'));
 
         document.querySelectorAll('[data-set-status]').forEach(el => {
           el.addEventListener('click', async () => {
@@ -4341,15 +4641,26 @@
           await openTicket(openTicketId);
         });
 
+        const imageInput = document.getElementById('ticketImageInput');
+        if (imageInput) imageInput.addEventListener('change', async () => {
+          const file = imageInput.files && imageInput.files[0];
+          if (!file) return;
+          if (file.size > 6 * 1024 * 1024) { alert('That image is too large (max 6MB).'); return; }
+          pendingImage = { dataUrl: await readFileAsDataUrl(file) };
+          paint();
+        });
+        const removeImgBtn = document.getElementById('ticketRemoveImageBtn');
+        if (removeImgBtn) removeImgBtn.addEventListener('click', () => { pendingImage = null; paint(); });
+
         const sendBtn = document.getElementById('ticketComposeSend');
         if (sendBtn) sendBtn.addEventListener('click', async () => {
           const body = (document.getElementById('ticketComposeBody').value || '').trim();
           const isNote = document.getElementById('ticketComposeNote').checked;
-          if (!body) return;
+          if (!body && !pendingImage) return;
           busy = true; paint();
           try {
-            await addRecruitmentMessage(openTicketId, body, isNote);
-            composeBody = ''; composeIsNote = false;
+            await addRecruitmentMessage(openTicketId, body, isNote, pendingImage ? pendingImage.dataUrl : null);
+            composeBody = ''; composeIsNote = false; pendingImage = null;
             await openTicket(openTicketId);
           } catch (e) { }
           busy = false;
@@ -4397,7 +4708,17 @@
         <div class="strip-card"><div class="strip-label">Total applications</div><div class="strip-value">${data.totals.total}</div></div>
         <div class="strip-card"><div class="strip-label">Devs hired</div><div class="strip-value" style="color:var(--ok-text);">${data.totals.accepted}</div></div>
         <div class="strip-card"><div class="strip-label">Awaiting review</div><div class="strip-value">${data.totals.pending + data.totals.inReview}</div></div>
-        <div class="strip-card"><div class="strip-label">Avg. first response</div><div class="strip-value">${data.avgResponseMinutes != null ? data.avgResponseMinutes + 'm' : '—'}</div></div>
+        <div class="strip-card"><div class="strip-label">Hire rate (of decided)</div><div class="strip-value">${data.conversionRate != null ? data.conversionRate + '%' : '—'}</div></div>
+        <div class="strip-card"><div class="strip-label">Avg / median response</div><div class="strip-value">${data.avgResponseMinutes != null ? data.avgResponseMinutes + 'm' : '—'}${data.medianResponseMinutes != null ? ` <span style="font-size:13px;color:var(--muted);font-weight:500;">/ ${data.medianResponseMinutes}m</span>` : ''}</div></div>
+        <div class="strip-card">
+          <div class="strip-label">This week vs last</div>
+          <div class="strip-value" style="display:flex;align-items:baseline;gap:6px;">
+            ${data.last7}
+            <span style="font-size:13px;font-weight:600;color:${data.weekOverWeekChangePct > 0 ? 'var(--ok-text)' : data.weekOverWeekChangePct < 0 ? 'var(--err-text)' : 'var(--muted)'};">
+              ${data.weekOverWeekChangePct > 0 ? '↑' : data.weekOverWeekChangePct < 0 ? '↓' : ''}${Math.abs(data.weekOverWeekChangePct)}%
+            </span>
+          </div>
+        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:20px;margin-top:20px;align-items:start;">
@@ -4408,6 +4729,28 @@
         <div class="panel" style="padding:20px;">
           <div class="preview-label" style="margin-bottom:10px;">Status breakdown</div>
           <canvas id="recruitStatusChart" height="140"></canvas>
+        </div>
+      </div>
+
+      <div class="panel" style="padding:20px;margin-top:20px;">
+        <div class="preview-label" style="margin-bottom:14px;">Pipeline funnel</div>
+        <div style="display:flex;align-items:stretch;gap:2px;">
+          ${(() => {
+                const stages = [
+                  { label: 'Submitted', value: data.totals.total, color: '#8A93A3' },
+                  { label: 'In review', value: data.totals.inReview + data.totals.accepted + data.totals.rejected + data.totals.withdrawn - data.totals.withdrawn, color: '#7C76E8' },
+                  { label: 'Accepted', value: data.totals.accepted, color: '#178A4C' }
+                ];
+                const max = Math.max(1, stages[0].value);
+                return stages.map(s => `
+              <div style="flex:1;text-align:center;">
+                <div style="height:90px;display:flex;align-items:flex-end;justify-content:center;">
+                  <div style="width:60%;min-height:4px;height:${Math.max(4, Math.round((s.value / max) * 90))}px;background:${s.color};border-radius:6px 6px 0 0;"></div>
+                </div>
+                <div style="font-weight:700;font-size:18px;margin-top:6px;">${s.value}</div>
+                <div style="font-size:12px;color:var(--muted);">${s.label}</div>
+              </div>`).join('');
+              })()}
         </div>
       </div>
 
@@ -4438,16 +4781,39 @@
             <thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
               <th style="padding:10px 16px;font-size:12px;color:var(--muted);">Staff</th>
               <th style="padding:10px 16px;font-size:12px;color:var(--muted);">Referrals</th>
+              <th style="padding:10px 16px;font-size:12px;color:var(--muted);">Hired</th>
             </tr></thead>
             <tbody>
               ${data.referrerLeaderboard.length ? data.referrerLeaderboard.map(r => `
                 <tr style="border-bottom:1px solid var(--line);">
                   <td style="padding:10px 16px;">${esc(r.username)}</td>
                   <td style="padding:10px 16px;">${r.count}</td>
-                </tr>`).join('') : `<tr><td style="padding:16px;color:var(--muted);" colspan="2">No referrals recorded yet.</td></tr>`}
+                  <td style="padding:10px 16px;color:var(--ok-text);">${r.hired}</td>
+                </tr>`).join('') : `<tr><td style="padding:16px;color:var(--muted);" colspan="3">No referrals recorded yet.</td></tr>`}
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div class="panel" style="padding:0;overflow:hidden;margin-top:20px;">
+        <div class="preview-label" style="padding:16px 16px 0;">Applications by position</div>
+        <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+          <thead><tr style="text-align:left;border-bottom:1px solid var(--line);">
+            <th style="padding:10px 16px;font-size:12px;color:var(--muted);">Position</th>
+            <th style="padding:10px 16px;font-size:12px;color:var(--muted);">Applications</th>
+            <th style="padding:10px 16px;font-size:12px;color:var(--muted);">Hired</th>
+            <th style="padding:10px 16px;font-size:12px;color:var(--muted);">Hire rate</th>
+          </tr></thead>
+          <tbody>
+            ${data.positionBreakdown.length ? data.positionBreakdown.map(p => `
+              <tr style="border-bottom:1px solid var(--line);">
+                <td style="padding:10px 16px;">${esc(p.position)}</td>
+                <td style="padding:10px 16px;">${p.applications}</td>
+                <td style="padding:10px 16px;color:var(--ok-text);">${p.accepted}</td>
+                <td style="padding:10px 16px;">${p.applications ? Math.round((p.accepted / p.applications) * 1000) / 10 + '%' : '—'}</td>
+              </tr>`).join('') : `<tr><td style="padding:16px;color:var(--muted);" colspan="4">No applications yet.</td></tr>`}
+          </tbody>
+        </table>
       </div>`}
     </div>`;
 

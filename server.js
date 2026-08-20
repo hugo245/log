@@ -3,6 +3,8 @@ const cors = require('cors');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { createClient } = require('@supabase/supabase-js');
+let webpush = null;
+try { webpush = require('web-push'); } catch (e) { /* optional dependency - see below */ }
 require('dotenv').config();
 
 const PORT = process.env.PORT || 3000;
@@ -24,13 +26,28 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_NOTIFY_CHANNEL_ID = process.env.DISCORD_NOTIFY_CHANNEL_ID;
+// The recruit session starts short-lived (just long enough to finish
+// applying), then gets extended once a ticket exists so the applicant can
+// come back and check status/chat for a while without re-authenticating.
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
+const RECRUIT_SESSION_PORTAL_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 const DISCORD_CONFIGURED = !!(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI);
 if (!DISCORD_CONFIGURED) {
     console.warn('Discord recruitment OAuth is not configured (DISCORD_CLIENT_ID/SECRET/REDIRECT_URI missing) - the recruitment flow will be disabled until it is.');
 }
 if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) {
     console.warn('DISCORD_BOT_TOKEN/DISCORD_NOTIFY_CHANNEL_ID not set - new recruitment tickets will not be posted to Discord.');
+}
+
+// --- Web Push (applicant notifications) --------------------------------------
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+const VAPID_CONTACT_EMAIL = process.env.VAPID_CONTACT_EMAIL || 'mailto:admin@playverse.cc';
+const PUSH_CONFIGURED = !!(webpush && VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+if (webpush && PUSH_CONFIGURED) {
+    webpush.setVapidDetails(VAPID_CONTACT_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+    console.warn('Push notifications are not configured (missing the web-push package or VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY) - applicants will not receive browser notifications.');
 }
 
 const requiredEnv = {
@@ -182,7 +199,9 @@ app.use(cors({
     allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning']
 }));
 
-app.use(express.json());
+// 8mb limit so chat image attachments (sent as base64) fit through - the
+// rest of the app's payloads are tiny, so this only matters for uploads.
+app.use(express.json({ limit: '8mb' }));
 
 app.get('/ping', (req, res) => {
     res.status(200).json({ ok: true, time: new Date().toISOString() });
@@ -260,24 +279,72 @@ async function createRecruitSession(robloxUserId, robloxUsername) {
 
 // Everyone currently holding a role that grants recruitment.respond - this is
 // the "signed up with recruitment role" list used for the referred-by picker
-// and for per-staff analytics. Sourced from manual role assignments, since
-// that's an explicit opt-in rather than an incidental group rank.
-async function listRecruiters() {
-    const { data: roles, error: rolesErr } = await supabase.from('roles').select('id, name, permissions');
+// and for per-staff analytics. Covers both ways a role can be held in this
+// app: an explicit manual assignment (user_role_assignments), and a role
+// that's auto-granted by Roblox group rank - the latter has no row in any
+// table, so it has to be resolved live against the Roblox Group API.
+// Cached briefly since this can involve a handful of Roblox API calls.
+let recruitersCache = { at: 0, data: null };
+const RECRUITERS_CACHE_MS = 5 * 60 * 1000;
+
+async function fetchGroupRoleMembers(groupId, rank) {
+    try {
+        const rolesRes = await fetch(`https://groups.roblox.com/v1/groups/${groupId}/roles`);
+        if (!rolesRes.ok) return [];
+        const rolesJson = await rolesRes.json().catch(() => null);
+        const roleset = rolesJson && Array.isArray(rolesJson.roles) ? rolesJson.roles.find(r => r.rank === rank) : null;
+        if (!roleset) return [];
+        const members = [];
+        let cursor = '';
+        for (let page = 0; page < 10; page++) { // hard cap so a huge group can't hang this request
+            const url = `https://groups.roblox.com/v1/groups/${groupId}/roles/${roleset.id}/users?limit=100${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`;
+            const res = await fetch(url);
+            if (!res.ok) break;
+            const json = await res.json().catch(() => null);
+            if (!json) break;
+            (json.data || []).forEach(u => members.push({ robloxUserId: u.userId, robloxUsername: u.username }));
+            if (!json.nextPageCursor) break;
+            cursor = json.nextPageCursor;
+        }
+        return members;
+    } catch (e) {
+        console.error('fetchGroupRoleMembers failed:', e.message);
+        return [];
+    }
+}
+
+async function listRecruiters({ skipCache } = {}) {
+    if (!skipCache && recruitersCache.data && (Date.now() - recruitersCache.at) < RECRUITERS_CACHE_MS) {
+        return recruitersCache.data;
+    }
+
+    const { data: roles, error: rolesErr } = await supabase.from('roles').select('*');
     if (rolesErr) throw new Error(rolesErr.message);
-    const recruiterRoleIds = (roles || [])
-        .filter(r => Array.isArray(r.permissions) && r.permissions.includes('recruitment.respond'))
-        .map(r => r.id);
-    if (!recruiterRoleIds.length) return [];
+    const recruiterRoles = (roles || []).filter(r => Array.isArray(r.permissions) && r.permissions.includes('recruitment.respond'));
+    if (!recruiterRoles.length) { recruitersCache = { at: Date.now(), data: [] }; return []; }
+
+    const byId = new Map();
+
+    // 1) Explicit manual assignments - always counts, regardless of link_only.
     const { data: assignments, error: assignErr } = await supabase
         .from('user_role_assignments')
         .select('roblox_user_id, roblox_username')
-        .in('role_id', recruiterRoleIds);
+        .in('role_id', recruiterRoles.map(r => r.id));
     if (assignErr) throw new Error(assignErr.message);
-    const byId = new Map();
     (assignments || []).forEach(a => { if (!byId.has(a.roblox_user_id)) byId.set(a.roblox_user_id, a.roblox_username); });
-    return [...byId.entries()].map(([robloxUserId, robloxUsername]) => ({ robloxUserId, robloxUsername }))
+
+    // 2) Roles auto-granted by Roblox group rank (not link_only, has a group
+    // + specific rank set) - resolve live against the Roblox Group API.
+    const groupRankRoles = recruiterRoles.filter(r => !r.link_only && r.roblox_group_id != null && r.min_rank != null);
+    for (const role of groupRankRoles) {
+        const members = await fetchGroupRoleMembers(role.roblox_group_id, role.min_rank);
+        members.forEach(m => { if (!byId.has(m.robloxUserId)) byId.set(m.robloxUserId, m.robloxUsername); });
+    }
+
+    const result = [...byId.entries()].map(([robloxUserId, robloxUsername]) => ({ robloxUserId, robloxUsername }))
         .sort((a, b) => a.robloxUsername.localeCompare(b.robloxUsername));
+    recruitersCache = { at: Date.now(), data: result };
+    return result;
 }
 
 async function discordApi(path, options) {
@@ -351,6 +418,56 @@ async function notifyDiscordStatusChange(ticket, newStatus, byUsername) {
     } catch (e) {
         console.error('notifyDiscordStatusChange failed:', e.message);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Applicant browser push notifications (opt-in) - status changes + new
+// staff messages. Best effort: a failed/expired subscription is deleted so
+// it stops being retried, but never blocks the underlying action.
+// ---------------------------------------------------------------------------
+async function sendPushToApplicant(robloxUserId, { title, body, url }) {
+    if (!PUSH_CONFIGURED) return;
+    try {
+        const { data: subs } = await supabase.from('recruit_push_subscriptions').select('*').eq('roblox_user_id', robloxUserId);
+        if (!subs || !subs.length) return;
+        const payload = JSON.stringify({ title, body, url: url || `${APP_ORIGIN}/#/recruit/status` });
+        await Promise.all(subs.map(async sub => {
+            try {
+                await webpush.sendNotification({
+                    endpoint: sub.endpoint,
+                    keys: { p256dh: sub.p256dh, auth: sub.auth }
+                }, payload);
+            } catch (e) {
+                // 404/410 = subscription is gone (browser unsubscribed, expired, etc) - clean it up.
+                if (e.statusCode === 404 || e.statusCode === 410) {
+                    await supabase.from('recruit_push_subscriptions').delete().eq('id', sub.id);
+                } else {
+                    console.error('sendPushToApplicant failed for one subscription:', e.message);
+                }
+            }
+        }));
+    } catch (e) {
+        console.error('sendPushToApplicant failed:', e.message);
+    }
+}
+
+// Uploads a base64 data-URL image to Supabase Storage and returns its public
+// URL. Used for chat attachments from both the staff dashboard and the
+// applicant status panel. Keeps a hard size cap regardless of what the
+// client claims, since data-URL length is easy to check before upload.
+const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+async function uploadChatAttachment(dataUrl, pathPrefix) {
+    const match = /^data:(image\/(?:png|jpeg|jpg|gif|webp));base64,(.+)$/.exec(dataUrl || '');
+    if (!match) throw new Error('unsupported_image_type');
+    const contentType = match[1];
+    const buffer = Buffer.from(match[2], 'base64');
+    if (buffer.length > MAX_ATTACHMENT_BYTES) throw new Error('image_too_large');
+    const ext = contentType.split('/')[1].replace('jpeg', 'jpg');
+    const path = `${pathPrefix}/${Date.now()}_${randomToken(6)}.${ext}`;
+    const { error } = await supabase.storage.from('recruitment-attachments').upload(path, buffer, { contentType, upsert: false });
+    if (error) throw new Error(error.message);
+    const { data: publicUrlData } = supabase.storage.from('recruitment-attachments').getPublicUrl(path);
+    return publicUrlData.publicUrl;
 }
 
 async function fetchRobloxGroupRoles(robloxUserId) {
@@ -1151,6 +1268,7 @@ app.get('/discord-auth-start', async (req, res) => {
     authorizeUrl.searchParams.set('response_type', 'code');
     authorizeUrl.searchParams.set('scope', 'identify');
     authorizeUrl.searchParams.set('state', state);
+    console.log(`[discord-auth-start] sending user to Discord with redirect_uri=${DISCORD_REDIRECT_URI}`);
     res.redirect(authorizeUrl.toString());
 });
 
@@ -1274,8 +1392,110 @@ app.post('/recruitment/apply', async (req, res) => {
 
     if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
 
+    // Extend this recruit session to a long-lived "portal" session so they
+    // can come back over the following weeks/months to check status and
+    // chat, without needing to redo the whole Roblox + Discord sign-in.
+    const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
+    await supabase.from('recruit_sessions').update({ expires_at: portalExpiresAt }).eq('token', recruitSession.token);
+
     notifyDiscordNewTicket(ticket);
     res.json({ ok: true, data: { id: ticket.id } });
+});
+
+// Applicant-facing "recruit panel" - lets someone who already applied check
+// their status and chat, using the same recruit-session bearer token (now
+// long-lived, extended above once their ticket was created).
+app.get('/recruitment/my-ticket', async (req, res) => {
+    const recruitSession = await getRecruitSession(req);
+    if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
+
+    const { data: ticket, error: ticketErr } = await supabase
+        .from('recruitment_tickets')
+        .select('*')
+        .eq('roblox_user_id', recruitSession.roblox_user_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+    if (!ticket) { res.status(404).json({ ok: false, error: 'no_ticket' }); return; }
+
+    const { data: messages, error: msgErr } = await supabase
+        .from('recruitment_messages')
+        .select('*')
+        .eq('ticket_id', ticket.id)
+        .eq('internal_note', false) // applicants never see internal staff notes
+        .order('created_at', { ascending: true });
+    if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
+
+    res.json({ ok: true, data: { ticket, messages: messages || [], pushConfigured: PUSH_CONFIGURED } });
+});
+
+app.post('/recruitment/my-ticket/message', async (req, res) => {
+    const recruitSession = await getRecruitSession(req);
+    if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
+
+    const body = req.body || {};
+    const text = body.body ? String(body.body).trim() : '';
+    const attachmentDataUrl = body.attachmentDataUrl ? String(body.attachmentDataUrl) : null;
+    if (!text && !attachmentDataUrl) { res.status(400).json({ ok: false, error: 'missing_body' }); return; }
+
+    const { data: ticket, error: ticketErr } = await supabase
+        .from('recruitment_tickets')
+        .select('*')
+        .eq('roblox_user_id', recruitSession.roblox_user_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+    if (!ticket) { res.status(404).json({ ok: false, error: 'no_ticket' }); return; }
+
+    let attachmentUrl = null;
+    if (attachmentDataUrl) {
+        try { attachmentUrl = await uploadChatAttachment(attachmentDataUrl, `ticket-${ticket.id}`); }
+        catch (e) { res.status(400).json({ ok: false, error: e.message }); return; }
+    }
+
+    const { error: msgErr } = await supabase.from('recruitment_messages').insert({
+        ticket_id: ticket.id,
+        author_type: 'applicant',
+        author_username: recruitSession.roblox_username,
+        body: text || '(image)',
+        attachment_url: attachmentUrl,
+        internal_note: false
+    });
+    if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
+
+    await supabase.from('recruitment_tickets').update({ updated_at: new Date().toISOString() }).eq('id', ticket.id);
+    res.json({ ok: true });
+});
+
+// Shared VAPID public key so the frontend can subscribe to push. Not a
+// secret - it's meant to be public (that's how Web Push works).
+app.get('/recruitment/push-public-key', (req, res) => {
+    res.json({ ok: true, publicKey: PUSH_CONFIGURED ? VAPID_PUBLIC_KEY : null });
+});
+
+app.post('/recruitment/push-subscribe', async (req, res) => {
+    const recruitSession = await getRecruitSession(req);
+    if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
+    const sub = req.body && req.body.subscription;
+    if (!sub || !sub.endpoint || !sub.keys) { res.status(400).json({ ok: false, error: 'invalid_subscription' }); return; }
+    const { error } = await supabase.from('recruit_push_subscriptions').upsert({
+        roblox_user_id: recruitSession.roblox_user_id,
+        endpoint: sub.endpoint,
+        p256dh: sub.keys.p256dh,
+        auth: sub.keys.auth
+    }, { onConflict: 'endpoint' });
+    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+    res.json({ ok: true });
+});
+
+app.post('/recruitment/push-unsubscribe', async (req, res) => {
+    const recruitSession = await getRecruitSession(req);
+    if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
+    const endpoint = req.body && req.body.endpoint;
+    if (endpoint) await supabase.from('recruit_push_subscriptions').delete().eq('endpoint', endpoint);
+    res.json({ ok: true });
 });
 
 // Public (no auth) - just names, used to populate the "who referred you?"
@@ -2932,20 +3152,29 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'recruitment.respond')) return;
         const id = payload.id;
         const body = payload.body ? String(payload.body).trim() : '';
+        const attachmentDataUrl = payload.attachmentDataUrl ? String(payload.attachmentDataUrl) : null;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        if (!body) { res.status(400).json({ ok: false, error: 'missing_body' }); return; }
+        if (!body && !attachmentDataUrl) { res.status(400).json({ ok: false, error: 'missing_body' }); return; }
 
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
         if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
 
+        let attachmentUrl = null;
+        if (attachmentDataUrl) {
+            try { attachmentUrl = await uploadChatAttachment(attachmentDataUrl, `ticket-${id}`); }
+            catch (e) { res.status(400).json({ ok: false, error: e.message }); return; }
+        }
+
+        const isInternal = !!payload.internalNote;
         const { error: msgErr } = await supabase.from('recruitment_messages').insert({
             ticket_id: id,
             author_type: 'staff',
             author_user_id: session.roblox_user_id,
             author_username: session.roblox_username,
-            body,
-            internal_note: !!payload.internalNote
+            body: body || '(image)',
+            attachment_url: attachmentUrl,
+            internal_note: isInternal
         });
         if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
 
@@ -2958,8 +3187,32 @@ app.post('/hr-data', async (req, res) => {
         }
         await supabase.from('recruitment_tickets').update(updates).eq('id', id);
 
+        if (!isInternal) {
+            sendPushToApplicant(ticket.roblox_user_id, {
+                title: `New message from ${session.roblox_username}`,
+                body: body ? body.slice(0, 120) : 'Sent an image',
+                url: `${APP_ORIGIN}/#/recruit/status`
+            });
+        }
+
         logAudit(session, { category: 'recruitment', action: 'message', targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username, details: { ticketId: id } });
         res.json({ ok: true });
+        return;
+    }
+
+    // Shared image upload for the staff ticket chat (applicant side has its
+    // own /recruitment/my-ticket/message which uploads inline instead).
+    if (action === 'recruitment_upload_attachment') {
+        if (!requirePermission(res, session, 'recruitment.respond')) return;
+        const dataUrl = payload.dataUrl ? String(payload.dataUrl) : '';
+        const ticketId = payload.ticketId ? String(payload.ticketId) : 'misc';
+        if (!dataUrl) { res.status(400).json({ ok: false, error: 'missing_data_url' }); return; }
+        try {
+            const url = await uploadChatAttachment(dataUrl, `ticket-${ticketId}`);
+            res.json({ ok: true, data: { url } });
+        } catch (e) {
+            res.status(400).json({ ok: false, error: e.message });
+        }
         return;
     }
 
@@ -2997,6 +3250,13 @@ app.post('/hr-data', async (req, res) => {
                 author_username: session.roblox_username, body: reason, internal_note: true
             });
         }
+
+        const statusLabels = { pending: 'set to pending', in_review: 'marked in review', accepted: 'accepted', rejected: 'rejected', withdrawn: 'marked withdrawn' };
+        sendPushToApplicant(ticket.roblox_user_id, {
+            title: 'Your PlayVerse application was updated',
+            body: `Your application was ${statusLabels[status] || status}.`,
+            url: `${APP_ORIGIN}/#/recruit/status`
+        });
 
         logAudit(session, {
             category: 'recruitment', action: 'status_change',
@@ -3066,10 +3326,12 @@ app.post('/hr-data', async (req, res) => {
         const byReferrer = {};
         all.forEach(t => {
             if (t.referred_by_username) {
-                byReferrer[t.referred_by_username] = (byReferrer[t.referred_by_username] || 0) + 1;
+                byReferrer[t.referred_by_username] = byReferrer[t.referred_by_username] || { username: t.referred_by_username, count: 0, hired: 0 };
+                byReferrer[t.referred_by_username].count += 1;
+                if (t.status === 'accepted') byReferrer[t.referred_by_username].hired += 1;
             }
         });
-        const referrerLeaderboard = Object.entries(byReferrer).map(([username, count]) => ({ username, count })).sort((a, b) => b.count - a.count);
+        const referrerLeaderboard = Object.values(byReferrer).sort((a, b) => b.count - a.count);
 
         const byDay = {};
         all.forEach(t => {
@@ -3082,8 +3344,49 @@ app.post('/hr-data', async (req, res) => {
         const avgResponseMinutes = responded.length
             ? Math.round(responded.reduce((sum, t) => sum + (new Date(t.first_response_at).getTime() - new Date(t.created_at).getTime()), 0) / responded.length / 60000)
             : null;
+        const medianResponseMinutes = (() => {
+            if (!responded.length) return null;
+            const mins = responded.map(t => (new Date(t.first_response_at).getTime() - new Date(t.created_at).getTime()) / 60000).sort((a, b) => a - b);
+            const mid = Math.floor(mins.length / 2);
+            return Math.round(mins.length % 2 ? mins[mid] : (mins[mid - 1] + mins[mid]) / 2);
+        })();
 
-        res.json({ ok: true, data: { totals, staffLeaderboard, referrerLeaderboard, timeline, avgResponseMinutes } });
+        // Funnel + conversion: of everything that's been *decided* (closed),
+        // what fraction ended up hired? Still-open tickets are excluded so
+        // this doesn't get diluted by a backlog of untouched applications.
+        const closed = all.filter(t => ['accepted', 'rejected', 'withdrawn'].includes(t.status));
+        const conversionRate = closed.length ? Math.round((totals.accepted / closed.length) * 1000) / 10 : null;
+
+        // Which positions people are applying for, and how many of each
+        // actually get hired - surfaces where the pipeline is thin.
+        const byPosition = {};
+        all.forEach(t => {
+            const key = t.position && t.position.trim() ? t.position.trim() : 'Not specified';
+            byPosition[key] = byPosition[key] || { position: key, applications: 0, accepted: 0 };
+            byPosition[key].applications += 1;
+            if (t.status === 'accepted') byPosition[key].accepted += 1;
+        });
+        const positionBreakdown = Object.values(byPosition).sort((a, b) => b.applications - a.applications);
+
+        // This week vs last week, so a spike/drop in volume is visible at a
+        // glance rather than buried in the daily timeline.
+        const now = Date.now();
+        const oneDay = 24 * 60 * 60 * 1000;
+        const last7 = all.filter(t => now - new Date(t.created_at).getTime() <= 7 * oneDay).length;
+        const prev7 = all.filter(t => {
+            const age = now - new Date(t.created_at).getTime();
+            return age > 7 * oneDay && age <= 14 * oneDay;
+        }).length;
+        const weekOverWeekChangePct = prev7 > 0 ? Math.round(((last7 - prev7) / prev7) * 1000) / 10 : (last7 > 0 ? 100 : 0);
+
+        res.json({
+            ok: true,
+            data: {
+                totals, staffLeaderboard, referrerLeaderboard, timeline,
+                avgResponseMinutes, medianResponseMinutes, conversionRate,
+                positionBreakdown, last7, prev7, weekOverWeekChangePct
+            }
+        });
         return;
     }
 
