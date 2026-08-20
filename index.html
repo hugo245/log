@@ -2586,6 +2586,55 @@
       border-color: var(--err-line);
       color: var(--err-text);
     }
+
+    .roling-steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      margin: 4px 0 6px;
+    }
+
+    .roling-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 96px;
+    }
+
+    .roling-step-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .roling-step-done .roling-step-icon {
+      background: var(--ok-bg);
+      border: 1px solid var(--ok-line);
+    }
+
+    .roling-step-pending .roling-step-icon {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-line);
+    }
+
+    .roling-step-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-soft);
+    }
+
+    .roling-step-connector {
+      width: 44px;
+      height: 2px;
+      background: var(--line);
+      margin-bottom: 24px;
+      flex: 0 0 auto;
+    }
   </style>
 </head>
 
@@ -2753,6 +2802,19 @@
     function fmtDate(ts) {
       const d = new Date(ts);
       return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    const ROLING_BATCH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+    function formatCountdown(ms) {
+      if (ms <= 0) return 'Any moment now';
+      const totalMinutes = Math.floor(ms / 60000);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      if (hours > 0) return `${hours}h ${minutes}m`;
+      const totalSeconds = Math.floor(ms / 1000);
+      if (minutes > 0) return `${minutes}m ${totalSeconds % 60}s`;
+      return `${totalSeconds}s`;
     }
 
     function fmtDateTime(ts) {
@@ -4280,7 +4342,44 @@
       return 'background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;';
     }
 
-    function renderLockedModal() {
+    function renderLockedModal(ticket) {
+      if (ticket && ticket.placed_team_id) {
+        const placedAtMs = ticket.placed_at ? new Date(ticket.placed_at).getTime() : Date.now();
+        const etaMs = placedAtMs + ROLING_BATCH_INTERVAL_MS;
+        return `
+    <div class="modal-scrim" id="lockedModalScrim">
+      <div class="modal-card" style="max-width:440px;text-align:center;">
+        <div class="modal-body" style="padding-top:16px;">
+          <div class="roling-steps">
+            <div class="roling-step roling-step-done">
+              <div class="roling-step-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ok-text)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 6L9 17l-5-5"></path>
+                </svg>
+              </div>
+              <div class="roling-step-label">Confirmed</div>
+            </div>
+            <div class="roling-step-connector"></div>
+            <div class="roling-step roling-step-pending">
+              <div class="roling-step-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--warn-text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 2h12"></path>
+                  <path d="M6 22h12"></path>
+                  <path d="M6 2c0 5 4 6 6 8c2-2 6-3 6-8"></path>
+                  <path d="M6 22c0-5 4-6 6-8c2 2 6 3 6 8"></path>
+                </svg>
+              </div>
+              <div class="roling-step-label">Access granted</div>
+            </div>
+          </div>
+          <h3 style="margin:14px 0 6px;">Placed on ${esc(ticket.placed_team_name)}${ticket.skillset_name ? ` as ${esc(ticket.skillset_name)}` : ''}</h3>
+          <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">Leads have confirmed your placement. Your dashboard access is applied automatically in the next roling batch.</p>
+          <p style="font-size:13px;margin:0;"><strong id="rolingCountdown" data-eta="${etaMs}">${esc(formatCountdown(etaMs - Date.now()))}</strong> until the next batch runs</p>
+          <p style="color:var(--muted);font-size:12px;margin-top:14px;">Need it sooner? Contact your Recruiter or Lead for priority access.</p>
+        </div>
+      </div>
+    </div>`;
+      }
       return `
     <div class="modal-scrim" id="lockedModalScrim">
       <div class="modal-card" style="max-width:400px;text-align:center;">
@@ -4327,6 +4426,7 @@
       let composeText = '';
       let pendingImage = null;
       let pollTimer = null;
+      let rolingCountdownTimer = null;
       let notifyModalShown = false;
       let notifyBusy = false;
       let notifyError = null;
@@ -4432,7 +4532,7 @@
           <div style="margin-top:10px;color:var(--muted);font-size:12px;">Submitted ${new Date(data.ticket.created_at).toLocaleString()}</div>
         </div>`}
     </div>
-    ${data && data.ticket.status === 'team_selection' ? renderLockedModal() : notifyModalShown ? `
+    ${data && data.ticket.status === 'team_selection' ? renderLockedModal(data.ticket) : notifyModalShown ? `
     <div class="modal-scrim" id="notifyModalScrim">
       <div class="modal-card" style="max-width:420px;text-align:center;">
         <div class="modal-body" style="padding-top:8px;">
@@ -4451,6 +4551,21 @@
         wireImageLightbox(document.getElementById('statusMessages'));
         const messagesContainer = document.getElementById('statusMessages');
         if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        const rolingCountdownEl = document.getElementById('rolingCountdown');
+        if (rolingCountdownTimer) { clearInterval(rolingCountdownTimer); rolingCountdownTimer = null; }
+        if (rolingCountdownEl) {
+          const etaMs = Number(rolingCountdownEl.dataset.eta);
+          const tick = () => {
+            const el = document.getElementById('rolingCountdown');
+            if (!el || renderGen !== myGen) return;
+            el.textContent = formatCountdown(etaMs - Date.now());
+          };
+          rolingCountdownTimer = setInterval(() => {
+            if (renderGen !== myGen) { clearInterval(rolingCountdownTimer); return; }
+            tick();
+          }, 1000);
+        }
 
         const composeEl = document.getElementById('statusComposeBody');
         if (composeEl) {
