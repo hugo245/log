@@ -3995,7 +3995,7 @@
         wireTopbarSignOut();
         const yesBtn = document.getElementById('recruitYesBtn');
         if (yesBtn) yesBtn.addEventListener('click', () => {
-          window.location.href = EDGE_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
+          window.location.href = EXTERNAL_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
         });
         const noBtn = document.getElementById('recruitNoBtn');
         if (noBtn) noBtn.addEventListener('click', () => { window.location.hash = '#/'; });
@@ -4093,7 +4093,7 @@
 
         const linkBtn = document.getElementById('applyLinkDiscordBtn');
         if (linkBtn) linkBtn.addEventListener('click', () => {
-          window.location.href = EDGE_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
+          window.location.href = EXTERNAL_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
         });
 
         const submitBtn = document.getElementById('applySubmitBtn');

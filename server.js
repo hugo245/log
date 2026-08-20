@@ -215,7 +215,7 @@ function base64url(buffer) {
 }
 
 function getBearerToken(req) {
-    const auth = req.headers.authorization || '';
+    const auth = (req && req.headers && req.headers.authorization) || '';
     return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
 }
 
