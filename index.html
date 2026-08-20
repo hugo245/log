@@ -4620,10 +4620,10 @@
           <div class="modal-section">
             <div class="modal-section-title">Status</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button type="button" class="btn btn-ghost btn-sm" data-set-status="in_review" ${busy ? 'disabled' : ''}>Mark in review</button>
-              <button type="button" class="btn btn-ok btn-sm" data-set-status="accepted" ${busy ? 'disabled' : ''}>Accept &amp; hire</button>
-              <button type="button" class="btn btn-danger btn-sm" data-set-status="rejected" style="background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);" ${busy ? 'disabled' : ''}>Reject</button>
-              <button type="button" class="btn btn-ghost btn-sm" data-set-status="withdrawn" ${busy ? 'disabled' : ''}>Mark withdrawn</button>
+              ${t.status !== 'in_review' ? `<button type="button" class="btn btn-ghost btn-sm" data-set-status="in_review" ${busy ? 'disabled' : ''}>Mark in review</button>` : ''}
+              ${t.status !== 'accepted' && t.status !== 'team_selection' ? `<button type="button" class="btn btn-ok btn-sm" data-set-status="accepted" ${busy ? 'disabled' : ''}>Accept &amp; hire</button>` : ''}
+              ${t.status !== 'rejected' ? `<button type="button" class="btn btn-danger btn-sm" data-set-status="rejected" style="background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);" ${busy ? 'disabled' : ''}>Reject</button>` : ''}
+              ${t.status !== 'withdrawn' ? `<button type="button" class="btn btn-ghost btn-sm" data-set-status="withdrawn" ${busy ? 'disabled' : ''}>Mark withdrawn</button>` : ''}
             </div>
             ${t.status === 'accepted' ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--accent-soft);border:1px solid var(--accent-soft-strong);">
@@ -4676,7 +4676,7 @@
 
       function renderNextPhaseModal(t) {
         return `
-    <div class="modal-scrim" id="nextPhaseModalScrim" style="z-index:60;">
+    <div class="modal-scrim" id="nextPhaseModalScrim" style="z-index:110;">
       <div class="modal-card" style="max-width:420px;">
         <button type="button" class="modal-close" id="nextPhaseModalClose">&times;</button>
         <div class="modal-body" style="padding-top:8px;">
@@ -4702,7 +4702,7 @@
 
       function renderAllSetModal() {
         return `
-    <div class="modal-scrim" id="allSetModalScrim" style="z-index:70;">
+    <div class="modal-scrim" id="allSetModalScrim" style="z-index:120;">
       <div class="modal-card" style="max-width:380px;text-align:center;">
         <div class="modal-body" style="padding-top:12px;">
           <div style="width:56px;height:56px;border-radius:50%;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
