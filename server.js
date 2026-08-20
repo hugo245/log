@@ -647,10 +647,6 @@ async function checkBaseAccess(robloxUserId) {
     const isGroupMember = !!membership && (base.minRank == null || membership.role.rank >= base.minRank);
 
     if (isGroupMember) return { allowed: true, base, isGroupMember: true, viaPlacement: false };
-    // Someone who was hired/placed through recruitment (has a role assignment or a
-    // team/skillset placement) should keep access even before they've joined the
-    // Roblox group - they just need a nudge to go join it, not to be sent back
-    // through the recruitment flow again.
     if (hasBypass) return { allowed: true, base, isGroupMember: false, viaPlacement: true };
     return { allowed: false, base, isGroupMember: false, viaPlacement: false };
 }
@@ -773,9 +769,6 @@ async function computeGroupEligibility(robloxUserId) {
     return results;
 }
 
-// Writes/refreshes a user_assignments row without depending on a DB-level
-// unique constraint for upsert (used both for instant "Manual Roling" from
-// the dashboard and can be reused for any other direct placement writes).
 async function upsertUserAssignmentRecord({ robloxUserId, robloxUsername, teamId, skillsetId }) {
     if (!robloxUserId || !teamId) return { ok: false, error: 'missing_fields' };
 
@@ -1203,13 +1196,21 @@ app.get('/roblox-auth-callback', async (req, res) => {
 app.get('/recruit-session', async (req, res) => {
     const session = await getRecruitSession(req);
     if (!session) { res.status(401).json({ ok: false, error: 'not_found_or_expired' }); return; }
+
+    let hasFullAccess = false;
+    try {
+        const baseCheck = await checkBaseAccess(session.roblox_user_id);
+        hasFullAccess = !!baseCheck.allowed;
+    } catch (e) { }
+
     res.json({
         ok: true,
         robloxUserId: session.roblox_user_id,
         robloxUsername: session.roblox_username,
         discordLinked: !!session.discord_user_id,
         discordUsername: session.discord_username || null,
-        discordConfigured: DISCORD_CONFIGURED
+        discordConfigured: DISCORD_CONFIGURED,
+        hasFullAccess
     });
 });
 

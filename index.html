@@ -3818,6 +3818,12 @@
         return;
       }
 
+      const RECRUIT_ONLY_PATHS = ['#/recruit', '#/recruit/apply', '#/recruit/status'];
+      if (isHrAuthed && RECRUIT_ONLY_PATHS.includes(path)) {
+        window.location.hash = '#/';
+        return;
+      }
+
       if (path === '#/tos') {
         if (isHrAuthed) renderPolicyPage('tos'); else renderHrGate();
       } else if (path === '#/aup') {
@@ -4071,6 +4077,7 @@
       wireTopbarSignOut();
 
       fetchRecruitSession(rt).then(info => {
+        if (info.hasFullAccess) { clearRecruitToken(); beginLogin('#/'); return; }
         if (info.discordLinked) { window.location.hash = '#/recruit/apply'; return; }
         paintGate(info);
       }).catch(() => {
@@ -4330,7 +4337,17 @@
         if (showSpinner) { loading = true; paint(); }
         const prevStatus = data ? data.ticket.status : undefined;
         try {
-          data = await fetchMyTicket(rt);
+          const [ticketData, sessionInfo] = await Promise.all([
+            fetchMyTicket(rt),
+            fetchRecruitSession(rt).catch(() => null)
+          ]);
+          if (sessionInfo && sessionInfo.hasFullAccess) {
+            if (pollTimer) clearInterval(pollTimer);
+            clearRecruitToken();
+            beginLogin('#/');
+            return;
+          }
+          data = ticketData;
           loading = false; loadError = null;
         } catch (e) {
           loading = false;
@@ -4714,7 +4731,7 @@
             ${t.placed_team_id ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
               <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. This rolls into the system automatically on the next scheduled batch (runs every 6 hours) - or apply it right now:</div>
-              <button type="button" class="btn btn-primary btn-sm" id="manualRolingBtn" ${manualRolingBusy ? 'disabled' : ''}>${manualRolingBusy ? 'Roling…' : 'Manual Roling apply now'}</button>
+              <button type="button" class="btn btn-primary btn-sm" id="manualRolingBtn" ${manualRolingBusy ? 'disabled' : ''}>${manualRolingBusy ? 'Roling...' : 'Manual Roling - apply now'}</button>
               ${manualRolingMsg ? `<div style="margin-top:8px;font-weight:600;color:${manualRolingMsg.ok ? 'var(--ok-text)' : 'var(--err-text)'};">${esc(manualRolingMsg.text)}</div>` : ''}
             </div>` : ''}
             ${recruiters.length ? `

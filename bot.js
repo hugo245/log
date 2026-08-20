@@ -51,9 +51,6 @@ function statusColor(status) {
     return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
 }
 
-// Ensures a user_assignments row exists/matches for a given placement, without
-// depending on a DB-level unique constraint (upsert with onConflict silently
-// fails if that constraint doesn't actually exist on the table).
 async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skillsetId }) {
     if (!robloxUserId || !teamId) return { ok: false, error: 'missing_fields' };
 
@@ -89,12 +86,7 @@ async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skil
     return { ok: true, mode: 'inserted' };
 }
 
-// Reconciliation / "roling" batch: any recruitment ticket that has been placed
-// on a team (placed_team_id set) should have a matching user_assignments row,
-// including its skillset. This is what actually grants site access on the
-// normal cadence - runs on bot startup and then every RECONCILE_INTERVAL_MS.
-// Leads can bypass the wait per-ticket with "Manual Roling" on the dashboard.
-const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let nextReconcileAt = null;
 
 async function reconcilePlacements() {
@@ -294,8 +286,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const nextRunUnix = nextReconcileUnix();
             const nextRunNote = nextRunUnix
-                ? ` They'll be rolled into the system automatically <t:${nextRunUnix}:R> or use **Manual Roling** on the dashboard to give them access right now.`
-                : ` They'll be rolled into the system on the next scheduled batch or use **Manual Roling** on the dashboard to give them access right now.`;
+                ? ` They'll be rolled into the system automatically <t:${nextRunUnix}:R>, or use **Manual Roling** on the dashboard to give them access right now.`
+                : ` They'll be rolled into the system on the next scheduled batch, or use **Manual Roling** on the dashboard to give them access right now.`;
             await interaction.editReply({
                 content: `✅ **${ticket.roblox_username}** confirmed for **${team.name}**${skillset ? ` as **${skillset.name}**` : ''} (by ${interaction.user}).${nextRunNote}`
             });
@@ -307,8 +299,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 const parts = [`You've been accepted and placed on the **${team.name}** team!`];
                 if (skillset) parts.push(`Skillset: **${skillset.name}**.`);
                 parts.push(nextRunUnix
-                    ? `Your access will finish setting up automatically <t:${nextRunUnix}:R> a lead can also speed this up for you if needed.`
-                    : `Your access will finish setting up shortly a lead can also speed this up for you if needed.`);
+                    ? `Your access will finish setting up automatically <t:${nextRunUnix}:R>, a lead can also speed this up for you if needed.`
+                    : `Your access will finish setting up shortly, a lead can also speed this up for you if needed.`);
                 if (APP_ORIGIN) parts.push(`Check your status here: ${APP_ORIGIN}/#/recruit/status`);
                 await user.send(parts.join(' '));
             } catch (e) { }
