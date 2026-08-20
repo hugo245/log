@@ -2585,8 +2585,7 @@
   <script>
     const SUPABASE_URL = 'https://tixfcxypoyedqbkiwbtx.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGZjeHlwb3llZHFia2l3YnR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NzExMDUsImV4cCI6MjEwMTI0NzEwNX0.0biB2dg46s1Cy_Gpq6ZuL3fHnSLJP2xJO8RHpKRGaS8';
-    const EDGE_BASE = 'https://api.playverseinternal.cc';
-    const EXTERNAL_BASE = 'https://external.hugolabs.eu';
+    const EDGE_BASE = 'https://api.playverseinternal.cc'
     const GAMES_TABLE = 'games';
     const SETTINGS_TABLE = 'app_settings';
     const SESSION_STORAGE_KEY = 'pv_hr_session_token';
@@ -3072,7 +3071,7 @@
     }
 
     async function fetchRecruitSession(rt) {
-      const res = await fetch(EXTERNAL_BASE + '/recruit-session', {
+      const res = await fetch(EDGE_BASE + '/recruit-session', {
         headers: { Authorization: 'Bearer ' + rt, 'ngrok-skip-browser-warning': 'true' }
       });
       const json = await res.json().catch(() => ({}));
@@ -3081,14 +3080,14 @@
     }
 
     async function loadPublicRecruiters() {
-      const res = await fetch(EXTERNAL_BASE + '/recruitment/recruiters', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const res = await fetch(EDGE_BASE + '/recruitment/recruiters', { headers: { 'ngrok-skip-browser-warning': 'true' } });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) return [];
       return json.data || [];
     }
 
     async function submitRecruitmentApplication(rt, data) {
-      const res = await fetch(EXTERNAL_BASE + '/recruitment/apply', {
+      const res = await fetch(EDGE_BASE + '/recruitment/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + rt, 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify(data)
@@ -3995,7 +3994,7 @@
         wireTopbarSignOut();
         const yesBtn = document.getElementById('recruitYesBtn');
         if (yesBtn) yesBtn.addEventListener('click', () => {
-          window.location.href = EXTERNAL_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
+          window.location.href = EDGE_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
         });
         const noBtn = document.getElementById('recruitNoBtn');
         if (noBtn) noBtn.addEventListener('click', () => { window.location.hash = '#/'; });
@@ -4093,7 +4092,7 @@
 
         const linkBtn = document.getElementById('applyLinkDiscordBtn');
         if (linkBtn) linkBtn.addEventListener('click', () => {
-          window.location.href = EXTERNAL_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
+          window.location.href = EDGE_BASE + '/discord-auth-start?rt=' + encodeURIComponent(rt) + '&return=' + encodeURIComponent('#/recruit/apply');
         });
 
         const submitBtn = document.getElementById('applySubmitBtn');
