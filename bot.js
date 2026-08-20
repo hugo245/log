@@ -244,7 +244,7 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 const http = require('http');
-http.createServer((req, res) => res.end('bot is alive')).listen(process.env.PORT || 4000);
+http.createServer((req, res) => res.end('bot is alive')).listen(4000);
 
 (async () => {
     await registerCommands();
