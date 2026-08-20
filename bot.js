@@ -51,6 +51,78 @@ function statusColor(status) {
     return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
 }
 
+// Ensures a user_assignments row exists/matches for a given placement, without
+// depending on a DB-level unique constraint (upsert with onConflict silently
+// fails if that constraint doesn't actually exist on the table).
+async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skillsetId }) {
+    if (!robloxUserId || !teamId) return { ok: false, error: 'missing_fields' };
+
+    const { data: existing, error: findErr } = await supabase
+        .from('user_assignments')
+        .select('roblox_user_id, team_id')
+        .eq('roblox_user_id', robloxUserId)
+        .eq('team_id', teamId)
+        .maybeSingle();
+    if (findErr) return { ok: false, error: findErr.message };
+
+    if (existing) {
+        const { error: updateErr } = await supabase.from('user_assignments')
+            .update({
+                roblox_username: robloxUsername,
+                skillset_id: skillsetId ?? null,
+                assigned_at: new Date().toISOString()
+            })
+            .eq('roblox_user_id', robloxUserId)
+            .eq('team_id', teamId);
+        if (updateErr) return { ok: false, error: updateErr.message };
+        return { ok: true, mode: 'updated' };
+    }
+
+    const { error: insertErr } = await supabase.from('user_assignments').insert({
+        roblox_user_id: robloxUserId,
+        roblox_username: robloxUsername,
+        team_id: teamId,
+        skillset_id: skillsetId ?? null,
+        assigned_at: new Date().toISOString()
+    });
+    if (insertErr) return { ok: false, error: insertErr.message };
+    return { ok: true, mode: 'inserted' };
+}
+
+// Reconciliation pass: any recruitment ticket that has been placed on a team
+// (placed_team_id/placed_team_name set) should have a matching user_assignments
+// row, including its skillset. Catches anything that fell through due to a
+// past failed upsert, a manual DB edit, or a ticket placed before this logic
+// existed. Runs on bot startup and can be re-invoked any time.
+async function reconcilePlacements() {
+    const { data: tickets, error } = await supabase
+        .from('recruitment_tickets')
+        .select('roblox_user_id, roblox_username, skillset_id, skillset_name, placed_team_id, placed_team_name')
+        .not('placed_team_id', 'is', null);
+    if (error) { console.error('reconcilePlacements: could not load tickets:', error.message); return; }
+
+    let fixed = 0;
+    for (const ticket of tickets || []) {
+        let skillsetId = ticket.skillset_id || null;
+        if (!skillsetId && ticket.skillset_name) {
+            const { data: skillsetRow } = await supabase.from('skillsets').select('id').eq('name', ticket.skillset_name).maybeSingle();
+            skillsetId = skillsetRow ? skillsetRow.id : null;
+        }
+        const result = await upsertUserAssignment({
+            robloxUserId: ticket.roblox_user_id,
+            robloxUsername: ticket.roblox_username,
+            teamId: ticket.placed_team_id,
+            skillsetId
+        });
+        if (!result.ok) {
+            console.error(`reconcilePlacements: failed for ${ticket.roblox_username} (${ticket.roblox_user_id}):`, result.error);
+        } else if (result.mode === 'inserted') {
+            fixed++;
+        }
+    }
+    if (fixed) console.log(`reconcilePlacements: backfilled ${fixed} missing user_assignments row(s).`);
+}
+
 async function requireRecruiterRole(interaction) {
     if (!DISCORD_RECRUITER_ROLE_ID) return true;
     const member = interaction.member;
@@ -200,13 +272,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 skillset = skillsetRow || null;
             }
 
-            await supabase.from('user_assignments').upsert({
-                roblox_user_id: ticket.roblox_user_id,
-                roblox_username: ticket.roblox_username,
-                team_id: team.id,
-                skillset_id: ticket.skillset_id || null,
-                assigned_at: new Date().toISOString()
-            }, { onConflict: 'roblox_user_id,team_id' });
+            const assignResult = await upsertUserAssignment({
+                robloxUserId: ticket.roblox_user_id,
+                robloxUsername: ticket.roblox_username,
+                teamId: team.id,
+                skillsetId: ticket.skillset_id || null
+            });
+            if (!assignResult.ok) {
+                console.error(`Failed to write user_assignments for ${ticket.roblox_username}:`, assignResult.error);
+            }
 
             await supabase.from('recruitment_tickets').update({
                 placed_team_id: team.id,
@@ -215,27 +289,10 @@ client.on(Events.InteractionCreate, async interaction => {
                 updated_at: new Date().toISOString()
             }).eq('id', ticketId);
 
-            // Grant the HR-tool roles tied to this team/skillset so the recruit
-            // actually gets access on the website, not just the DB fields.
-            const roleIds = [...new Set([team.role_id, skillset && skillset.role_id].filter(v => v != null))];
-            let grantedRoleNames = [];
-            if (roleIds.length) {
-                const { data: roleRows } = await supabase.from('roles').select('id, name').in('id', roleIds);
-                grantedRoleNames = (roleRows || []).map(r => r.name);
-                for (const roleId of roleIds) {
-                    const { error: assignErr } = await supabase.from('user_role_assignments').insert({
-                        roblox_user_id: ticket.roblox_user_id,
-                        role_id: roleId,
-                        roblox_username: ticket.roblox_username
-                    });
-                    if (assignErr && assignErr.code !== '23505') {
-                        console.error('Failed to grant role', roleId, 'to', ticket.roblox_user_id, assignErr.message);
-                    }
-                }
-            }
-
-            const roleSummary = grantedRoleNames.length ? ` Granted role(s): **${grantedRoleNames.join(', ')}**.` : '';
-            await interaction.editReply({ content: `Placed **${ticket.roblox_username}** on **${team.name}** (by ${interaction.user}).${roleSummary}` });
+            const assignmentNote = assignResult.ok
+                ? ''
+                : ` (⚠️ could not save to user_assignments: ${assignResult.error})`;
+            await interaction.editReply({ content: `Placed **${ticket.roblox_username}** on **${team.name}**${skillset ? ` as **${skillset.name}**` : ''} (by ${interaction.user}).${assignmentNote}` });
 
             try {
                 const link = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', ticket.roblox_user_id).maybeSingle();
@@ -243,7 +300,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 const user = await client.users.fetch(discordUserId);
                 const parts = [`You've been accepted and placed on the **${team.name}** team!`];
                 if (skillset) parts.push(`Skillset: **${skillset.name}**.`);
-                if (grantedRoleNames.length) parts.push(`You now have access on the site as: **${grantedRoleNames.join(', ')}**.`);
                 if (APP_ORIGIN) parts.push(`Check it out here: ${APP_ORIGIN}/#/recruit/status`);
                 await user.send(parts.join(' '));
             } catch (e) { }
@@ -288,4 +344,5 @@ http.createServer((req, res) => res.end('bot is alive')).listen(4000);
 (async () => {
     await registerCommands();
     await client.login(DISCORD_BOT_TOKEN);
+    await reconcilePlacements();
 })();

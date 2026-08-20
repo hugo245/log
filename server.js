@@ -2308,7 +2308,6 @@ app.post('/hr-data', async (req, res) => {
             discord_url: payload.discordUrl ? String(payload.discordUrl).trim() : null,
             roblox_group_url: payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null,
             roblox_group_id: payload.robloxGroupId ? Number(payload.robloxGroupId) : null,
-            role_id: payload.roleId ? Number(payload.roleId) : null,
             info: payload.info ? String(payload.info) : null
         }).select().maybeSingle();
         if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A team with that name already exists.' }); return; }
@@ -2331,7 +2330,6 @@ app.post('/hr-data', async (req, res) => {
         if (payload.discordUrl !== undefined) update.discord_url = payload.discordUrl ? String(payload.discordUrl).trim() : null;
         if (payload.robloxGroupUrl !== undefined) update.roblox_group_url = payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null;
         if (payload.robloxGroupId !== undefined) update.roblox_group_id = payload.robloxGroupId ? Number(payload.robloxGroupId) : null;
-        if (payload.roleId !== undefined) update.role_id = payload.roleId ? Number(payload.roleId) : null;
         if (payload.info !== undefined) update.info = payload.info ? String(payload.info) : null;
         const { error } = await supabase.from('teams').update(update).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
@@ -2369,8 +2367,7 @@ app.post('/hr-data', async (req, res) => {
         const { error } = await supabase.from('skillsets').insert({
             name,
             color: payload.color ? String(payload.color).trim() : null,
-            description: payload.description ? String(payload.description).trim() : null,
-            role_id: payload.roleId ? Number(payload.roleId) : null
+            description: payload.description ? String(payload.description).trim() : null
         });
         if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A skillset with that name already exists.' }); return; }
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
@@ -2386,7 +2383,6 @@ app.post('/hr-data', async (req, res) => {
         if (payload.name != null) update.name = String(payload.name).trim();
         if (payload.color !== undefined) update.color = payload.color ? String(payload.color).trim() : null;
         if (payload.description !== undefined) update.description = payload.description ? String(payload.description).trim() : null;
-        if (payload.roleId !== undefined) update.role_id = payload.roleId ? Number(payload.roleId) : null;
         const { error } = await supabase.from('skillsets').update(update).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
