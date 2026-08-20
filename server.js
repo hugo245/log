@@ -447,6 +447,20 @@ async function notifyDiscordNextPhase(ticket, skillset) {
     }
 }
 
+async function notifyDiscordPlacement(ticket, team, byUsername) {
+    if (!DISCORD_BOT_TOKEN || !DISCORD_LEAD_CHANNEL_ID) return;
+    try {
+        await discordApi(`/channels/${DISCORD_LEAD_CHANNEL_ID}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                content: `✅ **${ticket.roblox_username}** confirmed for **${team.name}**${ticket.skillset_name ? ` as **${ticket.skillset_name}**` : ''} (by ${byUsername} on the website).`
+            })
+        });
+    } catch (e) {
+        console.error('notifyDiscordPlacement failed:', e.message);
+    }
+}
+
 async function sendPushToApplicant(robloxUserId, { title, body, url }) {
     if (!PUSH_CONFIGURED) return;
     try {
@@ -3220,6 +3234,48 @@ app.post('/hr-data', async (req, res) => {
         });
 
         res.json({ ok: true, data: { discordPosted: !!messageId } });
+        return;
+    }
+
+    if (action === 'recruitment_place_team') {
+        if (!requirePermission(res, session, 'recruitment.manage')) return;
+        const id = payload.id;
+        const teamId = payload.teamId != null ? Number(payload.teamId) : null;
+        if (!id || !teamId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+
+        const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+        if (ticket.status !== 'team_selection') { res.status(400).json({ ok: false, error: 'not_in_team_selection' }); return; }
+
+        const { data: team, error: teamErr } = await supabase.from('teams').select('id, name').eq('id', teamId).maybeSingle();
+        if (teamErr) { res.status(500).json({ ok: false, error: teamErr.message }); return; }
+        if (!team) { res.status(404).json({ ok: false, error: 'team_not_found' }); return; }
+
+        const placedAt = new Date().toISOString();
+        const { error: updateErr } = await supabase.from('recruitment_tickets').update({
+            placed_team_id: team.id,
+            placed_team_name: team.name,
+            placed_at: placedAt,
+            updated_at: placedAt
+        }).eq('id', id);
+        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+
+        notifyDiscordPlacement(ticket, team, session.roblox_username);
+
+        sendPushToApplicant(ticket.roblox_user_id, {
+            title: "You've been placed!",
+            body: `You've been placed on ${team.name}${ticket.skillset_name ? ' as ' + ticket.skillset_name : ''}.`,
+            url: `${APP_ORIGIN}/#/recruit/status`
+        });
+
+        logAudit(session, {
+            category: 'recruitment', action: 'team_placement',
+            targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+            details: { ticketId: id, teamId: team.id, teamName: team.name, skillsetId: ticket.skillset_id, skillsetName: ticket.skillset_name }
+        });
+
+        res.json({ ok: true, data: { teamId: team.id, teamName: team.name } });
         return;
     }
 

@@ -3279,6 +3279,14 @@
       const json = await callHrData('list_skillsets');
       return json.data || [];
     }
+    async function loadTeamsForPlacement() {
+      const json = await callHrData('list_teams');
+      return json.data || [];
+    }
+    async function placeRecruitmentTicketTeam(id, teamId) {
+      const json = await callHrData('recruitment_place_team', { id, teamId });
+      return json.data;
+    }
     async function loadRecruiters() {
       const json = await callHrData('recruitment_list_recruiters');
       return json.data || [];
@@ -4660,12 +4668,18 @@
       let manualRolingBusy = false;
       let manualRolingMsg = null;
 
+      let placeTeamOptions = [];
+      let placeTeamSelectedId = '';
+      let placeTeamBusy = false;
+      let placeTeamError = null;
+
       const canManage = hasPermission('recruitment.manage');
       const canRespond = hasPermission('recruitment.respond');
       const canSeeAnalytics = hasPermission('recruitment.analytics');
 
       load();
       if (canManage) loadRecruiters().then(r => { recruiters = r; if (openTicketId) paintModal(); }).catch(() => { });
+      if (canManage) loadTeamsForPlacement().then(r => { placeTeamOptions = r; if (openTicketId) paintModal(); }).catch(() => { });
 
       async function load() {
         loading = true; loadError = null; paint();
@@ -4681,6 +4695,7 @@
         openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; pendingImage = null;
         nextPhaseModalOpen = false; nextPhaseError = null; nextPhaseSelectedSkillsetId = ''; allSetModalOpen = false;
         manualRolingBusy = false; manualRolingMsg = null;
+        placeTeamSelectedId = ''; placeTeamBusy = false; placeTeamError = null;
         paintModal(); paintNextPhaseOverlay();
         try {
           ticketDetail = await loadRecruitmentTicket(id);
@@ -4839,9 +4854,17 @@
               <div style="font-size:13px;color:var(--ink);margin-bottom:8px;">Ready to move them into team selection? Pick a skillset and we'll notify the leads.</div>
               <button type="button" class="btn btn-primary btn-sm" id="nextPhaseBtn">Next Phase &rarr;</button>
             </div>` : ''}
-            ${t.status === 'team_selection' ? `
+            ${t.status === 'team_selection' && !t.placed_team_id ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--accent-soft);border:1px solid var(--accent-soft-strong);font-size:13px;">
-              In team selection${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Leads were notified on Discord${t.next_phase_by_username ? ` by ${esc(t.next_phase_by_username)}` : ''}.
+              <div style="margin-bottom:8px;">In team selection${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Leads were notified on Discord${t.next_phase_by_username ? ` by ${esc(t.next_phase_by_username)}` : ''} - or place them on a team here:</div>
+              ${placeTeamError ? `<div class="error-box" style="margin-bottom:8px;"><span>${esc(placeTeamError)}</span></div>` : ''}
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <select id="placeTeamSelect" ${placeTeamBusy ? 'disabled' : ''}>
+                  <option value="">${placeTeamOptions.length ? 'Choose a team...' : 'Loading teams...'}</option>
+                  ${placeTeamOptions.map(team => `<option value="${esc(team.id)}" ${String(placeTeamSelectedId) === String(team.id) ? 'selected' : ''}>${esc(team.name)}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-primary btn-sm" id="placeTeamBtn" ${placeTeamBusy ? 'disabled' : ''}>${placeTeamBusy ? 'Placing...' : 'Place on team'}</button>
+              </div>
             </div>` : ''}
             ${t.placed_team_id ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
@@ -5011,6 +5034,29 @@
             nextPhaseError = 'Could not load skillsets.';
           }
           nextPhaseSkillsetsLoading = false; paintNextPhaseOverlay();
+        });
+
+        const placeTeamSelect = document.getElementById('placeTeamSelect');
+        if (placeTeamSelect) placeTeamSelect.addEventListener('change', () => { placeTeamSelectedId = placeTeamSelect.value; });
+
+        const placeTeamBtn = document.getElementById('placeTeamBtn');
+        if (placeTeamBtn) placeTeamBtn.addEventListener('click', async () => {
+          const teamId = (document.getElementById('placeTeamSelect') || {}).value || placeTeamSelectedId;
+          if (!teamId) { placeTeamError = 'Please choose a team.'; paintModal(); return; }
+          placeTeamBusy = true; placeTeamError = null; paintModal();
+          try {
+            await placeRecruitmentTicketTeam(openTicketId, teamId);
+            const [detail, freshTickets] = await Promise.all([
+              loadRecruitmentTicket(openTicketId),
+              loadRecruitmentTickets(statusFilter)
+            ]);
+            ticketDetail = detail;
+            tickets = freshTickets;
+            placeTeamSelectedId = '';
+          } catch (e) {
+            placeTeamError = e.message || 'Could not place them on that team.';
+          }
+          placeTeamBusy = false; paint();
         });
 
         const manualRolingBtn = document.getElementById('manualRolingBtn');
