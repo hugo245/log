@@ -294,8 +294,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const nextRunUnix = nextReconcileUnix();
             const nextRunNote = nextRunUnix
-                ? ` They'll be rolled into the system automatically <t:${nextRunUnix}:R> — or use **Manual Roling** on the dashboard to give them access right now.`
-                : ` They'll be rolled into the system on the next scheduled batch — or use **Manual Roling** on the dashboard to give them access right now.`;
+                ? ` They'll be rolled into the system automatically <t:${nextRunUnix}:R> or use **Manual Roling** on the dashboard to give them access right now.`
+                : ` They'll be rolled into the system on the next scheduled batch or use **Manual Roling** on the dashboard to give them access right now.`;
             await interaction.editReply({
                 content: `✅ **${ticket.roblox_username}** confirmed for **${team.name}**${skillset ? ` as **${skillset.name}**` : ''} (by ${interaction.user}).${nextRunNote}`
             });
@@ -307,8 +307,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 const parts = [`You've been accepted and placed on the **${team.name}** team!`];
                 if (skillset) parts.push(`Skillset: **${skillset.name}**.`);
                 parts.push(nextRunUnix
-                    ? `Your access will finish setting up automatically <t:${nextRunUnix}:R> — a lead can also speed this up for you if needed.`
-                    : `Your access will finish setting up shortly — a lead can also speed this up for you if needed.`);
+                    ? `Your access will finish setting up automatically <t:${nextRunUnix}:R> a lead can also speed this up for you if needed.`
+                    : `Your access will finish setting up shortly a lead can also speed this up for you if needed.`);
                 if (APP_ORIGIN) parts.push(`Check your status here: ${APP_ORIGIN}/#/recruit/status`);
                 await user.send(parts.join(' '));
             } catch (e) { }
