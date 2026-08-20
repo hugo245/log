@@ -632,21 +632,27 @@ async function convertPendingRobuxForCashMethodUsers(filter) {
 
 async function checkBaseAccess(robloxUserId) {
     const base = await getBaseAccessConfig();
-    if (!base.groupId) return { allowed: true, base };
+    if (!base.groupId) return { allowed: true, base, isGroupMember: true, viaPlacement: false };
 
-    const { data: manualRows, error: manualErr } = await supabase
-        .from('user_role_assignments')
-        .select('id')
-        .eq('roblox_user_id', robloxUserId)
-        .limit(1);
+    const [{ data: manualRows, error: manualErr }, { data: placementRows, error: placementErr }] = await Promise.all([
+        supabase.from('user_role_assignments').select('id').eq('roblox_user_id', robloxUserId).limit(1),
+        supabase.from('user_assignments').select('roblox_user_id').eq('roblox_user_id', robloxUserId).limit(1)
+    ]);
     if (manualErr) throw manualErr;
-    if (manualRows && manualRows.length > 0) return { allowed: true, base };
+    if (placementErr) throw placementErr;
+    const hasBypass = (manualRows && manualRows.length > 0) || (placementRows && placementRows.length > 0);
 
     const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
     const membership = groupRoles.find(g => g.group && g.group.id === base.groupId);
-    if (!membership) return { allowed: false, base };
-    if (base.minRank != null && membership.role.rank < base.minRank) return { allowed: false, base };
-    return { allowed: true, base };
+    const isGroupMember = !!membership && (base.minRank == null || membership.role.rank >= base.minRank);
+
+    if (isGroupMember) return { allowed: true, base, isGroupMember: true, viaPlacement: false };
+    // Someone who was hired/placed through recruitment (has a role assignment or a
+    // team/skillset placement) should keep access even before they've joined the
+    // Roblox group - they just need a nudge to go join it, not to be sent back
+    // through the recruitment flow again.
+    if (hasBypass) return { allowed: true, base, isGroupMember: false, viaPlacement: true };
+    return { allowed: false, base, isGroupMember: false, viaPlacement: false };
 }
 
 async function computeAccess(robloxUserId) {
@@ -765,6 +771,44 @@ async function computeGroupEligibility(robloxUserId) {
     }
 
     return results;
+}
+
+// Writes/refreshes a user_assignments row without depending on a DB-level
+// unique constraint for upsert (used both for instant "Manual Roling" from
+// the dashboard and can be reused for any other direct placement writes).
+async function upsertUserAssignmentRecord({ robloxUserId, robloxUsername, teamId, skillsetId }) {
+    if (!robloxUserId || !teamId) return { ok: false, error: 'missing_fields' };
+
+    const { data: existing, error: findErr } = await supabase
+        .from('user_assignments')
+        .select('roblox_user_id, team_id')
+        .eq('roblox_user_id', robloxUserId)
+        .eq('team_id', teamId)
+        .maybeSingle();
+    if (findErr) return { ok: false, error: findErr.message };
+
+    if (existing) {
+        const { error: updateErr } = await supabase.from('user_assignments')
+            .update({
+                roblox_username: robloxUsername,
+                skillset_id: skillsetId ?? null,
+                assigned_at: new Date().toISOString()
+            })
+            .eq('roblox_user_id', robloxUserId)
+            .eq('team_id', teamId);
+        if (updateErr) return { ok: false, error: updateErr.message };
+        return { ok: true, mode: 'updated' };
+    }
+
+    const { error: insertErr } = await supabase.from('user_assignments').insert({
+        roblox_user_id: robloxUserId,
+        roblox_username: robloxUsername,
+        team_id: teamId,
+        skillset_id: skillsetId ?? null,
+        assigned_at: new Date().toISOString()
+    });
+    if (insertErr) return { ok: false, error: insertErr.message };
+    return { ok: true, mode: 'inserted' };
 }
 
 async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
@@ -1429,13 +1473,24 @@ app.get('/onboarding-link-preview', async (req, res) => {
 app.get('/hr-session', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false }); return; }
+
+    let needsGroupJoin = false;
+    let baseGroupId = null;
+    try {
+        const baseCheck = await checkBaseAccess(session.roblox_user_id);
+        needsGroupJoin = !!(baseCheck.base && baseCheck.base.groupId && !baseCheck.isGroupMember);
+        baseGroupId = (baseCheck.base && baseCheck.base.groupId) || null;
+    } catch (e) { }
+
     res.json({
         ok: true,
         robloxUserId: session.roblox_user_id,
         robloxUsername: session.roblox_username,
         roles: session.roles || [],
         permissions: session.permissions || [],
-        maxHierarchy: session.max_hierarchy || 0
+        maxHierarchy: session.max_hierarchy || 0,
+        needsGroupJoin,
+        baseGroupId
     });
 });
 
@@ -3180,6 +3235,43 @@ app.post('/hr-data', async (req, res) => {
         }).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'recruitment_manual_roling') {
+        if (!requirePermission(res, session, 'recruitment.manage')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+
+        const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+        if (!ticket.placed_team_id) { res.status(400).json({ ok: false, error: 'not_placed_on_team_yet' }); return; }
+
+        const result = await upsertUserAssignmentRecord({
+            robloxUserId: ticket.roblox_user_id,
+            robloxUsername: ticket.roblox_username,
+            teamId: ticket.placed_team_id,
+            skillsetId: ticket.skillset_id || null
+        });
+        if (!result.ok) { res.status(500).json({ ok: false, error: result.error }); return; }
+
+        logAudit(session, {
+            category: 'recruitment', action: 'manual_roling',
+            targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+            details: {
+                ticketId: id, teamId: ticket.placed_team_id, teamName: ticket.placed_team_name,
+                skillsetId: ticket.skillset_id, skillsetName: ticket.skillset_name, mode: result.mode
+            }
+        });
+
+        sendPushToApplicant(ticket.roblox_user_id, {
+            title: "You're all set!",
+            body: `Your ${ticket.placed_team_name || 'team'} access is live${ticket.skillset_name ? ' as ' + ticket.skillset_name : ''}.`,
+            url: `${APP_ORIGIN}/#/recruit/status`
+        });
+
+        res.json({ ok: true, data: { mode: result.mode } });
         return;
     }
 

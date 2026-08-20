@@ -89,12 +89,17 @@ async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skil
     return { ok: true, mode: 'inserted' };
 }
 
-// Reconciliation pass: any recruitment ticket that has been placed on a team
-// (placed_team_id/placed_team_name set) should have a matching user_assignments
-// row, including its skillset. Catches anything that fell through due to a
-// past failed upsert, a manual DB edit, or a ticket placed before this logic
-// existed. Runs on bot startup and can be re-invoked any time.
+// Reconciliation / "roling" batch: any recruitment ticket that has been placed
+// on a team (placed_team_id set) should have a matching user_assignments row,
+// including its skillset. This is what actually grants site access on the
+// normal cadence - runs on bot startup and then every RECONCILE_INTERVAL_MS.
+// Leads can bypass the wait per-ticket with "Manual Roling" on the dashboard.
+const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
+let nextReconcileAt = null;
+
 async function reconcilePlacements() {
+    nextReconcileAt = Date.now() + RECONCILE_INTERVAL_MS;
+
     const { data: tickets, error } = await supabase
         .from('recruitment_tickets')
         .select('roblox_user_id, roblox_username, skillset_id, skillset_name, placed_team_id, placed_team_name')
@@ -120,7 +125,11 @@ async function reconcilePlacements() {
             fixed++;
         }
     }
-    if (fixed) console.log(`reconcilePlacements: backfilled ${fixed} missing user_assignments row(s).`);
+    if (fixed) console.log(`reconcilePlacements: rolled in ${fixed} pending placement(s).`);
+}
+
+function nextReconcileUnix() {
+    return nextReconcileAt ? Math.floor(nextReconcileAt / 1000) : null;
 }
 
 async function requireRecruiterRole(interaction) {
@@ -272,27 +281,24 @@ client.on(Events.InteractionCreate, async interaction => {
                 skillset = skillsetRow || null;
             }
 
-            const assignResult = await upsertUserAssignment({
-                robloxUserId: ticket.roblox_user_id,
-                robloxUsername: ticket.roblox_username,
-                teamId: team.id,
-                skillsetId: ticket.skillset_id || null
-            });
-            if (!assignResult.ok) {
-                console.error(`Failed to write user_assignments for ${ticket.roblox_username}:`, assignResult.error);
-            }
-
-            await supabase.from('recruitment_tickets').update({
+            const { error: updateErr } = await supabase.from('recruitment_tickets').update({
                 placed_team_id: team.id,
                 placed_team_name: team.name,
                 placed_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             }).eq('id', ticketId);
+            if (updateErr) {
+                await interaction.editReply({ content: `Couldn't save that placement: ${updateErr.message}` });
+                return;
+            }
 
-            const assignmentNote = assignResult.ok
-                ? ''
-                : ` (⚠️ could not save to user_assignments: ${assignResult.error})`;
-            await interaction.editReply({ content: `Placed **${ticket.roblox_username}** on **${team.name}**${skillset ? ` as **${skillset.name}**` : ''} (by ${interaction.user}).${assignmentNote}` });
+            const nextRunUnix = nextReconcileUnix();
+            const nextRunNote = nextRunUnix
+                ? ` They'll be rolled into the system automatically <t:${nextRunUnix}:R> — or use **Manual Roling** on the dashboard to give them access right now.`
+                : ` They'll be rolled into the system on the next scheduled batch — or use **Manual Roling** on the dashboard to give them access right now.`;
+            await interaction.editReply({
+                content: `✅ **${ticket.roblox_username}** confirmed for **${team.name}**${skillset ? ` as **${skillset.name}**` : ''} (by ${interaction.user}).${nextRunNote}`
+            });
 
             try {
                 const link = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', ticket.roblox_user_id).maybeSingle();
@@ -300,7 +306,10 @@ client.on(Events.InteractionCreate, async interaction => {
                 const user = await client.users.fetch(discordUserId);
                 const parts = [`You've been accepted and placed on the **${team.name}** team!`];
                 if (skillset) parts.push(`Skillset: **${skillset.name}**.`);
-                if (APP_ORIGIN) parts.push(`Check it out here: ${APP_ORIGIN}/#/recruit/status`);
+                parts.push(nextRunUnix
+                    ? `Your access will finish setting up automatically <t:${nextRunUnix}:R> — a lead can also speed this up for you if needed.`
+                    : `Your access will finish setting up shortly — a lead can also speed this up for you if needed.`);
+                if (APP_ORIGIN) parts.push(`Check your status here: ${APP_ORIGIN}/#/recruit/status`);
                 await user.send(parts.join(' '));
             } catch (e) { }
             return;
@@ -345,4 +354,5 @@ http.createServer((req, res) => res.end('bot is alive')).listen(4000);
     await registerCommands();
     await client.login(DISCORD_BOT_TOKEN);
     await reconcilePlacements();
+    setInterval(reconcilePlacements, RECONCILE_INTERVAL_MS);
 })();

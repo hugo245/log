@@ -2557,6 +2557,35 @@
       z-index: 9999;
       padding: 16px;
     }
+
+    .group-join-banner {
+      position: sticky;
+      top: 0;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px 16px;
+      background: var(--err-bg);
+      border-bottom: 1px solid var(--err-line);
+      color: var(--err-text);
+      font-size: 13.5px;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .group-join-banner a {
+      color: var(--err-text);
+      text-decoration: underline;
+      font-weight: 700;
+    }
+
+    .group-join-banner .btn-sm {
+      border-color: var(--err-line);
+      color: var(--err-text);
+    }
   </style>
 </head>
 
@@ -2676,6 +2705,8 @@
     let authReady = false;
     let appDataReady = false;
     let needsOnboarding = false;
+    let needsGroupJoin = false;
+    let baseGroupId = null;
 
     let renderGen = 0;
 
@@ -2963,6 +2994,8 @@
           hrPermissions = json.permissions || [];
           hrMaxHierarchy = json.maxHierarchy || 0;
           needsOnboarding = onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false;
+          needsGroupJoin = !!json.needsGroupJoin;
+          baseGroupId = json.baseGroupId != null ? json.baseGroupId : null;
         } else {
           isHrAuthed = false;
           hrUsername = '';
@@ -2970,6 +3003,8 @@
           hrPermissions = [];
           hrMaxHierarchy = 0;
           needsOnboarding = false;
+          needsGroupJoin = false;
+          baseGroupId = null;
           clearToken();
         }
       } catch (e) {
@@ -2979,6 +3014,8 @@
         hrPermissions = [];
         hrMaxHierarchy = 0;
         needsOnboarding = false;
+        needsGroupJoin = false;
+        baseGroupId = null;
       }
     }
 
@@ -3170,6 +3207,10 @@
     }
     async function nextPhaseRecruitmentTicket(id, skillsetId) {
       const json = await callHrData('recruitment_next_phase', { id, skillsetId });
+      return json.data;
+    }
+    async function manualRolingRecruitmentTicket(id) {
+      const json = await callHrData('recruitment_manual_roling', { id });
       return json.data;
     }
     async function loadSkillsetsForNextPhase() {
@@ -3724,6 +3765,8 @@
       hrRoles = [];
       hrPermissions = [];
       hrMaxHierarchy = 0;
+      needsGroupJoin = false;
+      baseGroupId = null;
       window.location.hash = '#/';
     }
 
@@ -3816,9 +3859,28 @@
           renderHrGate();
         }
       }
+
+      renderGroupJoinBanner();
     }
     window.addEventListener('hashchange', route);
     initAuth();
+
+    function renderGroupJoinBanner() {
+      const show = isHrAuthed && needsGroupJoin;
+      let el = document.getElementById('groupJoinBanner');
+      if (!show) {
+        if (el) el.remove();
+        return;
+      }
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'groupJoinBanner';
+        el.className = 'group-join-banner';
+        document.body.insertBefore(el, document.body.firstChild);
+      }
+      const joinLink = baseGroupId != null ? `https://www.roblox.com/groups/${esc(baseGroupId)}` : 'https://www.roblox.com/groups';
+      el.innerHTML = `<span>⚠️ You're in, but you still need to join the PlayVerse Roblox group ASAP to keep your access.</span><a href="${joinLink}" target="_blank" rel="noopener">Join the group now</a>`;
+    }
 
     function canSeeAnalytics() {
       return isHrAuthed && hasPermission('dashboard.view');
@@ -4463,6 +4525,8 @@
       let nextPhaseBusy = false;
       let nextPhaseError = null;
       let allSetModalOpen = false;
+      let manualRolingBusy = false;
+      let manualRolingMsg = null;
 
       const canManage = hasPermission('recruitment.manage');
       const canRespond = hasPermission('recruitment.respond');
@@ -4484,6 +4548,7 @@
       async function openTicket(id) {
         openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; pendingImage = null;
         nextPhaseModalOpen = false; nextPhaseError = null; nextPhaseSelectedSkillsetId = ''; allSetModalOpen = false;
+        manualRolingBusy = false; manualRolingMsg = null;
         paintModal(); paintNextPhaseOverlay();
         try {
           ticketDetail = await loadRecruitmentTicket(id);
@@ -4645,6 +4710,12 @@
             ${t.status === 'team_selection' ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--accent-soft);border:1px solid var(--accent-soft-strong);font-size:13px;">
               In team selection${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Leads were notified on Discord${t.next_phase_by_username ? ` by ${esc(t.next_phase_by_username)}` : ''}.
+            </div>` : ''}
+            ${t.placed_team_id ? `
+            <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
+              <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. This rolls into the system automatically on the next scheduled batch (runs every 6 hours) - or apply it right now:</div>
+              <button type="button" class="btn btn-primary btn-sm" id="manualRolingBtn" ${manualRolingBusy ? 'disabled' : ''}>${manualRolingBusy ? 'Roling…' : 'Manual Roling — apply now'}</button>
+              ${manualRolingMsg ? `<div style="margin-top:8px;font-weight:600;color:${manualRolingMsg.ok ? 'var(--ok-text)' : 'var(--err-text)'};">${esc(manualRolingMsg.text)}</div>` : ''}
             </div>` : ''}
             ${recruiters.length ? `
             <div style="margin-top:12px;">
@@ -4808,6 +4879,18 @@
             nextPhaseError = 'Could not load skillsets.';
           }
           nextPhaseSkillsetsLoading = false; paintNextPhaseOverlay();
+        });
+
+        const manualRolingBtn = document.getElementById('manualRolingBtn');
+        if (manualRolingBtn) manualRolingBtn.addEventListener('click', async () => {
+          manualRolingBusy = true; manualRolingMsg = null; paintModal();
+          try {
+            const data = await manualRolingRecruitmentTicket(openTicketId);
+            manualRolingMsg = { ok: true, text: data && data.mode === 'inserted' ? 'Rolled in - access granted just now.' : 'Already up to date - roled in.' };
+          } catch (e) {
+            manualRolingMsg = { ok: false, text: e.message || 'Could not roll them in.' };
+          }
+          manualRolingBusy = false; paintModal();
         });
       }
 
