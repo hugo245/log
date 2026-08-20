@@ -23,6 +23,8 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_NOTIFY_CHANNEL_ID = process.env.DISCORD_NOTIFY_CHANNEL_ID;
+const DISCORD_LEAD_CHANNEL_ID = process.env.DISCORD_LEAD_CHANNEL_ID || DISCORD_NOTIFY_CHANNEL_ID;
+const DISCORD_LEAD_ROLE_ID = process.env.DISCORD_LEAD_ROLE_ID || '1539922527013572668';
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
 const RECRUIT_SESSION_PORTAL_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const DISCORD_CONFIGURED = !!(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI);
@@ -385,6 +387,63 @@ async function notifyDiscordStatusChange(ticket, newStatus, byUsername) {
         });
     } catch (e) {
         console.error('notifyDiscordStatusChange failed:', e.message);
+    }
+}
+
+async function notifyDiscordNextPhase(ticket, skillset) {
+    if (!DISCORD_BOT_TOKEN || !DISCORD_LEAD_CHANNEL_ID) return null;
+    try {
+        const { data: teams } = await supabase.from('teams').select('id, name').order('name', { ascending: true }).limit(24);
+        const teamOptions = (teams || []).map(t => ({ label: t.name.slice(0, 100), value: String(t.id) }));
+
+        const components = [];
+        if (teamOptions.length) {
+            components.push({
+                type: 1,
+                components: [{
+                    type: 3,
+                    custom_id: `nextphase_team_${ticket.id}`,
+                    placeholder: 'Assign a team...',
+                    options: teamOptions
+                }]
+            });
+        }
+        components.push({
+            type: 1,
+            components: [{
+                type: 6,
+                custom_id: `nextphase_roles_${ticket.id}`,
+                placeholder: 'Assign Discord roles...',
+                min_values: 0,
+                max_values: 10
+            }]
+        });
+
+        const message = await discordApi(`/channels/${DISCORD_LEAD_CHANNEL_ID}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                content: `<@&${DISCORD_LEAD_ROLE_ID}> **${ticket.roblox_username}** is ready for team selection.`,
+                embeds: [{
+                    title: `${ticket.roblox_username} - ready for team selection`,
+                    color: 0x178A4C,
+                    fields: [
+                        { name: 'Roblox', value: ticket.roblox_username, inline: true },
+                        { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
+                        { name: 'Position applied for', value: ticket.position || 'Not specified', inline: true },
+                        { name: 'Skillset', value: skillset ? skillset.name : 'Not set', inline: true },
+                        { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
+                        { name: 'Experience', value: (ticket.experience || 'N/A').slice(0, 400) }
+                    ],
+                    footer: { text: `Ticket ${ticket.id} - use the menus below to finish placing them` },
+                    timestamp: new Date().toISOString()
+                }],
+                components
+            })
+        });
+        return message ? message.id : null;
+    } catch (e) {
+        console.error('notifyDiscordNextPhase failed:', e.message);
+        return null;
     }
 }
 
@@ -1219,7 +1278,7 @@ app.post('/recruitment/apply', async (req, res) => {
     let referredByUsername = null;
     if (referredByUserId) {
         const recruiters = await listRecruiters();
-        const match = recruiters.find(r => r.robloxUserId === referredByUserId);
+        const match = recruiters.find(r => String(r.robloxUserId) === String(referredByUserId));
         if (match) referredByUsername = match.robloxUsername;
     }
 
@@ -3057,6 +3116,54 @@ app.post('/hr-data', async (req, res) => {
         });
         notifyDiscordStatusChange({ ...ticket, status }, status, session.roblox_username);
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'recruitment_next_phase') {
+        if (!requirePermission(res, session, 'recruitment.manage')) return;
+        const id = payload.id;
+        const skillsetId = payload.skillsetId;
+        if (!id || !skillsetId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+
+        const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+        if (ticket.status !== 'accepted') { res.status(400).json({ ok: false, error: 'not_accepted' }); return; }
+
+        const { data: skillset, error: skillsetErr } = await supabase.from('skillsets').select('id, name').eq('id', skillsetId).maybeSingle();
+        if (skillsetErr) { res.status(500).json({ ok: false, error: skillsetErr.message }); return; }
+        if (!skillset) { res.status(404).json({ ok: false, error: 'skillset_not_found' }); return; }
+
+        const nextPhaseAt = new Date().toISOString();
+        const { error: updateErr } = await supabase.from('recruitment_tickets').update({
+            status: 'team_selection',
+            skillset_id: skillset.id,
+            skillset_name: skillset.name,
+            next_phase_at: nextPhaseAt,
+            next_phase_by_username: session.roblox_username,
+            updated_at: nextPhaseAt
+        }).eq('id', id);
+        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+
+        const updatedTicket = { ...ticket, status: 'team_selection', skillset_id: skillset.id, skillset_name: skillset.name };
+        const messageId = await notifyDiscordNextPhase(updatedTicket, skillset);
+        if (messageId) {
+            await supabase.from('recruitment_tickets').update({ team_selection_message_id: messageId }).eq('id', id);
+        }
+
+        sendPushToApplicant(ticket.roblox_user_id, {
+            title: "You're in!",
+            body: 'Your application moved to team selection - hang tight while leads finish placing you.',
+            url: `${APP_ORIGIN}/#/recruit/status`
+        });
+
+        logAudit(session, {
+            category: 'recruitment', action: 'next_phase',
+            targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+            details: { ticketId: id, skillsetId: skillset.id, skillsetName: skillset.name }
+        });
+
+        res.json({ ok: true, data: { discordPosted: !!messageId } });
         return;
     }
 

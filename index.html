@@ -3168,6 +3168,14 @@
     async function assignRecruitmentTicket(id, userId, username) {
       await callHrData('recruitment_assign', { id, assignToUserId: userId, assignToUsername: username });
     }
+    async function nextPhaseRecruitmentTicket(id, skillsetId) {
+      const json = await callHrData('recruitment_next_phase', { id, skillsetId });
+      return json.data;
+    }
+    async function loadSkillsetsForNextPhase() {
+      const json = await callHrData('list_skillsets');
+      return json.data || [];
+    }
     async function loadRecruiters() {
       const json = await callHrData('recruitment_list_recruiters');
       return json.data || [];
@@ -4170,6 +4178,7 @@
         pending: ['Pending', '--warn-bg', '--warn-text', '--warn-line'],
         in_review: ['In review', '--accent-soft', '--accent', '--accent-soft-strong'],
         accepted: ['Accepted', '--ok-bg', '--ok-text', '--ok-line'],
+        team_selection: ['Team selection', '--accent-soft', '--accent', '--accent-soft-strong'],
         rejected: ['Rejected', '--err-bg', '--err-text', '--err-line'],
         withdrawn: ['Withdrawn', '--row-alt', '--muted', '--line']
       };
@@ -4181,20 +4190,42 @@
       pending: "We've got your application - it's in the queue to be reviewed.",
       in_review: "Someone's actively looking at your application.",
       accepted: "You're in! Someone from the team will reach out here shortly.",
+      team_selection: "You're in! Please wait for higher ups to put you in a team.",
       rejected: "This one didn't work out, but you're welcome to apply again in the future.",
       withdrawn: 'This application was marked as withdrawn.'
     };
 
     function chatBubble(m, isMine) {
       return `
-        <div style="display:flex;justify-content:${isMine ? 'flex-end' : 'flex-start'};">
-          <div style="max-width:80%;padding:8px 10px;border-radius:10px;background:${isMine ? 'var(--accent)' : 'var(--row-alt)'};color:${isMine ? '#fff' : 'var(--ink)'};font-size:13px;">
-            <div style="font-weight:600;opacity:.85;font-size:11px;margin-bottom:2px;">${esc(m.author_username)}</div>
-            ${m.attachment_url ? `<img src="${esc(m.attachment_url)}" alt="attachment" style="max-width:100%;border-radius:8px;margin-bottom:${m.body && m.body !== '(image)' ? '6px' : '0'};display:block;cursor:pointer;" data-view-image="${esc(m.attachment_url)}">` : ''}
-            ${!m.attachment_url || (m.body && m.body !== '(image)') ? `<div style="white-space:pre-wrap;">${esc(m.body)}</div>` : ''}
-            <div style="opacity:.7;font-size:10px;margin-top:3px;">${new Date(m.created_at).toLocaleString()}</div>
+        <div style="display:flex;justify-content:${isMine ? 'flex-end' : 'flex-start'};margin:2px 0;">
+          <div style="max-width:78%;padding:9px 12px;border-radius:14px;${isMine ? 'border-bottom-right-radius:4px;' : 'border-bottom-left-radius:4px;'}background:${isMine ? 'var(--accent)' : 'var(--surface)'};color:${isMine ? '#fff' : 'var(--ink)'};font-size:13px;line-height:1.4;box-shadow:0 1px 2px rgba(0,0,0,.06);${isMine ? '' : 'border:1px solid var(--line);'}">
+            <div style="font-weight:600;opacity:${isMine ? '.85' : '.65'};font-size:11px;margin-bottom:3px;">${esc(m.author_username)}</div>
+            ${m.attachment_url ? `<img src="${esc(m.attachment_url)}" alt="attachment" style="max-width:100%;max-height:220px;border-radius:10px;margin-bottom:${m.body && m.body !== '(image)' ? '6px' : '0'};display:block;cursor:zoom-in;object-fit:cover;" data-view-image="${esc(m.attachment_url)}">` : ''}
+            ${!m.attachment_url || (m.body && m.body !== '(image)') ? `<div style="white-space:pre-wrap;word-break:break-word;">${esc(m.body)}</div>` : ''}
+            <div style="opacity:${isMine ? '.75' : '.55'};font-size:10px;margin-top:4px;text-align:right;">${new Date(m.created_at).toLocaleString()}</div>
           </div>
         </div>`;
+    }
+
+    function chatFrameStyle() {
+      return 'background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;';
+    }
+
+    function renderLockedModal() {
+      return `
+    <div class="modal-scrim" id="lockedModalScrim">
+      <div class="modal-card" style="max-width:400px;text-align:center;">
+        <div class="modal-body" style="padding-top:12px;">
+          <div style="width:56px;height:56px;border-radius:50%;background:var(--ok-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ok-text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 6L9 17l-5-5"></path>
+            </svg>
+          </div>
+          <h3 style="margin:0 0 8px;">You're in!</h3>
+          <p style="color:var(--ink-soft);font-size:13px;">Please wait for higher ups to put you in a team. You can still check back here anytime to see updates.</p>
+        </div>
+      </div>
+    </div>`;
     }
 
     function wireImageLightbox(root) {
@@ -4224,6 +4255,7 @@
       let loading = true;
       let loadError = null;
       let sending = false;
+      let composeText = '';
       let pendingImage = null;
       let pollTimer = null;
       let notifyModalShown = false;
@@ -4234,6 +4266,7 @@
 
       async function load(showSpinner) {
         if (showSpinner) { loading = true; paint(); }
+        const prevStatus = data ? data.ticket.status : undefined;
         try {
           data = await fetchMyTicket(rt);
           loading = false; loadError = null;
@@ -4242,10 +4275,27 @@
           loadError = e.message === 'no_ticket' ? 'no_ticket' : (e.message || 'Could not load your application.');
         }
         if (renderGen !== myGen) return;
-        paint();
+
+        const statusChanged = data && prevStatus !== undefined && data.ticket.status !== prevStatus;
+        if (showSpinner || !data || statusChanged) {
+          paint();
+        } else {
+          patchMessages();
+        }
+
         if (!pollTimer && data) {
           pollTimer = setInterval(() => { if (renderGen !== myGen) { clearInterval(pollTimer); return; } load(false); }, 15000);
         }
+      }
+
+      function patchMessages() {
+        const container = document.getElementById('statusMessages');
+        if (!container || !data) return;
+        container.innerHTML = data.messages.length
+          ? data.messages.map(m => chatBubble(m, m.author_type === 'applicant')).join('')
+          : `<div class="empty-note">No messages yet - staff will reach out here once they review your application.</div>`;
+        wireImageLightbox(container);
+        container.scrollTop = container.scrollHeight;
       }
 
       function maybeShowNotifyModal() {
@@ -4281,12 +4331,12 @@
 
         <div class="panel" style="padding:20px;margin-bottom:16px;">
           <div class="preview-label" style="margin-bottom:10px;">Chat with staff</div>
-          <div id="statusMessages" style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto;margin-bottom:12px;padding-right:4px;">
+          <div id="statusMessages" style="display:flex;flex-direction:column;gap:2px;max-height:380px;overflow-y:auto;margin-bottom:12px;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:12px;scroll-behavior:smooth;">
             ${data.messages.length ? data.messages.map(m => chatBubble(m, m.author_type === 'applicant')).join('') : `<div class="empty-note">No messages yet - staff will reach out here once they review your application.</div>`}
           </div>
           ${pendingImage ? `<div style="margin-bottom:8px;position:relative;display:inline-block;"><img src="${esc(pendingImage.dataUrl)}" style="max-height:80px;border-radius:6px;display:block;"><button type="button" id="statusRemoveImageBtn" style="position:absolute;top:-6px;right:-6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);border-radius:999px;width:20px;height:20px;font-size:11px;cursor:pointer;">&times;</button></div>` : ''}
           <div style="display:flex;gap:8px;align-items:flex-end;">
-            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1;"></textarea>
+            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1;">${esc(composeText)}</textarea>
             <label class="btn btn-ghost btn-sm" style="cursor:pointer;margin-bottom:2px;">
               📎<input type="file" accept="image/*" id="statusImageInput" style="display:none;">
             </label>
@@ -4303,7 +4353,7 @@
           <div style="margin-top:10px;color:var(--muted);font-size:12px;">Submitted ${new Date(data.ticket.created_at).toLocaleString()}</div>
         </div>`}
     </div>
-    ${notifyModalShown ? `
+    ${data && data.ticket.status === 'team_selection' ? renderLockedModal() : notifyModalShown ? `
     <div class="modal-scrim" id="notifyModalScrim">
       <div class="modal-card" style="max-width:420px;text-align:center;">
         <div class="modal-body" style="padding-top:8px;">
@@ -4320,6 +4370,16 @@
 
         wireTopbarSignOut();
         wireImageLightbox(document.getElementById('statusMessages'));
+        const messagesContainer = document.getElementById('statusMessages');
+        if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        const composeEl = document.getElementById('statusComposeBody');
+        if (composeEl) {
+          composeEl.addEventListener('input', e => { composeText = e.target.value; });
+          composeEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn && sendBtn.click(); }
+          });
+        }
 
         const imageInput = document.getElementById('statusImageInput');
         if (imageInput) imageInput.addEventListener('change', async () => {
@@ -4334,17 +4394,21 @@
 
         const sendBtn = document.getElementById('statusSendBtn');
         if (sendBtn) sendBtn.addEventListener('click', async () => {
-          const body = (document.getElementById('statusComposeBody').value || '').trim();
+          const body = composeText.trim();
           if (!body && !pendingImage) return;
           sending = true; paint();
           try {
             await sendMyTicketMessage(rt, body, pendingImage ? pendingImage.dataUrl : null);
+            composeText = '';
             pendingImage = null;
             await load(false);
             maybeShowNotifyModal();
             paint();
           } catch (e) {
             alert('Could not send that message. Please try again.');
+            sending = false;
+            paint();
+            return;
           }
           sending = false;
         });
@@ -4392,6 +4456,14 @@
       let busy = false;
       let ticketPollTimer = null;
 
+      let nextPhaseModalOpen = false;
+      let nextPhaseSkillsets = [];
+      let nextPhaseSkillsetsLoading = false;
+      let nextPhaseSelectedSkillsetId = '';
+      let nextPhaseBusy = false;
+      let nextPhaseError = null;
+      let allSetModalOpen = false;
+
       const canManage = hasPermission('recruitment.manage');
       const canRespond = hasPermission('recruitment.respond');
       const canSeeAnalytics = hasPermission('recruitment.analytics');
@@ -4410,7 +4482,9 @@
       }
 
       async function openTicket(id) {
-        openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; pendingImage = null; paint();
+        openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; pendingImage = null;
+        nextPhaseModalOpen = false; nextPhaseError = null; nextPhaseSelectedSkillsetId = ''; allSetModalOpen = false;
+        paint();
         try {
           ticketDetail = await loadRecruitmentTicket(id);
         } catch (e) { }
@@ -4418,12 +4492,29 @@
         if (ticketPollTimer) clearInterval(ticketPollTimer);
         ticketPollTimer = setInterval(async () => {
           if (renderGen !== myGen || openTicketId !== id) { clearInterval(ticketPollTimer); return; }
-          try { ticketDetail = await loadRecruitmentTicket(id); paint(); } catch (e) { }
+          try {
+            ticketDetail = await loadRecruitmentTicket(id);
+            patchTicketMessages();
+          } catch (e) { }
         }, 15000);
       }
 
+      function patchTicketMessages() {
+        const container = document.getElementById('ticketMessages');
+        if (!container || !ticketDetail) return;
+        const messages = ticketDetail.messages;
+        container.innerHTML = messages.length ? messages.map(m => m.internal_note ? `
+                <div style="padding:8px 10px;border-radius:8px;background:var(--warn-bg);font-size:13px;">
+                  <div style="font-weight:600;">${esc(m.author_username)} <span style="font-weight:400;color:var(--warn-text);">(internal note)</span></div>
+                  <div style="white-space:pre-wrap;">${esc(m.body)}</div>
+                  <div style="color:var(--muted);font-size:11px;margin-top:2px;">${new Date(m.created_at).toLocaleString()}</div>
+                </div>` : chatBubble(m, m.author_type === 'staff')).join('') : `<div class="empty-note">No messages yet - start the conversation below.</div>`;
+        wireImageLightbox(container);
+        container.scrollTop = container.scrollHeight;
+      }
+
       function counts() {
-        const c = { all: tickets.length, pending: 0, in_review: 0, accepted: 0, rejected: 0, withdrawn: 0 };
+        const c = { all: tickets.length, pending: 0, in_review: 0, accepted: 0, team_selection: 0, rejected: 0, withdrawn: 0 };
         tickets.forEach(t => { c[t.status] = (c[t.status] || 0) + 1; });
         return c;
       }
@@ -4448,7 +4539,7 @@
 
       <div class="filter-bar">
         <div class="tabs">
-          ${['all', 'pending', 'in_review', 'accepted', 'rejected', 'withdrawn'].map(s => `<button type="button" class="tab-btn ${statusFilter === s ? 'active' : ''}" data-status-filter="${s}">${s === 'all' ? 'All' : s.replace('_', ' ')} (${c[s] || 0})</button>`).join('')}
+          ${['all', 'pending', 'in_review', 'accepted', 'team_selection', 'rejected', 'withdrawn'].map(s => `<button type="button" class="tab-btn ${statusFilter === s ? 'active' : ''}" data-status-filter="${s}">${s === 'all' ? 'All' : s.replace('_', ' ')} (${c[s] || 0})</button>`).join('')}
         </div>
       </div>
 
@@ -4526,6 +4617,15 @@
               <button type="button" class="btn btn-danger btn-sm" data-set-status="rejected" style="background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);" ${busy ? 'disabled' : ''}>Reject</button>
               <button type="button" class="btn btn-ghost btn-sm" data-set-status="withdrawn" ${busy ? 'disabled' : ''}>Mark withdrawn</button>
             </div>
+            ${t.status === 'accepted' ? `
+            <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--accent-soft);border:1px solid var(--accent-soft-strong);">
+              <div style="font-size:13px;color:var(--ink);margin-bottom:8px;">Ready to move them into team selection? Pick a skillset and we'll notify the leads.</div>
+              <button type="button" class="btn btn-primary btn-sm" id="nextPhaseBtn">Next Phase &rarr;</button>
+            </div>` : ''}
+            ${t.status === 'team_selection' ? `
+            <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--accent-soft);border:1px solid var(--accent-soft-strong);font-size:13px;">
+              In team selection${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Leads were notified on Discord${t.next_phase_by_username ? ` by ${esc(t.next_phase_by_username)}` : ''}.
+            </div>` : ''}
             ${recruiters.length ? `
             <div style="margin-top:12px;">
               <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Assign to</label>
@@ -4538,7 +4638,7 @@
 
           <div class="modal-section">
             <div class="modal-section-title">Chat</div>
-            <div id="ticketMessages" style="display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto;margin-bottom:10px;">
+            <div id="ticketMessages" style="display:flex;flex-direction:column;gap:2px;max-height:300px;overflow-y:auto;margin-bottom:10px;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:12px;scroll-behavior:smooth;">
               ${messages.length ? messages.map(m => m.internal_note ? `
                 <div style="padding:8px 10px;border-radius:8px;background:var(--warn-bg);font-size:13px;">
                   <div style="font-weight:600;">${esc(m.author_username)} <span style="font-weight:400;color:var(--warn-text);">(internal note)</span></div>
@@ -4561,6 +4661,53 @@
           </div>
         </div>
       </div>
+    </div>
+    ${nextPhaseModalOpen ? renderNextPhaseModal(t) : ''}
+    ${allSetModalOpen ? renderAllSetModal() : ''}`;
+      }
+
+      function renderNextPhaseModal(t) {
+        return `
+    <div class="modal-scrim" id="nextPhaseModalScrim" style="z-index:60;">
+      <div class="modal-card" style="max-width:420px;">
+        <button type="button" class="modal-close" id="nextPhaseModalClose">&times;</button>
+        <div class="modal-body" style="padding-top:8px;">
+          <h3 style="margin-top:0;">Move to team selection</h3>
+          <p style="color:var(--ink-soft);font-size:13px;">Pick the skillset ${esc(t.roblox_username)} will join as. Leads will be notified on Discord to finish placing them into a team.</p>
+          ${nextPhaseError ? `<div class="error-box"><span>${esc(nextPhaseError)}</span></div>` : ''}
+          ${nextPhaseSkillsetsLoading ? `<div style="text-align:center;color:var(--muted);padding:16px 0;">Loading skillsets...</div>` : `
+          <div class="field" style="text-align:left;">
+            <label>Skillset</label>
+            <select id="nextPhaseSkillsetSelect">
+              <option value="">Choose one...</option>
+              ${nextPhaseSkillsets.map(s => `<option value="${esc(s.id)}" ${String(nextPhaseSelectedSkillsetId) === String(s.id) ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+            </select>
+          </div>`}
+          <div style="display:flex;gap:10px;justify-content:center;margin-top:16px;">
+            <button type="button" class="btn btn-primary" id="nextPhaseConfirmBtn" ${nextPhaseBusy || nextPhaseSkillsetsLoading ? 'disabled' : ''}>${nextPhaseBusy ? 'Sending...' : 'Move to team selection'}</button>
+            <button type="button" class="btn btn-ghost" id="nextPhaseCancelBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+      }
+
+      function renderAllSetModal() {
+        return `
+    <div class="modal-scrim" id="allSetModalScrim" style="z-index:70;">
+      <div class="modal-card" style="max-width:380px;text-align:center;">
+        <div class="modal-body" style="padding-top:12px;">
+          <div style="width:56px;height:56px;border-radius:50%;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <polyline points="12 7 12 12 15.5 14"></polyline>
+            </svg>
+          </div>
+          <h3 style="margin:0 0 8px;">You're all set for now.</h3>
+          <p style="color:var(--ink-soft);font-size:13px;margin-bottom:18px;">Leads have been notified on Discord to finish placing them into a team.</p>
+          <button type="button" class="btn btn-primary" id="allSetOkBtn">Got it</button>
+        </div>
+      </div>
     </div>`;
       }
 
@@ -4571,6 +4718,8 @@
         document.getElementById('ticketModalClose').addEventListener('click', close);
         scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
         wireImageLightbox(document.getElementById('ticketMessages'));
+        const messagesContainer = document.getElementById('ticketMessages');
+        if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
         document.querySelectorAll('[data-set-status]').forEach(el => {
           el.addEventListener('click', async () => {
@@ -4603,10 +4752,17 @@
         const removeImgBtn = document.getElementById('ticketRemoveImageBtn');
         if (removeImgBtn) removeImgBtn.addEventListener('click', () => { pendingImage = null; paint(); });
 
+        const composeEl = document.getElementById('ticketComposeBody');
+        if (composeEl) {
+          composeEl.addEventListener('input', e => { composeBody = e.target.value; });
+        }
+        const noteCheckbox = document.getElementById('ticketComposeNote');
+        if (noteCheckbox) noteCheckbox.addEventListener('change', e => { composeIsNote = e.target.checked; });
+
         const sendBtn = document.getElementById('ticketComposeSend');
         if (sendBtn) sendBtn.addEventListener('click', async () => {
-          const body = (document.getElementById('ticketComposeBody').value || '').trim();
-          const isNote = document.getElementById('ticketComposeNote').checked;
+          const body = composeBody.trim();
+          const isNote = composeIsNote;
           if (!body && !pendingImage) return;
           busy = true; paint();
           try {
@@ -4616,6 +4772,58 @@
           } catch (e) { }
           busy = false;
         });
+
+        const nextPhaseBtn = document.getElementById('nextPhaseBtn');
+        if (nextPhaseBtn) nextPhaseBtn.addEventListener('click', async () => {
+          nextPhaseModalOpen = true; nextPhaseError = null; nextPhaseSelectedSkillsetId = '';
+          nextPhaseSkillsetsLoading = true; paint();
+          try {
+            nextPhaseSkillsets = await loadSkillsetsForNextPhase();
+          } catch (e) {
+            nextPhaseError = 'Could not load skillsets.';
+          }
+          nextPhaseSkillsetsLoading = false; paint();
+        });
+        wireNextPhaseModal();
+        wireAllSetModal();
+      }
+
+      function wireNextPhaseModal() {
+        const scrim = document.getElementById('nextPhaseModalScrim');
+        if (!scrim) return;
+        const close = () => { nextPhaseModalOpen = false; nextPhaseError = null; paint(); };
+        document.getElementById('nextPhaseModalClose').addEventListener('click', close);
+        document.getElementById('nextPhaseCancelBtn').addEventListener('click', close);
+        scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+
+        const select = document.getElementById('nextPhaseSkillsetSelect');
+        if (select) select.addEventListener('change', () => { nextPhaseSelectedSkillsetId = select.value; });
+
+        const confirmBtn = document.getElementById('nextPhaseConfirmBtn');
+        if (confirmBtn) confirmBtn.addEventListener('click', async () => {
+          const skillsetId = (document.getElementById('nextPhaseSkillsetSelect') || {}).value || nextPhaseSelectedSkillsetId;
+          if (!skillsetId) { nextPhaseError = 'Please choose a skillset.'; paint(); return; }
+          nextPhaseBusy = true; nextPhaseError = null; paint();
+          try {
+            await nextPhaseRecruitmentTicket(openTicketId, skillsetId);
+            nextPhaseModalOpen = false;
+            await openTicket(openTicketId);
+            await load();
+            allSetModalOpen = true;
+            paint();
+          } catch (e) {
+            nextPhaseError = e.message || 'Could not move this application to team selection.';
+          }
+          nextPhaseBusy = false; paint();
+        });
+      }
+
+      function wireAllSetModal() {
+        const scrim = document.getElementById('allSetModalScrim');
+        if (!scrim) return;
+        const close = () => { allSetModalOpen = false; paint(); };
+        document.getElementById('allSetOkBtn').addEventListener('click', close);
+        scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
       }
     }
 

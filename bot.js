@@ -10,10 +10,13 @@ const {
     DISCORD_CLIENT_ID,
     DISCORD_GUILD_ID,
     DISCORD_RECRUITER_ROLE_ID,
+    DISCORD_LEAD_ROLE_ID,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
     APP_ORIGIN
 } = process.env;
+
+const LEAD_ROLE_ID = DISCORD_LEAD_ROLE_ID || '1539922527013572668';
 
 for (const [name, val] of Object.entries({ DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY })) {
     if (!val) { console.error(`Missing required env var: ${name}`); process.exit(1); }
@@ -22,10 +25,6 @@ for (const [name, val] of Object.entries({ DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID,
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-// ---------------------------------------------------------------------------
-// Slash command definitions + registration
-// ---------------------------------------------------------------------------
 
 const commands = [
     new SlashCommandBuilder()
@@ -48,20 +47,26 @@ async function registerCommands() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function statusColor(status) {
     return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
 }
 
 async function requireRecruiterRole(interaction) {
-    if (!DISCORD_RECRUITER_ROLE_ID) return true; // not configured = no restriction
+    if (!DISCORD_RECRUITER_ROLE_ID) return true;
     const member = interaction.member;
     const has = member && member.roles && member.roles.cache && member.roles.cache.has(DISCORD_RECRUITER_ROLE_ID);
     if (!has) {
         await interaction.reply({ content: "You don't have the recruiter role for this.", ephemeral: true });
+        return false;
+    }
+    return true;
+}
+
+async function requireLeadRole(interaction) {
+    const member = interaction.member;
+    const has = member && member.roles && member.roles.cache && member.roles.cache.has(LEAD_ROLE_ID);
+    if (!has) {
+        await interaction.reply({ content: "Only leads can use this panel.", ephemeral: true });
         return false;
     }
     return true;
@@ -83,10 +88,6 @@ function ticketEmbed(ticket) {
         .setFooter({ text: `Ticket ${ticket.id}` })
         .setTimestamp(new Date(ticket.created_at));
 }
-
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
 
 client.once(Events.ClientReady, c => {
     console.log(`Logged in as ${c.user.tag}`);
@@ -166,7 +167,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 content: `**${ticket.roblox_username}**'s application marked **${newStatus}** by ${interaction.user}. <@${ticket.discord_user_id}>`
             });
 
-            // Try to DM the applicant. Best effort - they may have DMs closed.
             try {
                 const link = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', ticket.roblox_user_id).maybeSingle();
                 const discordUserId = (link.data && link.data.discord_user_id) || ticket.discord_user_id;
@@ -176,7 +176,63 @@ client.on(Events.InteractionCreate, async interaction => {
                 } else {
                     await user.send(`Thanks for applying to PlayVerse. Unfortunately your application wasn't accepted this time. You're welcome to apply again in the future.`);
                 }
-            } catch (e) { /* DMs closed, ignore */ }
+            } catch (e) { }
+            return;
+        }
+
+        if (interaction.isStringSelectMenu()) {
+            const [, ticketId] = interaction.customId.match(/^nextphase_team_(.+)$/) || [];
+            if (!ticketId) return;
+            if (!(await requireLeadRole(interaction))) return;
+
+            const teamId = Number(interaction.values[0]);
+            const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', ticketId).maybeSingle();
+            if (error || !ticket) { await interaction.reply({ content: 'That ticket no longer exists.', ephemeral: true }); return; }
+
+            const { data: team } = await supabase.from('teams').select('id, name').eq('id', teamId).maybeSingle();
+            if (!team) { await interaction.reply({ content: 'That team no longer exists.', ephemeral: true }); return; }
+
+            await supabase.from('user_assignments').upsert({
+                roblox_user_id: ticket.roblox_user_id,
+                roblox_username: ticket.roblox_username,
+                team_id: team.id,
+                skillset_id: ticket.skillset_id || null,
+                assigned_at: new Date().toISOString()
+            }, { onConflict: 'roblox_user_id,team_id' });
+
+            await supabase.from('recruitment_tickets').update({
+                placed_team_id: team.id,
+                placed_team_name: team.name,
+                placed_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            }).eq('id', ticketId);
+
+            await interaction.reply({ content: `Placed **${ticket.roblox_username}** on **${team.name}** (by ${interaction.user}).` });
+            return;
+        }
+
+        if (interaction.isRoleSelectMenu()) {
+            const [, ticketId] = interaction.customId.match(/^nextphase_roles_(.+)$/) || [];
+            if (!ticketId) return;
+            if (!(await requireLeadRole(interaction))) return;
+
+            const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', ticketId).maybeSingle();
+            if (error || !ticket) { await interaction.reply({ content: 'That ticket no longer exists.', ephemeral: true }); return; }
+
+            const selectedRoles = interaction.roles;
+            if (!selectedRoles || !selectedRoles.size) { await interaction.reply({ content: 'No roles selected.', ephemeral: true }); return; }
+
+            await interaction.deferReply();
+            try {
+                const guild = interaction.guild;
+                const member = await guild.members.fetch(ticket.discord_user_id);
+                const roleIds = [...selectedRoles.keys()];
+                await member.roles.add(roleIds);
+                const roleNames = [...selectedRoles.values()].map(r => r.name).join(', ');
+                await interaction.editReply({ content: `Granted **${ticket.roblox_username}** (<@${ticket.discord_user_id}>) the role(s): ${roleNames} (by ${interaction.user}).` });
+            } catch (e) {
+                await interaction.editReply({ content: `Could not assign those roles: ${e.message}. Make sure the bot's own role sits above them in the role list.` });
+            }
             return;
         }
     } catch (e) {
@@ -187,9 +243,8 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 });
 
-// keep this Web Service happy on Render's free tier - not used for anything real
 const http = require('http');
-http.createServer((req, res) => res.end('bot is alive')).listen(4000);
+http.createServer((req, res) => res.end('bot is alive')).listen(process.env.PORT || 4000);
 
 (async () => {
     await registerCommands();
