@@ -4336,11 +4336,11 @@
           </div>
           ${pendingImage ? `<div style="margin-bottom:8px;position:relative;display:inline-block;"><img src="${esc(pendingImage.dataUrl)}" style="max-height:80px;border-radius:6px;display:block;"><button type="button" id="statusRemoveImageBtn" style="position:absolute;top:-6px;right:-6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);border-radius:999px;width:20px;height:20px;font-size:11px;cursor:pointer;">&times;</button></div>` : ''}
           <div style="display:flex;gap:8px;align-items:flex-end;">
-            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1 1 0%;min-width:0;width:auto;">${esc(composeText)}</textarea>
-            <label class="btn btn-ghost btn-sm" style="cursor:pointer;margin-bottom:2px;">
+            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1 1 auto;min-width:0;width:100%;min-height:44px;">${esc(composeText)}</textarea>
+            <label class="btn btn-ghost btn-sm" style="cursor:pointer;margin-bottom:2px;flex:0 0 auto;">
               📎<input type="file" accept="image/*" id="statusImageInput" style="display:none;">
             </label>
-            <button type="button" class="btn btn-primary btn-sm" id="statusSendBtn" ${sending ? 'disabled' : ''} style="margin-bottom:2px;">${sending ? 'Sending...' : 'Send'}</button>
+            <button type="button" class="btn btn-primary btn-sm" id="statusSendBtn" ${sending ? 'disabled' : ''} style="margin-bottom:2px;flex:0 0 auto;width:auto;">${sending ? 'Sending...' : 'Send'}</button>
           </div>
         </div>
 
