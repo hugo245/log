@@ -4286,6 +4286,9 @@
         if (submitBtn) submitBtn.addEventListener('click', async () => {
           const experience = (document.getElementById('ap_experience').value || '').trim();
           const whyJoin = (document.getElementById('ap_why').value || '').trim();
+          const portfolioUrl = (document.getElementById('ap_portfolio').value || '').trim() || null;
+          const position = (document.getElementById('ap_position').value || '').trim() || null;
+          const referredByUserId = document.getElementById('ap_referrer').value || null;
           const errs = {};
           if (!experience) errs.experience = 'Please share a bit about your experience.';
           if (!whyJoin) errs.whyJoin = "Let us know why you'd like to join.";
@@ -4296,9 +4299,9 @@
             await submitRecruitmentApplication(rt, {
               experience,
               whyJoin,
-              portfolioUrl: (document.getElementById('ap_portfolio').value || '').trim() || null,
-              position: (document.getElementById('ap_position').value || '').trim() || null,
-              referredByUserId: document.getElementById('ap_referrer').value || null
+              portfolioUrl,
+              position,
+              referredByUserId
             });
             submitting = false;
             window.location.hash = '#/recruit/status';
