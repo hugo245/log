@@ -2610,8 +2610,8 @@
     }
     function themeToggleIcon() {
       return getTheme() === 'dark'
-        ? '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.6M12 18.9v2.6M4.4 4.4l1.85 1.85M17.75 17.75l1.85 1.85M2.5 12h2.6M18.9 12h2.6M4.4 19.6l1.85-1.85M17.75 6.25l1.85-1.85"></path></svg>' // sun
-        : '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7Z"></path></svg>'; // moon
+        ? '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.6M12 18.9v2.6M4.4 4.4l1.85 1.85M17.75 17.75l1.85 1.85M2.5 12h2.6M18.9 12h2.6M4.4 19.6l1.85-1.85M17.75 6.25l1.85-1.85"></path></svg>'
+        : '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7Z"></path></svg>';
     }
 
     const PERMISSION_LABELS = {
@@ -2677,10 +2677,6 @@
     let appDataReady = false;
     let needsOnboarding = false;
 
-    // Bumped every time route() switches pages. Async page loaders capture
-    // the value at the start and check it before repainting, so a slow
-    // fetch from a page you've since navigated away from can never
-    // overwrite what's currently on screen.
     let renderGen = 0;
 
     function hasPermission(permission) {
@@ -2744,8 +2740,6 @@
       };
     }
 
-    // Renders a clickable username that opens the global user menu.
-    // Falls back to plain text (no click) if there's nothing to identify the user by.
     function userLink(userId, username) {
       const label = esc(username || (userId ? `ID ${userId}` : 'Unknown'));
       if (!userId && !username) return `<span class="hint">Unknown</span>`;
@@ -2952,10 +2946,6 @@
       const token = getStoredToken();
       if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; return; }
       try {
-        // Fire the session check and the onboarding check together instead of
-        // waiting for the first to finish before starting the second - both
-        // just need the bearer token, so this saves a full round trip on
-        // every page load (meaningful when the API has to cold-start).
         const [res, onboardingResult] = await Promise.all([
           fetch(EDGE_BASE + '/hr-session', {
             headers: {
@@ -3060,12 +3050,6 @@
       return json;
     }
 
-    // -------------------------------------------------------------------
-    // Recruitment: recruit-session (pre-HR-login applicant) helpers
-    // -------------------------------------------------------------------
-    // localStorage (not sessionStorage) since a submitted application
-    // extends the recruit session to ~90 days server-side, so applicants
-    // can come back across browser restarts to check status/chat.
     function getRecruitToken() {
       try { return localStorage.getItem(RECRUIT_TOKEN_KEY); } catch (e) { return null; }
     }
@@ -3123,9 +3107,6 @@
       return json;
     }
 
-    // -------------------------------------------------------------------
-    // Recruitment: push notifications (applicant opt-in)
-    // -------------------------------------------------------------------
     function urlBase64ToUint8Array(base64String) {
       const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
       const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -3170,10 +3151,6 @@
       });
     }
 
-    // -------------------------------------------------------------------
-    // Recruitment: staff-side (uses the normal hr_session, like everything
-    // else in the app)
-    // -------------------------------------------------------------------
     async function loadRecruitmentTickets(status) {
       const json = await callHrData('recruitment_list_tickets', { status: status || 'all' });
       return json.data || [];
@@ -3427,7 +3404,6 @@
       return json.data || [];
     }
 
-    // --- Audit logs / quick moderation / backups -----------------------
     async function listAuditLogs(category, search) {
       const json = await callHrData('list_audit_logs', { category, search });
       return json.data || [];
@@ -3455,10 +3431,7 @@
       return json;
     }
 
-    // --- Global "user menu" (clickable users everywhere -> quick profile
-    // + quick moderation). Rendered into #globalUserMenuRoot, which sits
-    // outside #app so it survives page repaints. -----------------------
-    let umTarget = null;      // { id, username }
+    let umTarget = null;
     let umLoading = false;
     let umWarnings = [];
     let umBanned = null;
@@ -3594,8 +3567,6 @@
       if (typeof window.__refreshCurrentAuditPage === 'function') window.__refreshCurrentAuditPage();
     }
 
-    // Delegated click handler: any element with data-user-link (and a
-    // data-user-id and/or data-user-name attribute) opens the user menu.
     document.addEventListener('click', (e) => {
       const el = e.target.closest('[data-user-link]');
       if (!el) return;
@@ -3721,9 +3692,6 @@
     }
 
     async function initAuth() {
-      // These two don't depend on each other (one hits the API, the other
-      // talks to Supabase directly) so run them side by side rather than
-      // waiting on one before starting the other.
       await Promise.all([verifySession(), loadAppData()]);
       authReady = true;
       route();
@@ -4003,10 +3971,6 @@
       if (btn) btn.addEventListener('click', () => beginLogin('#/onboarding', token));
     }
 
-    // =======================================================================
-    // Recruitment: applicant-facing flow (#/recruit, #/recruit/apply)
-    // =======================================================================
-
     const RECRUIT_ERROR_MESSAGES = {
       session_expired: 'That took a little too long and your session expired. Please sign in with Roblox again.',
       invalid_state: 'That Discord sign-in attempt was invalid or expired, please try again.',
@@ -4099,9 +4063,6 @@
         if (renderGen !== myGen) return;
         info = sessionInfo;
         recruiters = recruiterList;
-        // If they already have a ticket (came back later, or refreshed
-        // mid-flow), skip straight to the status/chat panel instead of
-        // showing the application form again.
         fetchMyTicket(rt).then(() => {
           if (renderGen !== myGen) return;
           window.location.hash = '#/recruit/status';
@@ -4204,10 +4165,6 @@
       }
     }
 
-    // =======================================================================
-    // Recruitment: staff-facing dashboard (#/recruitment)
-    // =======================================================================
-
     function recruitmentStatusChip(status) {
       const map = {
         pending: ['Pending', '--warn-bg', '--warn-text', '--warn-line'],
@@ -4252,10 +4209,6 @@
       });
     }
 
-    // =======================================================================
-    // Recruitment: applicant "recruit panel" (#/recruit/status)
-    // =======================================================================
-
     function renderRecruitStatus() {
       const rt = getRecruitToken();
       if (!rt) {
@@ -4271,7 +4224,7 @@
       let loading = true;
       let loadError = null;
       let sending = false;
-      let pendingImage = null; // { dataUrl, name }
+      let pendingImage = null;
       let pollTimer = null;
       let notifyModalShown = false;
       let notifyBusy = false;
@@ -4417,8 +4370,6 @@
         });
       }
 
-      // Ask about notifications a beat after the first successful load, once
-      // there's actually a ticket to attach the subscription to.
       const notifyCheckInterval = setInterval(() => {
         if (renderGen !== myGen) { clearInterval(notifyCheckInterval); return; }
         if (data) { maybeShowNotifyModal(); if (notifyModalShown) { paint(); clearInterval(notifyCheckInterval); } }
@@ -4518,8 +4469,8 @@
                 ${tickets.map((t, i) => `
                 <tr data-open-ticket="${esc(t.id)}" style="cursor:pointer;border-bottom:1px solid var(--line);background:${i % 2 ? 'var(--row-alt)' : 'transparent'};">
                   <td style="padding:12px 16px;"><strong>${esc(t.roblox_username)}</strong><div style="font-size:12px;color:var(--muted);">${esc(t.discord_username)}</div></td>
-                  <td style="padding:12px 16px;">${esc(t.position || '—')}</td>
-                  <td style="padding:12px 16px;">${esc(t.referred_by_username || '—')}</td>
+                  <td style="padding:12px 16px;">${esc(t.position || '-')}</td>
+                  <td style="padding:12px 16px;">${esc(t.referred_by_username || '-')}</td>
                   <td style="padding:12px 16px;">${recruitmentStatusChip(t.status)}</td>
                   <td style="padding:12px 16px;color:var(--muted);font-size:13px;">${new Date(t.created_at).toLocaleString()}</td>
                   <td style="padding:12px 16px;text-align:right;"><button type="button" class="btn btn-ghost btn-sm">💬 Chat</button></td>
@@ -4668,10 +4619,6 @@
       }
     }
 
-    // =======================================================================
-    // Recruitment: analytics (#/recruitment-analytics)
-    // =======================================================================
-
     function renderRecruitmentAnalytics() {
       const myGen = renderGen;
       let data = null;
@@ -4708,8 +4655,8 @@
         <div class="strip-card"><div class="strip-label">Total applications</div><div class="strip-value">${data.totals.total}</div></div>
         <div class="strip-card"><div class="strip-label">Devs hired</div><div class="strip-value" style="color:var(--ok-text);">${data.totals.accepted}</div></div>
         <div class="strip-card"><div class="strip-label">Awaiting review</div><div class="strip-value">${data.totals.pending + data.totals.inReview}</div></div>
-        <div class="strip-card"><div class="strip-label">Hire rate (of decided)</div><div class="strip-value">${data.conversionRate != null ? data.conversionRate + '%' : '—'}</div></div>
-        <div class="strip-card"><div class="strip-label">Avg / median response</div><div class="strip-value">${data.avgResponseMinutes != null ? data.avgResponseMinutes + 'm' : '—'}${data.medianResponseMinutes != null ? ` <span style="font-size:13px;color:var(--muted);font-weight:500;">/ ${data.medianResponseMinutes}m</span>` : ''}</div></div>
+        <div class="strip-card"><div class="strip-label">Hire rate (of decided)</div><div class="strip-value">${data.conversionRate != null ? data.conversionRate + '%' : '-'}</div></div>
+        <div class="strip-card"><div class="strip-label">Avg / median response</div><div class="strip-value">${data.avgResponseMinutes != null ? data.avgResponseMinutes + 'm' : '-'}${data.medianResponseMinutes != null ? ` <span style="font-size:13px;color:var(--muted);font-weight:500;">/ ${data.medianResponseMinutes}m</span>` : ''}</div></div>
         <div class="strip-card">
           <div class="strip-label">This week vs last</div>
           <div class="strip-value" style="display:flex;align-items:baseline;gap:6px;">
@@ -4770,7 +4717,7 @@
                   <td style="padding:10px 16px;">${esc(s.username)}</td>
                   <td style="padding:10px 16px;">${s.responded}</td>
                   <td style="padding:10px 16px;color:var(--ok-text);">${s.accepted}</td>
-                  <td style="padding:10px 16px;">${s.avgResponseMinutes != null ? s.avgResponseMinutes + 'm' : '—'}</td>
+                  <td style="padding:10px 16px;">${s.avgResponseMinutes != null ? s.avgResponseMinutes + 'm' : '-'}</td>
                 </tr>`).join('') : `<tr><td style="padding:16px;color:var(--muted);" colspan="4">No responses yet.</td></tr>`}
             </tbody>
           </table>
@@ -4810,7 +4757,7 @@
                 <td style="padding:10px 16px;">${esc(p.position)}</td>
                 <td style="padding:10px 16px;">${p.applications}</td>
                 <td style="padding:10px 16px;color:var(--ok-text);">${p.accepted}</td>
-                <td style="padding:10px 16px;">${p.applications ? Math.round((p.accepted / p.applications) * 1000) / 10 + '%' : '—'}</td>
+                <td style="padding:10px 16px;">${p.applications ? Math.round((p.accepted / p.applications) * 1000) / 10 + '%' : '-'}</td>
               </tr>`).join('') : `<tr><td style="padding:16px;color:var(--muted);" colspan="4">No applications yet.</td></tr>`}
           </tbody>
         </table>
@@ -5249,7 +5196,7 @@
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Something went wrong while reading the shared request list.';
         }
-        if (myGen !== renderGen) return; // navigated away while this was loading
+        if (myGen !== renderGen) return;
         loading = false;
         paintShell();
       }
@@ -5411,12 +5358,6 @@
         return Array.from(map.entries()).map(([label, v]) => ({ label, ...v })).sort((a, b) => b.amount - a.amount);
       }
 
-      // A person can show up with roblox_user_id set on some requests and
-      // null on others (e.g. requests logged before their id was on file),
-      // and Roblox usernames can change over time. Grouping by the raw
-      // username string alone splits one person into several rows, so
-      // prefer the stable numeric id and only fall back to a
-      // case-insensitive username when no id is present.
       function ownerKey(r) {
         return r.robloxUserId != null ? ('id:' + r.robloxUserId) : ('name:' + (r.robloxUsername || '').toLowerCase());
       }
@@ -5428,8 +5369,6 @@
           const cur = map.get(key) || { robloxUserId: r.robloxUserId, robloxUsername: null, robux: 0, usd: 0, count: 0, paymentMethod: null };
           if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
           cur.count += 1;
-          // rows arrive newest-first, so the first request we see for a person
-          // reflects their current username/payment method rather than an old one.
           if (!cur.robloxUsername && r.robloxUsername) cur.robloxUsername = r.robloxUsername;
           if (!cur.paymentMethod && r.paymentMethod) cur.paymentMethod = r.paymentMethod;
           if (cur.robloxUserId == null && r.robloxUserId != null) cur.robloxUserId = r.robloxUserId;
@@ -8264,7 +8203,7 @@
       const canRevert = hasPermission('audit.revert');
       const canBackup = hasPermission('backups.manage');
 
-      let tab = 'logs'; // 'logs' | 'backups'
+      let tab = 'logs';
 
       let logs = [];
       let logsLoading = true;
@@ -8278,7 +8217,7 @@
       let backupsError = null;
       let backupAllBusy = false;
       let backupMsg = null;
-      let backupBusyId = null; // id currently being loaded/restored
+      let backupBusyId = null;
 
       window.__refreshCurrentAuditPage = () => { if (renderGen === myGen && tab === 'logs') loadLogs(); };
 

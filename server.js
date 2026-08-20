@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const zlib = require('zlib');
 const { createClient } = require('@supabase/supabase-js');
 let webpush = null;
-try { webpush = require('web-push'); } catch (e) { /* optional dependency - see below */ }
+try { webpush = require('web-push'); } catch (e) { }
 require('dotenv').config();
 
 const PORT = process.env.PORT || 3000;
@@ -18,19 +18,13 @@ const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 const STATE_LIFETIME_MS = 10 * 60 * 1000;
 const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 
-// --- Recruitment system (Discord OAuth + tickets) ---------------------------
-// Optional: the app boots fine without these, but the recruitment flow and
-// Discord notifications are disabled until they're set.
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_NOTIFY_CHANNEL_ID = process.env.DISCORD_NOTIFY_CHANNEL_ID;
-// The recruit session starts short-lived (just long enough to finish
-// applying), then gets extended once a ticket exists so the applicant can
-// come back and check status/chat for a while without re-authenticating.
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
-const RECRUIT_SESSION_PORTAL_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+const RECRUIT_SESSION_PORTAL_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const DISCORD_CONFIGURED = !!(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI);
 if (!DISCORD_CONFIGURED) {
     console.warn('Discord recruitment OAuth is not configured (DISCORD_CLIENT_ID/SECRET/REDIRECT_URI missing) - the recruitment flow will be disabled until it is.');
@@ -39,7 +33,6 @@ if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) {
     console.warn('DISCORD_BOT_TOKEN/DISCORD_NOTIFY_CHANNEL_ID not set - new recruitment tickets will not be posted to Discord.');
 }
 
-// --- Web Push (applicant notifications) --------------------------------------
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_CONTACT_EMAIL = process.env.VAPID_CONTACT_EMAIL || 'mailto:admin@playverse.cc';
@@ -199,8 +192,6 @@ app.use(cors({
     allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning']
 }));
 
-// 8mb limit so chat image attachments (sent as base64) fit through - the
-// rest of the app's payloads are tiny, so this only matters for uploads.
 app.use(express.json({ limit: '8mb' }));
 
 app.get('/ping', (req, res) => {
@@ -248,13 +239,6 @@ function generateRequestId() {
     return `PV_${rand}_${stamp}`;
 }
 
-// ---------------------------------------------------------------------------
-// Recruitment: recruit sessions, Discord link helpers, Discord notifications
-// ---------------------------------------------------------------------------
-
-// Looks up the short-lived "applicant" identity created when someone signs in
-// with Roblox but isn't eligible for the HR tool yet. Deliberately not the
-// same table/shape as hr_sessions - it carries no roles or permissions.
 async function getRecruitSession(req) {
     const token = getBearerToken(req) || (req.query && req.query.rt) || (req.body && req.body.rt);
     if (!token) return null;
@@ -277,13 +261,6 @@ async function createRecruitSession(robloxUserId, robloxUsername) {
     return token;
 }
 
-// Everyone currently holding a role that grants recruitment.respond - this is
-// the "signed up with recruitment role" list used for the referred-by picker
-// and for per-staff analytics. Covers both ways a role can be held in this
-// app: an explicit manual assignment (user_role_assignments), and a role
-// that's auto-granted by Roblox group rank - the latter has no row in any
-// table, so it has to be resolved live against the Roblox Group API.
-// Cached briefly since this can involve a handful of Roblox API calls.
 let recruitersCache = { at: 0, data: null };
 const RECRUITERS_CACHE_MS = 5 * 60 * 1000;
 
@@ -296,7 +273,7 @@ async function fetchGroupRoleMembers(groupId, rank) {
         if (!roleset) return [];
         const members = [];
         let cursor = '';
-        for (let page = 0; page < 10; page++) { // hard cap so a huge group can't hang this request
+        for (let page = 0; page < 10; page++) {
             const url = `https://groups.roblox.com/v1/groups/${groupId}/roles/${roleset.id}/users?limit=100${cursor ? '&cursor=' + encodeURIComponent(cursor) : ''}`;
             const res = await fetch(url);
             if (!res.ok) break;
@@ -325,7 +302,6 @@ async function listRecruiters({ skipCache } = {}) {
 
     const byId = new Map();
 
-    // 1) Explicit manual assignments - always counts, regardless of link_only.
     const { data: assignments, error: assignErr } = await supabase
         .from('user_role_assignments')
         .select('roblox_user_id, roblox_username')
@@ -333,8 +309,6 @@ async function listRecruiters({ skipCache } = {}) {
     if (assignErr) throw new Error(assignErr.message);
     (assignments || []).forEach(a => { if (!byId.has(a.roblox_user_id)) byId.set(a.roblox_user_id, a.roblox_username); });
 
-    // 2) Roles auto-granted by Roblox group rank (not link_only, has a group
-    // + specific rank set) - resolve live against the Roblox Group API.
     const groupRankRoles = recruiterRoles.filter(r => !r.link_only && r.roblox_group_id != null && r.min_rank != null);
     for (const role of groupRankRoles) {
         const members = await fetchGroupRoleMembers(role.roblox_group_id, role.min_rank);
@@ -365,9 +339,6 @@ async function discordApi(path, options) {
     return text ? JSON.parse(text) : null;
 }
 
-// Posts an embed to the notify channel when a new ticket comes in. Best
-// effort - a Discord outage should never block someone's application from
-// being saved.
 async function notifyDiscordNewTicket(ticket) {
     if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) return;
     try {
@@ -387,9 +358,6 @@ async function notifyDiscordNewTicket(ticket) {
                     footer: { text: `Ticket ${ticket.id}` },
                     timestamp: new Date().toISOString()
                 }],
-                // These custom_ids are handled by the companion discord-bot -
-                // see discord-bot/index.js. The dashboard link always works
-                // even if the bot is offline.
                 components: [{
                     type: 1,
                     components: [
@@ -420,11 +388,6 @@ async function notifyDiscordStatusChange(ticket, newStatus, byUsername) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Applicant browser push notifications (opt-in) - status changes + new
-// staff messages. Best effort: a failed/expired subscription is deleted so
-// it stops being retried, but never blocks the underlying action.
-// ---------------------------------------------------------------------------
 async function sendPushToApplicant(robloxUserId, { title, body, url }) {
     if (!PUSH_CONFIGURED) return;
     try {
@@ -438,7 +401,6 @@ async function sendPushToApplicant(robloxUserId, { title, body, url }) {
                     keys: { p256dh: sub.p256dh, auth: sub.auth }
                 }, payload);
             } catch (e) {
-                // 404/410 = subscription is gone (browser unsubscribed, expired, etc) - clean it up.
                 if (e.statusCode === 404 || e.statusCode === 410) {
                     await supabase.from('recruit_push_subscriptions').delete().eq('id', sub.id);
                 } else {
@@ -451,10 +413,6 @@ async function sendPushToApplicant(robloxUserId, { title, body, url }) {
     }
 }
 
-// Uploads a base64 data-URL image to Supabase Storage and returns its public
-// URL. Used for chat attachments from both the staff dashboard and the
-// applicant status panel. Keeps a hard size cap regardless of what the
-// client claims, since data-URL length is easy to check before upload.
 const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 async function uploadChatAttachment(dataUrl, pathPrefix) {
     const match = /^data:(image\/(?:png|jpeg|jpg|gif|webp));base64,(.+)$/.exec(dataUrl || '');
@@ -522,14 +480,6 @@ async function getDevexRate() {
     return data && data.devex_rate != null ? Number(data.devex_rate) : 0;
 }
 
-// When someone sets their payout method to PayPal or Venmo, any of their
-// still-pending Robux requests can't actually be paid out that way, so we
-// convert them to a USD amount (using the current DevEx rate) automatically
-// instead of leaving them stuck in a currency that no longer matches how
-// they get paid. Symmetrically, if they switch back to the Robux/DevEx
-// payout method, any still-pending USD requests get converted back to
-// Robux. Requests that are already paid/rejected, or already in the
-// matching currency, are left alone.
 async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, method) {
     let fromCurrency, toCurrency;
     if (method === 'PAYPAL' || method === 'VENMO') {
@@ -568,16 +518,9 @@ async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, m
             return supabase.from('payment_requests').update({ payment: amount, currency: toCurrency }).eq('id', row.id);
         }));
     } catch (e) {
-        // Best-effort - if this fails, the payment method itself was still saved successfully.
     }
 }
 
-// Sweep for any pending Robux request whose owner's *currently saved*
-// payment method is PayPal or Venmo, and convert it to USD. This catches
-// cases the point-in-time conversion (above) can miss - e.g. a request
-// logged before the person ever set a payment method, or a method that
-// was set through a path that predates this feature. Called on every
-// dashboard/"My payments" load so it self-heals over time.
 async function convertPendingRobuxForCashMethodUsers(filter) {
     try {
         let query = supabase
@@ -625,7 +568,6 @@ async function convertPendingRobuxForCashMethodUsers(filter) {
             return supabase.from('payment_requests').update({ payment: usdAmount, currency: 'USD' }).eq('id', row.id);
         }));
     } catch (e) {
-        // Best-effort - a failure here shouldn't block loading the requests.
     }
 }
 
@@ -633,8 +575,6 @@ async function checkBaseAccess(robloxUserId) {
     const base = await getBaseAccessConfig();
     if (!base.groupId) return { allowed: true, base };
 
-    // A manual role assignment overrides the base group/rank requirement,
-    // same as it does in computeAccess().
     const { data: manualRows, error: manualErr } = await supabase
         .from('user_role_assignments')
         .select('id')
@@ -667,10 +607,6 @@ async function computeAccess(robloxUserId) {
 
     const matchedRoles = (roles || []).filter(role => {
         if (manualRoleIds.has(role.id)) return true;
-        // Link-only roles never auto-grant off group rank. They can only be
-        // picked up through a manual assignment, which includes claiming an
-        // onboarding link. min_rank still applies at claim time as a
-        // safeguard, but it does not grant the role on its own.
         if (role.link_only) return false;
         if (role.roblox_group_id != null) {
             const rank = rankByGroupId[role.roblox_group_id];
@@ -684,10 +620,6 @@ async function computeAccess(robloxUserId) {
     const permissionSet = new Set();
     matchedRoles.forEach(role => (role.permissions || []).forEach(p => permissionSet.add(p)));
 
-    // The highest hierarchy value among a user's matched roles. This is used to
-    // gate "configure" and "moderate" actions so someone can only manage roles,
-    // role assignments, or staff (warn/ban) that sit strictly below their own
-    // level - never at or above it.
     const maxHierarchy = matchedRoles.reduce((max, role) => Math.max(max, Number(role.hierarchy) || 0), 0);
 
     return {
@@ -697,8 +629,6 @@ async function computeAccess(robloxUserId) {
     };
 }
 
-// Hierarchy level (0 if none) of a specific Roblox user, based on the roles
-// they currently qualify for (manual assignment or group rank).
 async function getUserHierarchy(robloxUserId) {
     try {
         const access = await computeAccess(robloxUserId);
@@ -711,8 +641,6 @@ async function getUserHierarchy(robloxUserId) {
 async function computeGroupEligibility(robloxUserId) {
     const results = [];
 
-    // Onboarding must be fully completed - this includes accepting the
-    // Terms of Service and Acceptable Use Policy, which are required steps.
     const requiredStepIds = ONBOARDING_STEPS.filter(s => s.required).map(s => s.id);
     const { data: progress, error: progErr } = await supabase
         .from('staff_onboarding_progress')
@@ -730,7 +658,6 @@ async function computeGroupEligibility(robloxUserId) {
         metaLabel: onboardingComplete ? 'Onboarding complete' : 'Onboarding not completed'
     });
 
-    // A payment method must be on file so a payout can actually be sent.
     const { data: paymentMethod, error: pmErr } = await supabase
         .from('payment_methods')
         .select('roblox_user_id')
@@ -785,10 +712,6 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
     if (!token) return null;
     const { data: link } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
     if (!link) return null;
-    // Each row is one team membership for this user, keyed on (roblox_user_id,
-    // team_id), so claiming a link for a new team adds to their existing
-    // teams instead of replacing them. Re-claiming a link for a team they're
-    // already on just refreshes the skillset/source on that same row.
     await supabase.from('user_assignments').upsert({
         roblox_user_id: robloxUserId,
         roblox_username: robloxUsername,
@@ -800,10 +723,6 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
     if (link.role_id) {
         const { data: role, error: roleErr } = await supabase.from('roles').select('*').eq('id', link.role_id).maybeSingle();
         if (roleErr) throw roleErr;
-        // For a link-only role, min_rank is a safeguard on the link itself:
-        // the person still has to actually be at that exact rank before the
-        // link can hand out the role. It never grants the role on its own
-        // at login, only here at claim time, and only on an exact match.
         let meetsRankSafeguard = true;
         if (role && role.link_only && role.min_rank != null && role.roblox_group_id != null) {
             const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
@@ -824,9 +743,6 @@ async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
     return link;
 }
 
-// Every team a given user belongs to, with the team and skillset details
-// resolved. Replaces the old "single assignment" model - a user can now be
-// on any number of teams at once.
 async function getUserTeamAssignments(robloxUserId) {
     const { data: rows, error } = await supabase
         .from('user_assignments')
@@ -876,10 +792,6 @@ function requirePermission(res, session, permission) {
     return false;
 }
 
-// Ensures the acting session's hierarchy is strictly higher than the
-// hierarchy of whatever they're trying to configure or moderate (a role, a
-// role assignment, or another staff member). Equal or lower hierarchy is
-// rejected, so a role can never be used to manage itself or anything above it.
 function requireHigherHierarchy(res, session, targetHierarchy) {
     const actorHierarchy = Number(session && session.max_hierarchy) || 0;
     if (actorHierarchy > (Number(targetHierarchy) || 0)) return true;
@@ -887,31 +799,6 @@ function requireHigherHierarchy(res, session, targetHierarchy) {
     return false;
 }
 
-// ---------------------------------------------------------------------------
-// Audit log
-//
-// Every meaningful write (payments, moderation, backups) is recorded to the
-// `audit_logs` table. `revert` (when provided) describes how to undo the
-// action - it's interpreted by revertAuditLog() below. Logging is
-// best-effort: a logging failure never blocks the underlying action.
-//
-// Expected schema (create in Supabase):
-//   create table audit_logs (
-//     id uuid primary key default gen_random_uuid(),
-//     category text not null,           -- 'payments' | 'moderation' | 'backups'
-//     action text not null,             -- e.g. 'mark_paid', 'add_user_warning'
-//     actor_user_id bigint,
-//     actor_username text,
-//     target_user_id bigint,
-//     target_username text,
-//     details jsonb,
-//     revert_data jsonb,
-//     reverted boolean not null default false,
-//     reverted_by text,
-//     reverted_at timestamptz,
-//     created_at timestamptz not null default now()
-//   );
-// ---------------------------------------------------------------------------
 async function logAudit(session, { category, action, targetUserId, targetUsername, details, revert }) {
     try {
         const { data, error } = await supabase.from('audit_logs').insert({
@@ -934,7 +821,6 @@ async function logAudit(session, { category, action, targetUserId, targetUsernam
     }
 }
 
-// Applies the inverse of a previously logged action. Returns { ok, error? }.
 async function applyRevert(revert) {
     if (!revert || !revert.type) return { ok: false, error: 'nothing_to_revert' };
     switch (revert.type) {
@@ -985,21 +871,6 @@ async function applyRevert(revert) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Backups
-//
-// Expected schema (create in Supabase):
-//   create table backups (
-//     id uuid primary key default gen_random_uuid(),
-//     created_by text,
-//     trigger text not null,           -- 'manual' | 'scheduled'
-//     tables jsonb,
-//     row_counts jsonb,
-//     size_bytes integer,
-//     data_gz text,                    -- gzip+base64 compact JSON dump
-//     created_at timestamptz not null default now()
-//   );
-// ---------------------------------------------------------------------------
 const BACKUP_TABLES = [
     'payment_requests', 'payment_methods', 'staff_warnings', 'banned_users',
     'roles', 'user_role_assignments', 'teams', 'skillsets', 'user_assignments',
@@ -1033,8 +904,6 @@ async function runBackup(trigger, actorUsername) {
     return data;
 }
 
-// Runs a scheduled backup every 6 hours. A first scheduled backup runs
-// shortly after startup so a recent snapshot always exists.
 const BACKUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 setTimeout(() => {
     runBackup('scheduled', 'system').catch(e => console.error('scheduled backup failed:', e.message));
@@ -1188,10 +1057,6 @@ app.get('/roblox-auth-callback', async (req, res) => {
         return;
     }
     if (!baseCheck.allowed) {
-        // Not eligible for the HR tool itself - instead of a dead end, hand
-        // them a short-lived recruit session and send them to the
-        // recruitment gate, where the frontend offers to start an
-        // application (which then also requires linking Discord).
         try {
             const rt = await createRecruitSession(robloxUserId, robloxUsername);
             res.redirect(`${APP_ORIGIN}/#/recruit?rt=${encodeURIComponent(rt)}`);
@@ -1231,10 +1096,6 @@ app.get('/roblox-auth-callback', async (req, res) => {
 
     res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
 });
-
-// ---------------------------------------------------------------------------
-// Recruitment: recruit-session lookup + Discord OAuth
-// ---------------------------------------------------------------------------
 
 app.get('/recruit-session', async (req, res) => {
     const session = await getRecruitSession(req);
@@ -1328,9 +1189,6 @@ app.get('/discord-auth-callback', async (req, res) => {
     res.redirect(`${APP_ORIGIN}/#/recruit/apply?rt=${encodeURIComponent(recruitSession.token)}`);
 });
 
-// Ticket submission - requires a recruit session with Discord already linked.
-// Intentionally not gated by any hr permission: the whole point is that the
-// applicant doesn't have HR access yet.
 app.post('/recruitment/apply', async (req, res) => {
     const recruitSession = await getRecruitSession(req);
     if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
@@ -1365,8 +1223,6 @@ app.post('/recruitment/apply', async (req, res) => {
         if (match) referredByUsername = match.robloxUsername;
     }
 
-    // Keep a standing Discord<->Roblox link for this person too - useful once
-    // they're hired and become staff.
     await supabase.from('discord_links').upsert({
         roblox_user_id: recruitSession.roblox_user_id,
         roblox_username: recruitSession.roblox_username,
@@ -1392,9 +1248,6 @@ app.post('/recruitment/apply', async (req, res) => {
 
     if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
 
-    // Extend this recruit session to a long-lived "portal" session so they
-    // can come back over the following weeks/months to check status and
-    // chat, without needing to redo the whole Roblox + Discord sign-in.
     const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
     await supabase.from('recruit_sessions').update({ expires_at: portalExpiresAt }).eq('token', recruitSession.token);
 
@@ -1402,9 +1255,6 @@ app.post('/recruitment/apply', async (req, res) => {
     res.json({ ok: true, data: { id: ticket.id } });
 });
 
-// Applicant-facing "recruit panel" - lets someone who already applied check
-// their status and chat, using the same recruit-session bearer token (now
-// long-lived, extended above once their ticket was created).
 app.get('/recruitment/my-ticket', async (req, res) => {
     const recruitSession = await getRecruitSession(req);
     if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
@@ -1423,7 +1273,7 @@ app.get('/recruitment/my-ticket', async (req, res) => {
         .from('recruitment_messages')
         .select('*')
         .eq('ticket_id', ticket.id)
-        .eq('internal_note', false) // applicants never see internal staff notes
+        .eq('internal_note', false)
         .order('created_at', { ascending: true });
     if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
 
@@ -1469,8 +1319,6 @@ app.post('/recruitment/my-ticket/message', async (req, res) => {
     res.json({ ok: true });
 });
 
-// Shared VAPID public key so the frontend can subscribe to push. Not a
-// secret - it's meant to be public (that's how Web Push works).
 app.get('/recruitment/push-public-key', (req, res) => {
     res.json({ ok: true, publicKey: PUSH_CONFIGURED ? VAPID_PUBLIC_KEY : null });
 });
@@ -1498,8 +1346,6 @@ app.post('/recruitment/push-unsubscribe', async (req, res) => {
     res.json({ ok: true });
 });
 
-// Public (no auth) - just names, used to populate the "who referred you?"
-// select on the application form itself.
 app.get('/recruitment/recruiters', async (req, res) => {
     try {
         const recruiters = await listRecruiters();
@@ -1533,7 +1379,6 @@ app.get('/hr-session', async (req, res) => {
         maxHierarchy: session.max_hierarchy || 0
     });
 });
-
 
 app.delete('/hr-session', async (req, res) => {
     const token = getBearerToken(req);
@@ -1616,8 +1461,6 @@ app.post('/hr-data', async (req, res) => {
         const userIds = [...new Set(rows.filter(r => r.roblox_user_id != null).map(r => r.roblox_user_id))];
         const usernames = [...new Set(rows.filter(r => r.roblox_user_id == null && r.roblox_username).map(r => r.roblox_username))];
 
-        // All four of these only depend on userIds/usernames (already known),
-        // not on each other, so fetch them together instead of waterfalling.
         const [byIdRes, byUsernameRes, sessionRolesRes, assignmentsRes] = await Promise.all([
             userIds.length ? supabase.from('payment_methods').select('*').in('roblox_user_id', userIds) : Promise.resolve({ data: [] }),
             usernames.length ? supabase.from('payment_methods').select('*').in('roblox_username', usernames) : Promise.resolve({ data: [] }),
@@ -1661,8 +1504,6 @@ app.post('/hr-data', async (req, res) => {
             r.payment_method = m ? { method: m.method, details: m.details || {} } : null;
 
             r.requester_roles = r.roblox_user_id != null ? (rolesByUserId[r.roblox_user_id] || []) : [];
-            // A requester can belong to several teams now, so join their team
-            // names/skillset names together rather than picking just one.
             const assigns = r.roblox_user_id != null ? (assignsByUserId[r.roblox_user_id] || []) : [];
             const teamNames = [...new Set(assigns.filter(a => a.team_id != null).map(a => teamNameById[a.team_id]).filter(Boolean))];
             const skillsetNames = [...new Set(assigns.filter(a => a.skillset_id != null).map(a => skillsetNameById[a.skillset_id]).filter(Boolean))];
@@ -1696,10 +1537,6 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'mark_all_paid') {
         if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
-        // Same "match by user id, fall back to username" pattern used
-        // elsewhere - a person can have some older requests logged before
-        // they had a roblox_user_id on file, or under a since-changed
-        // username, so matching on username alone would miss those.
         const robloxUserId = payload.robloxUserId != null && payload.robloxUserId !== '' ? Number(payload.robloxUserId) : null;
         const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : '';
         if (robloxUserId == null && !robloxUsername) { res.status(400).json({ ok: false, error: 'missing_user' }); return; }
@@ -1844,8 +1681,6 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'admin_set_payment_method') {
-        // Lets staff manually put a payment method on file for someone else,
-        // e.g. when the person can't or hasn't added their own yet.
         if (!requirePermission(res, session, 'staff.moderate')) return;
         const robloxUserId = Number(payload.robloxUserId);
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
@@ -1960,11 +1795,6 @@ app.post('/hr-data', async (req, res) => {
             if (!userId) { res.status(404).json({ ok: false, error: 'roblox_user_not_found' }); return; }
             let data = await computeGroupEligibility(userId);
 
-            // When "Ignore Eligibility for All Requests" is enabled, requests can be
-            // submitted regardless of group membership, onboarding/ToS status, or
-            // payment method on file. The real underlying status stays in each entry
-            // (isMember/metaLabel) for transparency, but `eligible` is forced true so
-            // the submit flow does not block on it.
             const ignoreEligibility = await getIgnoreEligibilityConfig();
             if (ignoreEligibility) {
                 data = data.map(entry => ({ ...entry, eligible: true, overridden: true }));
@@ -2079,8 +1909,6 @@ app.post('/hr-data', async (req, res) => {
         const hierarchy = payload.hierarchy === '' || payload.hierarchy == null ? 0 : Number(payload.hierarchy);
         const linkOnly = !!payload.linkOnly;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
-        // A role can't be created at or above the creator's own hierarchy -
-        // otherwise someone could hand out a role more senior than themselves.
         if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const { error } = await supabase.from('roles').insert({
             name,
@@ -2102,7 +1930,6 @@ app.post('/hr-data', async (req, res) => {
         const { data: existingRole, error: existingErr } = await supabase.from('roles').select('hierarchy').eq('id', id).maybeSingle();
         if (existingErr) { res.status(500).json({ ok: false, error: existingErr.message }); return; }
         if (!existingRole) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
-        // Can't edit a role that's already at or above your own level...
         if (!requireHigherHierarchy(res, session, existingRole.hierarchy)) return;
         const name = payload.name != null ? String(payload.name).trim() : null;
         if (payload.name != null && !name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
@@ -2110,7 +1937,6 @@ app.post('/hr-data', async (req, res) => {
         const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
         const hierarchy = payload.hierarchy === '' || payload.hierarchy == null ? 0 : Number(payload.hierarchy);
         const linkOnly = !!payload.linkOnly;
-        // ...and can't promote it to or above your own level either.
         if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
         const update = {
@@ -2161,7 +1987,6 @@ app.post('/hr-data', async (req, res) => {
         const { data: role, error: roleErr } = await supabase.from('roles').select('hierarchy').eq('id', roleId).maybeSingle();
         if (roleErr) { res.status(500).json({ ok: false, error: roleErr.message }); return; }
         if (!role) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
-        // Can't hand out a role that's at or above your own level.
         if (!requireHigherHierarchy(res, session, role.hierarchy)) return;
 
         const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
@@ -2188,8 +2013,6 @@ app.post('/hr-data', async (req, res) => {
             .maybeSingle();
         if (assignErr) { res.status(500).json({ ok: false, error: assignErr.message }); return; }
         if (!assignment) { res.status(404).json({ ok: false, error: 'assignment_not_found' }); return; }
-        // Can't revoke a role assignment that's at or above your own level either -
-        // otherwise a lower role could strip a higher one from someone else.
         if (!requireHigherHierarchy(res, session, assignment.roles && assignment.roles.hierarchy)) return;
         const { error } = await supabase.from('user_role_assignments').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
@@ -2277,8 +2100,6 @@ app.post('/hr-data', async (req, res) => {
             if (progressRes.error) throw progressRes.error;
             if (teamAssignRes.error) throw teamAssignRes.error;
 
-            // Used by the client to grey out warn/ban/assign actions against staff
-            // whose highest role sits at or above the viewer's own hierarchy level.
             const hierarchyByRoleName = {};
             (rolesRes.data || []).forEach(r => { hierarchyByRoleName[r.name] = Number(r.hierarchy) || 0; });
 
@@ -2373,8 +2194,6 @@ app.post('/hr-data', async (req, res) => {
                     skillsetId: ta.skillset_id,
                     skillsetName: ta.skillset_id != null ? (skillsetNameById[ta.skillset_id] || null) : null
                 })).filter(t => t.teamName || t.skillsetName);
-                // Kept for backward compatibility with anything still reading
-                // a single team/skillset off a staff row (e.g. quick display).
                 row.team = row.teams.map(t => t.teamName).filter(Boolean).join(', ') || null;
                 row.skillset = [...new Set(row.teams.map(t => t.skillsetName).filter(Boolean))].join(', ') || null;
             });
@@ -2404,8 +2223,6 @@ app.post('/hr-data', async (req, res) => {
         }
         return;
     }
-
-    // ---- Teams & skillsets (onboarding customization) ----
 
     if (action === 'list_teams') {
         const { data, error } = await supabase.from('teams').select('*').order('name', { ascending: true });
@@ -2676,8 +2493,6 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'get_my_assignment') {
-        // Returns an array now - a user can be on any number of teams, each
-        // with its own skillset, instead of just one.
         try {
             const assignments = await getUserTeamAssignments(session.roblox_user_id);
             res.json({ ok: true, data: assignments });
@@ -2706,12 +2521,7 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-
     if (action === 'assign_user_team_skillset') {
-        // Adds (or updates the skillset on) one team membership for the
-        // user. Since a user can now be on multiple teams at once, this no
-        // longer touches their other team memberships - it only ever
-        // upserts the single (user, team) row identified by teamId.
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         const robloxUserId = Number(payload.robloxUserId);
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
@@ -2795,8 +2605,6 @@ app.post('/hr-data', async (req, res) => {
         const reason = payload.reason ? String(payload.reason).trim() : '';
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
         if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
-        // Can't warn (or, via the 3-warning auto-ban, effectively ban) staff
-        // whose own role sits at or above the moderator's hierarchy level.
         const targetHierarchy = await getUserHierarchy(robloxUserId);
         if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
         let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
@@ -2886,9 +2694,6 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-    // -----------------------------------------------------------------------
-    // Audit logs
-    // -----------------------------------------------------------------------
     if (action === 'list_audit_logs') {
         if (!requirePermission(res, session, 'audit.view')) return;
         const category = payload.category && payload.category !== 'all' ? String(payload.category) : null;
@@ -3019,9 +2824,6 @@ app.post('/hr-data', async (req, res) => {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Backups
-    // -----------------------------------------------------------------------
     if (action === 'backup_all_data') {
         if (!requirePermission(res, session, 'backups.manage')) return;
         try {
@@ -3072,7 +2874,7 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'restore_backup') {
         if (!requirePermission(res, session, 'backups.manage')) return;
-        if (!requirePermission(res, session, 'roles.manage')) return; // extra guard: destructive action
+        if (!requirePermission(res, session, 'roles.manage')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data, error } = await supabase.from('backups').select('*').eq('id', id).maybeSingle();
@@ -3089,9 +2891,6 @@ app.post('/hr-data', async (req, res) => {
             return;
         }
 
-        // Restore is an additive upsert per table (matched on primary key) -
-        // it never deletes rows that exist now but weren't in the backup,
-        // to avoid silently wiping newer data.
         const summary = {};
         for (const table of (parsed.tables || [])) {
             const rows = (parsed.dump && parsed.dump[table]) || [];
@@ -3108,9 +2907,6 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-    // -----------------------------------------------------------------------
-    // Recruitment (staff side - everything here requires an hr_session)
-    // -----------------------------------------------------------------------
     if (action === 'recruitment_list_recruiters') {
         if (!requirePermission(res, session, 'recruitment.view')) return;
         try {
@@ -3178,8 +2974,6 @@ app.post('/hr-data', async (req, res) => {
         });
         if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
 
-        // First staff reply on a ticket sets the response-time clock used by
-        // analytics; later replies don't move it.
         const updates = { updated_at: new Date().toISOString() };
         if (!ticket.first_response_at) {
             updates.first_response_at = new Date().toISOString();
@@ -3200,8 +2994,6 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-    // Shared image upload for the staff ticket chat (applicant side has its
-    // own /recruitment/my-ticket/message which uploads inline instead).
     if (action === 'recruitment_upload_attachment') {
         if (!requirePermission(res, session, 'recruitment.respond')) return;
         const dataUrl = payload.dataUrl ? String(payload.dataUrl) : '';
@@ -3284,8 +3076,6 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-    // Analytics: response leaderboard per staff member, funnel totals, and a
-    // simple time series of applications received per day.
     if (action === 'recruitment_analytics') {
         if (!requirePermission(res, session, 'recruitment.analytics')) return;
         const { data: tickets, error } = await supabase.from('recruitment_tickets').select('*');
@@ -3351,14 +3141,9 @@ app.post('/hr-data', async (req, res) => {
             return Math.round(mins.length % 2 ? mins[mid] : (mins[mid - 1] + mins[mid]) / 2);
         })();
 
-        // Funnel + conversion: of everything that's been *decided* (closed),
-        // what fraction ended up hired? Still-open tickets are excluded so
-        // this doesn't get diluted by a backlog of untouched applications.
         const closed = all.filter(t => ['accepted', 'rejected', 'withdrawn'].includes(t.status));
         const conversionRate = closed.length ? Math.round((totals.accepted / closed.length) * 1000) / 10 : null;
 
-        // Which positions people are applying for, and how many of each
-        // actually get hired - surfaces where the pipeline is thin.
         const byPosition = {};
         all.forEach(t => {
             const key = t.position && t.position.trim() ? t.position.trim() : 'Not specified';
@@ -3368,8 +3153,6 @@ app.post('/hr-data', async (req, res) => {
         });
         const positionBreakdown = Object.values(byPosition).sort((a, b) => b.applications - a.applications);
 
-        // This week vs last week, so a spike/drop in volume is visible at a
-        // glance rather than buried in the daily timeline.
         const now = Date.now();
         const oneDay = 24 * 60 * 60 * 1000;
         const last7 = all.filter(t => now - new Date(t.created_at).getTime() <= 7 * oneDay).length;

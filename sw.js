@@ -1,10 +1,3 @@
-// PlayVerse recruitment - push notification service worker.
-//
-// This file must be served from the SAME ORIGIN as index.html, at the site
-// root (e.g. https://your-frontend-domain/sw.js), because the browser
-// Push API requires the service worker's scope to cover the page that
-// registered it. It does not need to live on the API server.
-
 self.addEventListener('push', event => {
     let payload = { title: 'PlayVerse', body: 'You have an update.' };
     try { payload = event.data.json(); } catch (e) { }
