@@ -16,6 +16,23 @@ const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 const STATE_LIFETIME_MS = 10 * 60 * 1000;
 const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 
+// --- Recruitment system (Discord OAuth + tickets) ---------------------------
+// Optional: the app boots fine without these, but the recruitment flow and
+// Discord notifications are disabled until they're set.
+const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const DISCORD_NOTIFY_CHANNEL_ID = process.env.DISCORD_NOTIFY_CHANNEL_ID;
+const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
+const DISCORD_CONFIGURED = !!(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI);
+if (!DISCORD_CONFIGURED) {
+    console.warn('Discord recruitment OAuth is not configured (DISCORD_CLIENT_ID/SECRET/REDIRECT_URI missing) - the recruitment flow will be disabled until it is.');
+}
+if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) {
+    console.warn('DISCORD_BOT_TOKEN/DISCORD_NOTIFY_CHANNEL_ID not set - new recruitment tickets will not be posted to Discord.');
+}
+
 const requiredEnv = {
     APP_ORIGIN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
     ROBLOX_CLIENT_ID, ROBLOX_CLIENT_SECRET, ROBLOX_REDIRECT_URI
@@ -47,7 +64,11 @@ const PERMISSIONS = [
     'broadcasts.manage',
     'audit.view',
     'audit.revert',
-    'backups.manage'
+    'backups.manage',
+    'recruitment.view',
+    'recruitment.respond',
+    'recruitment.manage',
+    'recruitment.analytics'
 ];
 
 const TOS_CONTENT = `Last updated: August 2026
@@ -206,6 +227,130 @@ function generateRequestId() {
     const rand = Math.floor(100000 + Math.random() * 900000);
     const stamp = Date.now().toString(36).slice(-4);
     return `PV_${rand}_${stamp}`;
+}
+
+// ---------------------------------------------------------------------------
+// Recruitment: recruit sessions, Discord link helpers, Discord notifications
+// ---------------------------------------------------------------------------
+
+// Looks up the short-lived "applicant" identity created when someone signs in
+// with Roblox but isn't eligible for the HR tool yet. Deliberately not the
+// same table/shape as hr_sessions - it carries no roles or permissions.
+async function getRecruitSession(req) {
+    const token = getBearerToken(req) || (req.query && req.query.rt) || (req.body && req.body.rt);
+    if (!token) return null;
+    const { data, error } = await supabase.from('recruit_sessions').select('*').eq('token', token).maybeSingle();
+    if (error || !data) return null;
+    if (new Date(data.expires_at).getTime() < Date.now()) {
+        await supabase.from('recruit_sessions').delete().eq('token', token);
+        return null;
+    }
+    return data;
+}
+
+async function createRecruitSession(robloxUserId, robloxUsername) {
+    const token = randomToken(24);
+    const expiresAt = new Date(Date.now() + RECRUIT_SESSION_LIFETIME_MS).toISOString();
+    const { error } = await supabase.from('recruit_sessions').insert({
+        token, roblox_user_id: robloxUserId, roblox_username: robloxUsername, expires_at: expiresAt
+    });
+    if (error) throw new Error(error.message);
+    return token;
+}
+
+// Everyone currently holding a role that grants recruitment.respond - this is
+// the "signed up with recruitment role" list used for the referred-by picker
+// and for per-staff analytics. Sourced from manual role assignments, since
+// that's an explicit opt-in rather than an incidental group rank.
+async function listRecruiters() {
+    const { data: roles, error: rolesErr } = await supabase.from('roles').select('id, name, permissions');
+    if (rolesErr) throw new Error(rolesErr.message);
+    const recruiterRoleIds = (roles || [])
+        .filter(r => Array.isArray(r.permissions) && r.permissions.includes('recruitment.respond'))
+        .map(r => r.id);
+    if (!recruiterRoleIds.length) return [];
+    const { data: assignments, error: assignErr } = await supabase
+        .from('user_role_assignments')
+        .select('roblox_user_id, roblox_username')
+        .in('role_id', recruiterRoleIds);
+    if (assignErr) throw new Error(assignErr.message);
+    const byId = new Map();
+    (assignments || []).forEach(a => { if (!byId.has(a.roblox_user_id)) byId.set(a.roblox_user_id, a.roblox_username); });
+    return [...byId.entries()].map(([robloxUserId, robloxUsername]) => ({ robloxUserId, robloxUsername }))
+        .sort((a, b) => a.robloxUsername.localeCompare(b.robloxUsername));
+}
+
+async function discordApi(path, options) {
+    if (!DISCORD_BOT_TOKEN) throw new Error('discord_bot_not_configured');
+    const res = await fetch(`https://discord.com/api/v10${path}`, {
+        ...options,
+        headers: {
+            Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+            'Content-Type': 'application/json',
+            ...(options && options.headers)
+        }
+    });
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`discord_api_${res.status}: ${body}`);
+    }
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+}
+
+// Posts an embed to the notify channel when a new ticket comes in. Best
+// effort - a Discord outage should never block someone's application from
+// being saved.
+async function notifyDiscordNewTicket(ticket) {
+    if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) return;
+    try {
+        await discordApi(`/channels/${DISCORD_NOTIFY_CHANNEL_ID}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                embeds: [{
+                    title: 'New recruitment application',
+                    color: 0x3730D9,
+                    fields: [
+                        { name: 'Roblox', value: ticket.roblox_username, inline: true },
+                        { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
+                        { name: 'Position', value: ticket.position || 'Not specified', inline: true },
+                        { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
+                        { name: 'Why they want to join', value: (ticket.why_join || '').slice(0, 500) || 'N/A' }
+                    ],
+                    footer: { text: `Ticket ${ticket.id}` },
+                    timestamp: new Date().toISOString()
+                }],
+                // These custom_ids are handled by the companion discord-bot -
+                // see discord-bot/index.js. The dashboard link always works
+                // even if the bot is offline.
+                components: [{
+                    type: 1,
+                    components: [
+                        { type: 2, style: 3, label: 'Accept', custom_id: `recruit_accept_${ticket.id}` },
+                        { type: 2, style: 4, label: 'Reject', custom_id: `recruit_reject_${ticket.id}` },
+                        { type: 2, style: 2, label: 'Claim', custom_id: `recruit_claim_${ticket.id}` },
+                        { type: 2, style: 5, label: 'Open dashboard', url: `${APP_ORIGIN}/#/recruitment` }
+                    ]
+                }]
+            })
+        });
+    } catch (e) {
+        console.error('notifyDiscordNewTicket failed:', e.message);
+    }
+}
+
+async function notifyDiscordStatusChange(ticket, newStatus, byUsername) {
+    if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) return;
+    try {
+        await discordApi(`/channels/${DISCORD_NOTIFY_CHANNEL_ID}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                content: `**${ticket.roblox_username}**'s application was marked **${newStatus}** by ${byUsername}. <@${ticket.discord_user_id}>`
+            })
+        });
+    } catch (e) {
+        console.error('notifyDiscordStatusChange failed:', e.message);
+    }
 }
 
 async function fetchRobloxGroupRoles(robloxUserId) {
@@ -741,7 +886,7 @@ async function applyRevert(revert) {
 const BACKUP_TABLES = [
     'payment_requests', 'payment_methods', 'staff_warnings', 'banned_users',
     'roles', 'user_role_assignments', 'teams', 'skillsets', 'user_assignments',
-    'games', 'audit_logs'
+    'games', 'audit_logs', 'recruitment_tickets', 'recruitment_messages', 'discord_links'
 ];
 
 async function runBackup(trigger, actorUsername) {
@@ -925,7 +1070,19 @@ app.get('/roblox-auth-callback', async (req, res) => {
         fail('base_access_check_failed');
         return;
     }
-    if (!baseCheck.allowed) { fail('not_eligible'); return; }
+    if (!baseCheck.allowed) {
+        // Not eligible for the HR tool itself - instead of a dead end, hand
+        // them a short-lived recruit session and send them to the
+        // recruitment gate, where the frontend offers to start an
+        // application (which then also requires linking Discord).
+        try {
+            const rt = await createRecruitSession(robloxUserId, robloxUsername);
+            res.redirect(`${APP_ORIGIN}/#/recruit?rt=${encodeURIComponent(rt)}`);
+        } catch (e) {
+            fail('not_eligible');
+        }
+        return;
+    }
 
     let access;
     try {
@@ -956,6 +1113,174 @@ app.get('/roblox-auth-callback', async (req, res) => {
     }
 
     res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
+});
+
+// ---------------------------------------------------------------------------
+// Recruitment: recruit-session lookup + Discord OAuth
+// ---------------------------------------------------------------------------
+
+app.get('/recruit-session', async (req, res) => {
+    const session = await getRecruitSession(req);
+    if (!session) { res.status(401).json({ ok: false, error: 'not_found_or_expired' }); return; }
+    res.json({
+        ok: true,
+        robloxUserId: session.roblox_user_id,
+        robloxUsername: session.roblox_username,
+        discordLinked: !!session.discord_user_id,
+        discordUsername: session.discord_username || null,
+        discordConfigured: DISCORD_CONFIGURED
+    });
+});
+
+app.get('/discord-auth-start', async (req, res) => {
+    if (!DISCORD_CONFIGURED) { res.status(500).send('Discord sign-in is not configured.'); return; }
+    const rt = req.query.rt ? String(req.query.rt) : '';
+    if (!rt) { res.status(400).send('Missing recruit session.'); return; }
+    const recruitSession = await getRecruitSession({ query: { rt } });
+    if (!recruitSession) { res.redirect(`${APP_ORIGIN}/#/recruit?error=session_expired`); return; }
+
+    const state = randomToken(16);
+    const returnHash = req.query.return ? String(req.query.return).slice(0, 128) : '#/recruit/apply';
+    const { error } = await supabase.from('discord_oauth_states').insert({ state, rt, return_hash: returnHash });
+    if (error) { res.status(500).send('Could not start Discord sign-in.'); return; }
+
+    const authorizeUrl = new URL('https://discord.com/oauth2/authorize');
+    authorizeUrl.searchParams.set('client_id', DISCORD_CLIENT_ID);
+    authorizeUrl.searchParams.set('redirect_uri', DISCORD_REDIRECT_URI);
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('scope', 'identify');
+    authorizeUrl.searchParams.set('state', state);
+    res.redirect(authorizeUrl.toString());
+});
+
+app.get('/discord-auth-callback', async (req, res) => {
+    const code = req.query.code;
+    const state = req.query.state;
+
+    function fail(rt, reason) {
+        res.redirect(`${APP_ORIGIN}/#/recruit/apply?rt=${encodeURIComponent(rt || '')}&error=${encodeURIComponent(reason)}`);
+    }
+
+    if (!code || !state) { fail(null, 'missing_code_or_state'); return; }
+
+    const { data: stateRow } = await supabase.from('discord_oauth_states').select('*').eq('state', state).maybeSingle();
+    await supabase.from('discord_oauth_states').delete().eq('state', state);
+    if (!stateRow) { fail(null, 'invalid_state'); return; }
+
+    const recruitSession = await getRecruitSession({ query: { rt: stateRow.rt } });
+    if (!recruitSession) { fail(stateRow.rt, 'session_expired'); return; }
+
+    const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: DISCORD_REDIRECT_URI,
+            client_id: DISCORD_CLIENT_ID,
+            client_secret: DISCORD_CLIENT_SECRET
+        })
+    });
+    if (!tokenRes.ok) { fail(stateRow.rt, 'token_exchange_failed'); return; }
+    const tokenJson = await tokenRes.json();
+
+    const userRes = await fetch('https://discord.com/api/v10/users/@me', {
+        headers: { Authorization: `Bearer ${tokenJson.access_token}` }
+    });
+    if (!userRes.ok) { fail(stateRow.rt, 'userinfo_failed'); return; }
+    const discordUser = await userRes.json();
+    const discordUserId = discordUser.id;
+    const discordUsername = discordUser.username + (discordUser.discriminator && discordUser.discriminator !== '0' ? `#${discordUser.discriminator}` : '');
+    const discordAvatar = discordUser.avatar
+        ? `https://cdn.discordapp.com/avatars/${discordUserId}/${discordUser.avatar}.png`
+        : null;
+
+    await supabase.from('recruit_sessions').update({
+        discord_user_id: discordUserId,
+        discord_username: discordUsername,
+        discord_avatar: discordAvatar
+    }).eq('token', recruitSession.token);
+
+    res.redirect(`${APP_ORIGIN}/#/recruit/apply?rt=${encodeURIComponent(recruitSession.token)}`);
+});
+
+// Ticket submission - requires a recruit session with Discord already linked.
+// Intentionally not gated by any hr permission: the whole point is that the
+// applicant doesn't have HR access yet.
+app.post('/recruitment/apply', async (req, res) => {
+    const recruitSession = await getRecruitSession(req);
+    if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
+    if (!recruitSession.discord_user_id) { res.status(400).json({ ok: false, error: 'discord_not_linked' }); return; }
+
+    try {
+        if (await isUserBanned(recruitSession.roblox_user_id)) { res.status(403).json({ ok: false, error: 'account_banned' }); return; }
+    } catch (e) { }
+
+    const body = req.body || {};
+    const experience = body.experience ? String(body.experience).trim() : '';
+    const whyJoin = body.whyJoin ? String(body.whyJoin).trim() : '';
+    const portfolioUrl = body.portfolioUrl ? String(body.portfolioUrl).trim() : null;
+    const position = body.position ? String(body.position).trim() : null;
+    const referredByUserId = body.referredByUserId != null && body.referredByUserId !== '' ? Number(body.referredByUserId) : null;
+
+    if (!experience) { res.status(400).json({ ok: false, error: 'missing_experience' }); return; }
+    if (!whyJoin) { res.status(400).json({ ok: false, error: 'missing_why_join' }); return; }
+
+    const { data: existingOpen } = await supabase
+        .from('recruitment_tickets')
+        .select('id')
+        .eq('roblox_user_id', recruitSession.roblox_user_id)
+        .in('status', ['pending', 'in_review'])
+        .maybeSingle();
+    if (existingOpen) { res.status(409).json({ ok: false, error: 'application_already_open' }); return; }
+
+    let referredByUsername = null;
+    if (referredByUserId) {
+        const recruiters = await listRecruiters();
+        const match = recruiters.find(r => r.robloxUserId === referredByUserId);
+        if (match) referredByUsername = match.robloxUsername;
+    }
+
+    // Keep a standing Discord<->Roblox link for this person too - useful once
+    // they're hired and become staff.
+    await supabase.from('discord_links').upsert({
+        roblox_user_id: recruitSession.roblox_user_id,
+        roblox_username: recruitSession.roblox_username,
+        discord_user_id: recruitSession.discord_user_id,
+        discord_username: recruitSession.discord_username,
+        discord_avatar: recruitSession.discord_avatar,
+        linked_at: new Date().toISOString()
+    }, { onConflict: 'roblox_user_id' });
+
+    const { data: ticket, error } = await supabase.from('recruitment_tickets').insert({
+        roblox_user_id: recruitSession.roblox_user_id,
+        roblox_username: recruitSession.roblox_username,
+        discord_user_id: recruitSession.discord_user_id,
+        discord_username: recruitSession.discord_username,
+        portfolio_url: portfolioUrl,
+        experience,
+        why_join: whyJoin,
+        position,
+        referred_by_user_id: referredByUserId,
+        referred_by_username: referredByUsername,
+        status: 'pending'
+    }).select('*').maybeSingle();
+
+    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+
+    notifyDiscordNewTicket(ticket);
+    res.json({ ok: true, data: { id: ticket.id } });
+});
+
+// Public (no auth) - just names, used to populate the "who referred you?"
+// select on the application form itself.
+app.get('/recruitment/recruiters', async (req, res) => {
+    try {
+        const recruiters = await listRecruiters();
+        res.json({ ok: true, data: recruiters });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+    }
 });
 
 app.get('/onboarding-link-preview', async (req, res) => {
@@ -2554,6 +2879,205 @@ app.post('/hr-data', async (req, res) => {
             details: { id, summary }
         });
         res.json({ ok: true, summary });
+        return;
+    }
+
+    // -----------------------------------------------------------------------
+    // Recruitment (staff side - everything here requires an hr_session)
+    // -----------------------------------------------------------------------
+    if (action === 'recruitment_list_recruiters') {
+        if (!requirePermission(res, session, 'recruitment.view')) return;
+        try {
+            const data = await listRecruiters();
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+        return;
+    }
+
+    if (action === 'recruitment_list_tickets') {
+        if (!requirePermission(res, session, 'recruitment.view')) return;
+        const status = payload.status && payload.status !== 'all' ? String(payload.status) : null;
+        let query = supabase.from('recruitment_tickets').select('*').order('created_at', { ascending: false }).limit(200);
+        if (status) query = query.eq('status', status);
+        const { data, error } = await query;
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data || [] });
+        return;
+    }
+
+    if (action === 'recruitment_get_ticket') {
+        if (!requirePermission(res, session, 'recruitment.view')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const [{ data: ticket, error: ticketErr }, { data: messages, error: msgErr }] = await Promise.all([
+            supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle(),
+            supabase.from('recruitment_messages').select('*').eq('ticket_id', id).order('created_at', { ascending: true })
+        ]);
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+        if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
+        res.json({ ok: true, data: { ticket, messages: messages || [] } });
+        return;
+    }
+
+    if (action === 'recruitment_add_message') {
+        if (!requirePermission(res, session, 'recruitment.respond')) return;
+        const id = payload.id;
+        const body = payload.body ? String(payload.body).trim() : '';
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        if (!body) { res.status(400).json({ ok: false, error: 'missing_body' }); return; }
+
+        const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+
+        const { error: msgErr } = await supabase.from('recruitment_messages').insert({
+            ticket_id: id,
+            author_type: 'staff',
+            author_user_id: session.roblox_user_id,
+            author_username: session.roblox_username,
+            body,
+            internal_note: !!payload.internalNote
+        });
+        if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
+
+        // First staff reply on a ticket sets the response-time clock used by
+        // analytics; later replies don't move it.
+        const updates = { updated_at: new Date().toISOString() };
+        if (!ticket.first_response_at) {
+            updates.first_response_at = new Date().toISOString();
+            updates.first_response_by_username = session.roblox_username;
+        }
+        await supabase.from('recruitment_tickets').update(updates).eq('id', id);
+
+        logAudit(session, { category: 'recruitment', action: 'message', targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username, details: { ticketId: id } });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'recruitment_update_status') {
+        if (!requirePermission(res, session, 'recruitment.manage')) return;
+        const id = payload.id;
+        const status = payload.status;
+        const reason = payload.reason ? String(payload.reason).trim() : null;
+        const validStatuses = ['pending', 'in_review', 'accepted', 'rejected', 'withdrawn'];
+        if (!id || !validStatuses.includes(status)) { res.status(400).json({ ok: false, error: 'invalid_status' }); return; }
+
+        const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+
+        const updates = { status, updated_at: new Date().toISOString() };
+        if (!ticket.first_response_at) {
+            updates.first_response_at = new Date().toISOString();
+            updates.first_response_by_username = session.roblox_username;
+        }
+        if (['accepted', 'rejected', 'withdrawn'].includes(status)) {
+            updates.closed_at = new Date().toISOString();
+            updates.closed_by_username = session.roblox_username;
+            updates.close_reason = reason;
+        } else {
+            updates.closed_at = null; updates.closed_by_username = null; updates.close_reason = null;
+        }
+
+        const { error: updateErr } = await supabase.from('recruitment_tickets').update(updates).eq('id', id);
+        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+
+        if (reason) {
+            await supabase.from('recruitment_messages').insert({
+                ticket_id: id, author_type: 'staff', author_user_id: session.roblox_user_id,
+                author_username: session.roblox_username, body: reason, internal_note: true
+            });
+        }
+
+        logAudit(session, {
+            category: 'recruitment', action: 'status_change',
+            targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+            details: { ticketId: id, from: ticket.status, to: status }
+        });
+        notifyDiscordStatusChange({ ...ticket, status }, status, session.roblox_username);
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'recruitment_assign') {
+        if (!requirePermission(res, session, 'recruitment.manage')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const assignToUserId = payload.assignToUserId != null ? Number(payload.assignToUserId) : null;
+        const assignToUsername = payload.assignToUsername ? String(payload.assignToUsername) : null;
+        const { error } = await supabase.from('recruitment_tickets').update({
+            assigned_to_user_id: assignToUserId,
+            assigned_to_username: assignToUsername,
+            updated_at: new Date().toISOString()
+        }).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    // Analytics: response leaderboard per staff member, funnel totals, and a
+    // simple time series of applications received per day.
+    if (action === 'recruitment_analytics') {
+        if (!requirePermission(res, session, 'recruitment.analytics')) return;
+        const { data: tickets, error } = await supabase.from('recruitment_tickets').select('*');
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const all = tickets || [];
+
+        const totals = {
+            total: all.length,
+            pending: all.filter(t => t.status === 'pending').length,
+            inReview: all.filter(t => t.status === 'in_review').length,
+            accepted: all.filter(t => t.status === 'accepted').length,
+            rejected: all.filter(t => t.status === 'rejected').length,
+            withdrawn: all.filter(t => t.status === 'withdrawn').length
+        };
+
+        const byStaff = {};
+        all.forEach(t => {
+            if (t.first_response_by_username) {
+                const key = t.first_response_by_username;
+                byStaff[key] = byStaff[key] || { username: key, responded: 0, accepted: 0, rejected: 0, totalResponseMs: 0, responseCount: 0 };
+                byStaff[key].responded += 1;
+                if (t.status === 'accepted') byStaff[key].accepted += 1;
+                if (t.status === 'rejected') byStaff[key].rejected += 1;
+                if (t.first_response_at) {
+                    byStaff[key].totalResponseMs += (new Date(t.first_response_at).getTime() - new Date(t.created_at).getTime());
+                    byStaff[key].responseCount += 1;
+                }
+            }
+        });
+        const staffLeaderboard = Object.values(byStaff).map(s => ({
+            username: s.username,
+            responded: s.responded,
+            accepted: s.accepted,
+            rejected: s.rejected,
+            avgResponseMinutes: s.responseCount ? Math.round(s.totalResponseMs / s.responseCount / 60000) : null
+        })).sort((a, b) => b.responded - a.responded);
+
+        const byReferrer = {};
+        all.forEach(t => {
+            if (t.referred_by_username) {
+                byReferrer[t.referred_by_username] = (byReferrer[t.referred_by_username] || 0) + 1;
+            }
+        });
+        const referrerLeaderboard = Object.entries(byReferrer).map(([username, count]) => ({ username, count })).sort((a, b) => b.count - a.count);
+
+        const byDay = {};
+        all.forEach(t => {
+            const day = new Date(t.created_at).toISOString().slice(0, 10);
+            byDay[day] = (byDay[day] || 0) + 1;
+        });
+        const timeline = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).map(([date, count]) => ({ date, count }));
+
+        const responded = all.filter(t => t.first_response_at);
+        const avgResponseMinutes = responded.length
+            ? Math.round(responded.reduce((sum, t) => sum + (new Date(t.first_response_at).getTime() - new Date(t.created_at).getTime()), 0) / responded.length / 60000)
+            : null;
+
+        res.json({ ok: true, data: { totals, staffLeaderboard, referrerLeaderboard, timeline, avgResponseMinutes } });
         return;
     }
 
