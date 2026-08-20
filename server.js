@@ -1143,6 +1143,7 @@ app.get('/discord-auth-start', async (req, res) => {
     const returnHash = req.query.return ? String(req.query.return).slice(0, 128) : '#/recruit/apply';
     const { error } = await supabase.from('discord_oauth_states').insert({ state, rt, return_hash: returnHash });
     if (error) { res.status(500).send('Could not start Discord sign-in.'); return; }
+    console.log(`[discord-auth-start] created state ${state} for rt ${rt} (supabase url: ${SUPABASE_URL})`);
 
     const authorizeUrl = new URL('https://discord.com/oauth2/authorize');
     authorizeUrl.searchParams.set('client_id', DISCORD_CLIENT_ID);
@@ -1163,9 +1164,14 @@ app.get('/discord-auth-callback', async (req, res) => {
 
     if (!code || !state) { fail(null, 'missing_code_or_state'); return; }
 
-    const { data: stateRow } = await supabase.from('discord_oauth_states').select('*').eq('state', state).maybeSingle();
+    const { data: stateRow, error: stateSelectErr } = await supabase.from('discord_oauth_states').select('*').eq('state', state).maybeSingle();
     await supabase.from('discord_oauth_states').delete().eq('state', state);
-    if (!stateRow) { fail(null, 'invalid_state'); return; }
+    if (!stateRow) {
+        console.error(`[discord-auth-callback] state ${state} not found (supabase url: ${SUPABASE_URL})`, stateSelectErr ? stateSelectErr.message : '(no select error - row genuinely missing)');
+        fail(null, 'invalid_state');
+        return;
+    }
+    console.log(`[discord-auth-callback] matched state ${state} -> rt ${stateRow.rt}`);
 
     const recruitSession = await getRecruitSession({ query: { rt: stateRow.rt } });
     if (!recruitSession) { fail(stateRow.rt, 'session_expired'); return; }
