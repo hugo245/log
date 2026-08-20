@@ -185,12 +185,20 @@ client.on(Events.InteractionCreate, async interaction => {
             if (!ticketId) return;
             if (!(await requireLeadRole(interaction))) return;
 
+            await interaction.deferReply();
+
             const teamId = Number(interaction.values[0]);
             const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', ticketId).maybeSingle();
-            if (error || !ticket) { await interaction.reply({ content: 'That ticket no longer exists.', ephemeral: true }); return; }
+            if (error || !ticket) { await interaction.editReply({ content: 'That ticket no longer exists.' }); return; }
 
-            const { data: team } = await supabase.from('teams').select('id, name').eq('id', teamId).maybeSingle();
-            if (!team) { await interaction.reply({ content: 'That team no longer exists.', ephemeral: true }); return; }
+            const { data: team } = await supabase.from('teams').select('*').eq('id', teamId).maybeSingle();
+            if (!team) { await interaction.editReply({ content: 'That team no longer exists.' }); return; }
+
+            let skillset = null;
+            if (ticket.skillset_id) {
+                const { data: skillsetRow } = await supabase.from('skillsets').select('*').eq('id', ticket.skillset_id).maybeSingle();
+                skillset = skillsetRow || null;
+            }
 
             await supabase.from('user_assignments').upsert({
                 roblox_user_id: ticket.roblox_user_id,
@@ -207,7 +215,38 @@ client.on(Events.InteractionCreate, async interaction => {
                 updated_at: new Date().toISOString()
             }).eq('id', ticketId);
 
-            await interaction.reply({ content: `Placed **${ticket.roblox_username}** on **${team.name}** (by ${interaction.user}).` });
+            // Grant the HR-tool roles tied to this team/skillset so the recruit
+            // actually gets access on the website, not just the DB fields.
+            const roleIds = [...new Set([team.role_id, skillset && skillset.role_id].filter(v => v != null))];
+            let grantedRoleNames = [];
+            if (roleIds.length) {
+                const { data: roleRows } = await supabase.from('roles').select('id, name').in('id', roleIds);
+                grantedRoleNames = (roleRows || []).map(r => r.name);
+                for (const roleId of roleIds) {
+                    const { error: assignErr } = await supabase.from('user_role_assignments').insert({
+                        roblox_user_id: ticket.roblox_user_id,
+                        role_id: roleId,
+                        roblox_username: ticket.roblox_username
+                    });
+                    if (assignErr && assignErr.code !== '23505') {
+                        console.error('Failed to grant role', roleId, 'to', ticket.roblox_user_id, assignErr.message);
+                    }
+                }
+            }
+
+            const roleSummary = grantedRoleNames.length ? ` Granted role(s): **${grantedRoleNames.join(', ')}**.` : '';
+            await interaction.editReply({ content: `Placed **${ticket.roblox_username}** on **${team.name}** (by ${interaction.user}).${roleSummary}` });
+
+            try {
+                const link = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', ticket.roblox_user_id).maybeSingle();
+                const discordUserId = (link.data && link.data.discord_user_id) || ticket.discord_user_id;
+                const user = await client.users.fetch(discordUserId);
+                const parts = [`You've been accepted and placed on the **${team.name}** team!`];
+                if (skillset) parts.push(`Skillset: **${skillset.name}**.`);
+                if (grantedRoleNames.length) parts.push(`You now have access on the site as: **${grantedRoleNames.join(', ')}**.`);
+                if (APP_ORIGIN) parts.push(`Check it out here: ${APP_ORIGIN}/#/recruit/status`);
+                await user.send(parts.join(' '));
+            } catch (e) { }
             return;
         }
 
