@@ -27,7 +27,9 @@ const DISCORD_LEAD_CHANNEL_ID = process.env.DISCORD_LEAD_CHANNEL_ID;
 const DISCORD_LEAD_ROLE_ID = process.env.DISCORD_LEAD_ROLE_ID || '1539922527013572668';
 // Category new per-applicant ticket channels are created under, and the HR role(s) allowed into them.
 const DISCORD_TICKET_CATEGORY_ID = process.env.DISCORD_TICKET_CATEGORY_ID || '1540256971096072295';
-const DISCORD_HR_ROLE_ID = process.env.DISCORD_HR_ROLE_ID || process.env.DISCORD_HR_ROLE_IDS;
+// Comma-separated list supported via DISCORD_HR_ROLE_IDS, or a single id via DISCORD_HR_ROLE_ID.
+const DISCORD_HR_ROLE_IDS = (process.env.DISCORD_HR_ROLE_IDS || process.env.DISCORD_HR_ROLE_ID || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
 const RECRUIT_SESSION_PORTAL_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const DISCORD_CONFIGURED = !!(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI);
@@ -37,8 +39,8 @@ if (!DISCORD_CONFIGURED) {
 if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) {
     console.warn('DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not set - new recruitment tickets will not get a private Discord ticket channel.');
 }
-if (!DISCORD_HR_ROLE_ID) {
-    console.warn('DISCORD_HR_ROLE_ID not set - ticket channels will only be visible to the applicant, not to HR.');
+if (!DISCORD_HR_ROLE_IDS.length) {
+    console.warn('DISCORD_HR_ROLE_ID(S) not set - ticket channels will only be visible to the applicant, not to HR.');
 }
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
@@ -370,11 +372,35 @@ function ticketEmbedPayload(ticket) {
     };
 }
 
+// True if the given Discord user is currently a member of the configured guild.
+async function isDiscordGuildMember(discordUserId) {
+    if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID || !discordUserId) return false;
+    try {
+        const res = await fetch(`https://discord.com/api/v10/guilds/${DISCORD_GUILD_ID}/members/${discordUserId}`, {
+            headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` }
+        });
+        if (res.status === 404) return false;
+        if (!res.ok) {
+            const bodyText = await res.text().catch(() => '');
+            console.error(`isDiscordGuildMember: unexpected status ${res.status} checking ${discordUserId} in guild ${DISCORD_GUILD_ID}: ${bodyText}`);
+            return false;
+        }
+        return true;
+    } catch (e) {
+        console.error('isDiscordGuildMember failed:', e.message);
+        return false;
+    }
+}
+
 // Creates a private per-applicant ticket channel under DISCORD_TICKET_CATEGORY_ID, visible only to the
 // applicant and the HR role(s), with a small Accept/Reject/Claim/Configure panel. This is where all
 // communication with the applicant now happens instead of the old website chat.
 async function createDiscordTicketChannel(ticket) {
-    if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) return null;
+    if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) {
+        console.error('createDiscordTicketChannel: skipped - DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not configured.');
+        return null;
+    }
+    console.log(`createDiscordTicketChannel: creating channel for ticket ${ticket.id} in guild ${DISCORD_GUILD_ID}, category ${DISCORD_TICKET_CATEGORY_ID}, HR role(s): ${DISCORD_HR_ROLE_IDS.join(', ') || '(none configured)'}`);
     try {
         const VIEW_CHANNEL = 1024, SEND_MESSAGES = 2048, READ_MESSAGE_HISTORY = 65536, ATTACH_FILES = 32768, EMBED_LINKS = 16384;
         const memberAllow = String(VIEW_CHANNEL + SEND_MESSAGES + READ_MESSAGE_HISTORY + ATTACH_FILES + EMBED_LINKS);
@@ -382,7 +408,9 @@ async function createDiscordTicketChannel(ticket) {
             { id: DISCORD_GUILD_ID, type: 0, deny: String(VIEW_CHANNEL) }, // @everyone can't see it
             { id: ticket.discord_user_id, type: 1, allow: memberAllow } // the applicant
         ];
-        if (DISCORD_HR_ROLE_ID) overwrites.push({ id: DISCORD_HR_ROLE_ID, type: 0, allow: memberAllow });
+        for (const roleId of DISCORD_HR_ROLE_IDS) {
+            overwrites.push({ id: roleId, type: 0, allow: memberAllow });
+        }
         // The bot's own user id matches its application (client) id - make sure it can always see the channel.
         if (DISCORD_CLIENT_ID) overwrites.push({ id: DISCORD_CLIENT_ID, type: 1, allow: memberAllow });
 
@@ -397,12 +425,16 @@ async function createDiscordTicketChannel(ticket) {
                 permission_overwrites: overwrites
             })
         });
-        if (!channel || !channel.id) return null;
+        if (!channel || !channel.id) {
+            console.error('createDiscordTicketChannel: channel creation returned no id for ticket', ticket.id);
+            return null;
+        }
+        console.log(`createDiscordTicketChannel: created channel ${channel.id} for ticket ${ticket.id}`);
 
         const message = await discordApi(`/channels/${channel.id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `${DISCORD_HR_ROLE_ID ? `<@&${DISCORD_HR_ROLE_ID}> ` : ''}<@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application.`,
+                content: `${DISCORD_HR_ROLE_IDS.map(id => `<@&${id}>`).join(' ')} <@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application.`,
                 embeds: [ticketEmbedPayload(ticket)],
                 components: [{
                     type: 1,
@@ -416,14 +448,18 @@ async function createDiscordTicketChannel(ticket) {
             })
         });
 
-        await supabase.from('recruitment_tickets').update({
+        const { error: saveErr } = await supabase.from('recruitment_tickets').update({
             discord_channel_id: channel.id,
             ticket_message_id: message ? message.id : null
         }).eq('id', ticket.id);
+        if (saveErr) console.error(`createDiscordTicketChannel: channel ${channel.id} was created but saving it to ticket ${ticket.id} failed:`, saveErr.message);
 
         return channel.id;
     } catch (e) {
-        console.error('createDiscordTicketChannel failed:', e.message);
+        // discordApi() throws with the raw Discord error body baked into the message (e.g. invalid
+        // parent_id/category, bad role/user snowflake in permission_overwrites, missing Manage Channels
+        // permission, etc) - log it in full so the real cause shows up instead of failing silently.
+        console.error(`createDiscordTicketChannel failed for ticket ${ticket.id}:`, e.message);
         return null;
     }
 }
@@ -1352,6 +1388,17 @@ app.post('/recruitment/apply', async (req, res) => {
     try {
         if (await isUserBanned(recruitSession.roblox_user_id)) { res.status(403).json({ ok: false, error: 'account_banned' }); return; }
     } catch (e) { }
+
+    // Auto-deny applications from accounts whose linked Discord user isn't actually in the server -
+    // we can't open a private ticket channel for them (or let HR reach them) otherwise.
+    if (DISCORD_GUILD_ID) {
+        const inServer = await isDiscordGuildMember(recruitSession.discord_user_id);
+        if (!inServer) {
+            console.warn(`recruitment/apply: rejected - Discord user ${recruitSession.discord_user_id} is not a member of guild ${DISCORD_GUILD_ID} (or the membership check failed - see isDiscordGuildMember logs above).`);
+            res.status(403).json({ ok: false, error: 'discord_not_in_server' });
+            return;
+        }
+    }
 
     const body = req.body || {};
     const experience = body.experience ? String(body.experience).trim() : '';
