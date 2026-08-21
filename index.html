@@ -3195,17 +3195,6 @@
       return json.data;
     }
 
-    async function sendMyTicketMessage(rt, body, attachmentDataUrl) {
-      const res = await fetch(EDGE_BASE + '/recruitment/my-ticket/message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + rt, 'ngrok-skip-browser-warning': 'true' },
-        body: JSON.stringify({ body, attachmentDataUrl: attachmentDataUrl || null })
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.ok) throw new Error((json && json.error) || 'send_failed');
-      return json;
-    }
-
     function urlBase64ToUint8Array(base64String) {
       const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
       const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -3241,15 +3230,6 @@
       return true;
     }
 
-    function readFileAsDataUrl(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    }
-
     async function loadRecruitmentTickets(status) {
       const json = await callHrData('recruitment_list_tickets', { status: status || 'all' });
       return json.data || [];
@@ -3257,9 +3237,6 @@
     async function loadRecruitmentTicket(id) {
       const json = await callHrData('recruitment_get_ticket', { id });
       return json.data;
-    }
-    async function addRecruitmentMessage(id, body, internalNote, attachmentDataUrl) {
-      await callHrData('recruitment_add_message', { id, body, internalNote: !!internalNote, attachmentDataUrl: attachmentDataUrl || null });
     }
     async function updateRecruitmentStatus(id, status, reason) {
       await callHrData('recruitment_update_status', { id, status, reason: reason || null });
@@ -4337,22 +4314,6 @@
       withdrawn: 'This application was marked as withdrawn.'
     };
 
-    function chatBubble(m, isMine) {
-      return `
-        <div style="display:flex;justify-content:${isMine ? 'flex-end' : 'flex-start'};margin:2px 0;">
-          <div style="max-width:78%;padding:9px 12px;border-radius:14px;${isMine ? 'border-bottom-right-radius:4px;' : 'border-bottom-left-radius:4px;'}background:${isMine ? 'var(--accent)' : 'var(--surface)'};color:${isMine ? '#fff' : 'var(--ink)'};font-size:13px;line-height:1.4;box-shadow:0 1px 2px rgba(0,0,0,.06);${isMine ? '' : 'border:1px solid var(--line);'}">
-            <div style="font-weight:600;opacity:${isMine ? '.85' : '.65'};font-size:11px;margin-bottom:3px;">${esc(m.author_username)}</div>
-            ${m.attachment_url ? `<img src="${esc(m.attachment_url)}" alt="attachment" style="max-width:100%;max-height:220px;border-radius:10px;margin-bottom:${m.body && m.body !== '(image)' ? '6px' : '0'};display:block;cursor:zoom-in;object-fit:cover;" data-view-image="${esc(m.attachment_url)}">` : ''}
-            ${!m.attachment_url || (m.body && m.body !== '(image)') ? `<div style="white-space:pre-wrap;word-break:break-word;">${esc(m.body)}</div>` : ''}
-            <div style="opacity:${isMine ? '.75' : '.55'};font-size:10px;margin-top:4px;text-align:right;">${new Date(m.created_at).toLocaleString()}</div>
-          </div>
-        </div>`;
-    }
-
-    function chatFrameStyle() {
-      return 'background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;';
-    }
-
     function renderLockedModal(ticket) {
       if (ticket && ticket.placed_team_id) {
         const placedAtMs = ticket.placed_at ? new Date(ticket.placed_at).getTime() : Date.now();
@@ -4407,18 +4368,6 @@
     </div>`;
     }
 
-    function wireImageLightbox(root) {
-      (root || document).querySelectorAll('[data-view-image]').forEach(el => {
-        el.addEventListener('click', () => {
-          const overlay = document.createElement('div');
-          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:24px;';
-          overlay.innerHTML = `<img src="${esc(el.dataset.viewImage)}" style="max-width:100%;max-height:100%;border-radius:8px;">`;
-          overlay.addEventListener('click', () => overlay.remove());
-          document.body.appendChild(overlay);
-        });
-      });
-    }
-
     function renderRecruitStatus() {
       const rt = getRecruitToken();
       if (!rt) {
@@ -4433,9 +4382,6 @@
       let data = null;
       let loading = true;
       let loadError = null;
-      let sending = false;
-      let composeText = '';
-      let pendingImage = null;
       let pollTimer = null;
       let rolingCountdownTimer = null;
       let notifyModalShown = false;
@@ -4466,26 +4412,11 @@
         }
         if (renderGen !== myGen) return;
 
-        const statusChanged = data && prevStatus !== undefined && data.ticket.status !== prevStatus;
-        if (showSpinner || !data || statusChanged) {
-          paint();
-        } else {
-          patchMessages();
-        }
+        paint();
 
         if (!pollTimer && data) {
           pollTimer = setInterval(() => { if (renderGen !== myGen) { clearInterval(pollTimer); return; } load(false); }, 15000);
         }
-      }
-
-      function patchMessages() {
-        const container = document.getElementById('statusMessages');
-        if (!container || !data) return;
-        container.innerHTML = data.messages.length
-          ? data.messages.map(m => chatBubble(m, m.author_type === 'applicant')).join('')
-          : `<div class="empty-note">No messages yet - staff will reach out here once they review your application.</div>`;
-        wireImageLightbox(container);
-        container.scrollTop = container.scrollHeight;
       }
 
       function maybeShowNotifyModal() {
@@ -4520,18 +4451,11 @@
         </div>
 
         <div class="panel" style="padding:20px;margin-bottom:16px;">
-          <div class="preview-label" style="margin-bottom:10px;">Chat with staff</div>
-          <div id="statusMessages" style="display:flex;flex-direction:column;gap:2px;max-height:380px;overflow-y:auto;margin-bottom:12px;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:12px;scroll-behavior:smooth;">
-            ${data.messages.length ? data.messages.map(m => chatBubble(m, m.author_type === 'applicant')).join('') : `<div class="empty-note">No messages yet - staff will reach out here once they review your application.</div>`}
-          </div>
-          ${pendingImage ? `<div style="margin-bottom:8px;position:relative;display:inline-block;"><img src="${esc(pendingImage.dataUrl)}" style="max-height:80px;border-radius:6px;display:block;"><button type="button" id="statusRemoveImageBtn" style="position:absolute;top:-6px;right:-6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);border-radius:999px;width:20px;height:20px;font-size:11px;cursor:pointer;">&times;</button></div>` : ''}
-          <div style="display:flex;gap:8px;align-items:flex-end;">
-            <textarea id="statusComposeBody" rows="2" placeholder="Write a message..." style="flex:1 1 auto;min-width:0;width:100%;min-height:44px;">${esc(composeText)}</textarea>
-            <label class="btn btn-ghost btn-sm" style="cursor:pointer;margin-bottom:2px;flex:0 0 auto;">
-              📎<input type="file" accept="image/*" id="statusImageInput" style="display:none;">
-            </label>
-            <button type="button" class="btn btn-primary btn-sm" id="statusSendBtn" ${sending ? 'disabled' : ''} style="margin-bottom:2px;flex:0 0 auto;width:auto;">${sending ? 'Sending...' : 'Send'}</button>
-          </div>
+          <div class="preview-label" style="margin-bottom:10px;">Communication</div>
+          ${data.ticket.discordChannelUrl ? `
+          <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">We've opened a private ticket channel for your application on Discord - that's where staff will message you and where you can ask questions.</p>
+          <a class="btn btn-primary btn-sm" href="${esc(data.ticket.discordChannelUrl)}" target="_blank" rel="noopener">Open your Discord ticket channel</a>
+          ` : `<p style="color:var(--ink-soft);font-size:13px;">Your private Discord ticket channel is being set up - check your Discord server, staff will message you there.</p>`}
         </div>
 
         <div class="panel" style="padding:20px;">
@@ -4548,7 +4472,7 @@
       <div class="modal-card" style="max-width:420px;text-align:center;">
         <div class="modal-body" style="padding-top:8px;">
           <h3 style="margin-top:0;">Want a heads-up when something changes?</h3>
-          <p style="color:var(--ink-soft);">We can notify you in your browser when your application status updates or you get a new message - no need to keep checking back.</p>
+          <p style="color:var(--ink-soft);">We can notify you in your browser when your application status updates - no need to keep checking back.</p>
           ${notifyError ? `<div class="error-box"><span>${esc(notifyError)}</span></div>` : ''}
           <div style="display:flex;gap:10px;justify-content:center;margin-top:14px;">
             <button type="button" class="btn btn-primary" id="notifyEnableBtn" ${notifyBusy ? 'disabled' : ''}>${notifyBusy ? 'Enabling...' : 'Enable notifications'}</button>
@@ -4559,9 +4483,6 @@
     </div>` : ''}`;
 
         wireTopbarSignOut();
-        wireImageLightbox(document.getElementById('statusMessages'));
-        const messagesContainer = document.getElementById('statusMessages');
-        if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
         const rolingCountdownEl = document.getElementById('rolingCountdown');
         if (rolingCountdownTimer) { clearInterval(rolingCountdownTimer); rolingCountdownTimer = null; }
@@ -4577,46 +4498,6 @@
             tick();
           }, 1000);
         }
-
-        const composeEl = document.getElementById('statusComposeBody');
-        if (composeEl) {
-          composeEl.addEventListener('input', e => { composeText = e.target.value; });
-          composeEl.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn && sendBtn.click(); }
-          });
-        }
-
-        const imageInput = document.getElementById('statusImageInput');
-        if (imageInput) imageInput.addEventListener('change', async () => {
-          const file = imageInput.files && imageInput.files[0];
-          if (!file) return;
-          if (file.size > 6 * 1024 * 1024) { alert('That image is too large (max 6MB).'); return; }
-          pendingImage = { dataUrl: await readFileAsDataUrl(file), name: file.name };
-          paint();
-        });
-        const removeImgBtn = document.getElementById('statusRemoveImageBtn');
-        if (removeImgBtn) removeImgBtn.addEventListener('click', () => { pendingImage = null; paint(); });
-
-        const sendBtn = document.getElementById('statusSendBtn');
-        if (sendBtn) sendBtn.addEventListener('click', async () => {
-          const body = composeText.trim();
-          if (!body && !pendingImage) return;
-          sending = true; paint();
-          try {
-            await sendMyTicketMessage(rt, body, pendingImage ? pendingImage.dataUrl : null);
-            composeText = '';
-            pendingImage = null;
-            await load(false);
-            maybeShowNotifyModal();
-            paint();
-          } catch (e) {
-            alert('Could not send that message. Please try again.');
-            sending = false;
-            paint();
-            return;
-          }
-          sending = false;
-        });
 
         const notifyEnableBtn = document.getElementById('notifyEnableBtn');
         if (notifyEnableBtn) notifyEnableBtn.addEventListener('click', async () => {
@@ -4655,9 +4536,6 @@
       let ticketDetail = null;
       let ticketDetailLoading = false;
       let recruiters = [];
-      let composeBody = '';
-      let composeIsNote = false;
-      let pendingImage = null;
       let busy = false;
       let ticketPollTimer = null;
 
@@ -4677,7 +4555,6 @@
       let placeTeamError = null;
 
       const canManage = hasPermission('recruitment.manage');
-      const canRespond = hasPermission('recruitment.respond');
       const canSeeAnalytics = hasPermission('recruitment.analytics');
 
       load();
@@ -4695,7 +4572,7 @@
       }
 
       async function openTicket(id) {
-        openTicketId = id; ticketDetail = null; ticketDetailLoading = true; composeBody = ''; composeIsNote = false; pendingImage = null;
+        openTicketId = id; ticketDetail = null; ticketDetailLoading = true;
         nextPhaseModalOpen = false; nextPhaseError = null; nextPhaseSelectedSkillsetId = ''; allSetModalOpen = false;
         manualRolingBusy = false; manualRolingMsg = null;
         placeTeamSelectedId = ''; placeTeamBusy = false; placeTeamError = null;
@@ -4709,24 +4586,11 @@
           if (renderGen !== myGen || openTicketId !== id) { clearInterval(ticketPollTimer); return; }
           try {
             ticketDetail = await loadRecruitmentTicket(id);
-            patchTicketMessages();
+            paintModal();
           } catch (e) { }
         }, 15000);
       }
 
-      function patchTicketMessages() {
-        const container = document.getElementById('ticketMessages');
-        if (!container || !ticketDetail) return;
-        const messages = ticketDetail.messages;
-        container.innerHTML = messages.length ? messages.map(m => m.internal_note ? `
-                <div style="padding:8px 10px;border-radius:8px;background:var(--warn-bg);font-size:13px;">
-                  <div style="font-weight:600;">${esc(m.author_username)} <span style="font-weight:400;color:var(--warn-text);">(internal note)</span></div>
-                  <div style="white-space:pre-wrap;">${esc(m.body)}</div>
-                  <div style="color:var(--muted);font-size:11px;margin-top:2px;">${new Date(m.created_at).toLocaleString()}</div>
-                </div>` : chatBubble(m, m.author_type === 'staff')).join('') : `<div class="empty-note">No messages yet - start the conversation below.</div>`;
-        wireImageLightbox(container);
-        container.scrollTop = container.scrollHeight;
-      }
 
       function counts() {
         const c = { all: tickets.length, pending: 0, in_review: 0, accepted: 0, team_selection: 0, rejected: 0, withdrawn: 0 };
@@ -4744,7 +4608,7 @@
         <div>
           <span class="eyebrow">Recruitment</span>
           <h1 style="margin-bottom:4px;">Applications</h1>
-          <p class="sub">Review incoming applications, chat with applicants, and track who's hiring.</p>
+          <p class="sub">Review incoming applications and track who's hiring. Chat with applicants happens in their Discord ticket channel.</p>
         </div>
         <div class="dash-toolbar">
           ${canSeeAnalytics ? `<a class="btn btn-ghost btn-sm" href="#/recruitment-analytics">Analytics</a>` : ''}
@@ -4779,7 +4643,7 @@
                   <td style="padding:12px 16px;">${esc(t.referred_by_username || '-')}</td>
                   <td style="padding:12px 16px;">${recruitmentStatusChip(t.status)}</td>
                   <td style="padding:12px 16px;color:var(--muted);font-size:13px;">${new Date(t.created_at).toLocaleString()}</td>
-                  <td style="padding:12px 16px;text-align:right;"><button type="button" class="btn btn-ghost btn-sm">💬 Chat</button></td>
+                  <td style="padding:12px 16px;text-align:right;"><button type="button" class="btn btn-ghost btn-sm">Open</button></td>
                 </tr>`).join('')}
               </tbody>
             </table>
@@ -4824,7 +4688,6 @@
           return `<div class="modal-scrim" id="ticketModalScrim"><div class="modal-card"><button type="button" class="modal-close" id="ticketModalClose">&times;</button><div class="modal-body" style="text-align:center;padding:40px;color:var(--muted);">Loading...</div></div></div>`;
         }
         const t = ticketDetail.ticket;
-        const messages = ticketDetail.messages;
         return `
     <div class="modal-scrim" id="ticketModalScrim">
       <div class="modal-card" style="max-width:640px;">
@@ -4886,27 +4749,11 @@
           </div>` : ''}
 
           <div class="modal-section">
-            <div class="modal-section-title">Chat</div>
-            <div id="ticketMessages" style="display:flex;flex-direction:column;gap:2px;max-height:300px;overflow-y:auto;margin-bottom:10px;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:12px;scroll-behavior:smooth;">
-              ${messages.length ? messages.map(m => m.internal_note ? `
-                <div style="padding:8px 10px;border-radius:8px;background:var(--warn-bg);font-size:13px;">
-                  <div style="font-weight:600;">${esc(m.author_username)} <span style="font-weight:400;color:var(--warn-text);">(internal note)</span></div>
-                  <div style="white-space:pre-wrap;">${esc(m.body)}</div>
-                  <div style="color:var(--muted);font-size:11px;margin-top:2px;">${new Date(m.created_at).toLocaleString()}</div>
-                </div>` : chatBubble(m, m.author_type === 'staff')).join('') : `<div class="empty-note">No messages yet - start the conversation below.</div>`}
-            </div>
-            ${canRespond ? `
-            ${pendingImage ? `<div style="margin-bottom:8px;position:relative;display:inline-block;"><img src="${esc(pendingImage.dataUrl)}" style="max-height:80px;border-radius:6px;display:block;"><button type="button" id="ticketRemoveImageBtn" style="position:absolute;top:-6px;right:-6px;background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);border-radius:999px;width:20px;height:20px;font-size:11px;cursor:pointer;">&times;</button></div>` : ''}
-            <textarea id="ticketComposeBody" rows="2" placeholder="Write a message or note...">${esc(composeBody)}</textarea>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-              <label style="font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px;">
-                <input type="checkbox" id="ticketComposeNote" ${composeIsNote ? 'checked' : ''}> Internal note only
-              </label>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📎<input type="file" accept="image/*" id="ticketImageInput" style="display:none;"></label>
-                <button type="button" class="btn btn-primary btn-sm" id="ticketComposeSend" ${busy ? 'disabled' : ''}>Send</button>
-              </div>
-            </div>` : ''}
+            <div class="modal-section-title">Communication</div>
+            ${t.discordChannelUrl ? `
+            <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">This applicant has a private ticket channel on Discord - accept, reject, claim, and configure their application from the panel there.</p>
+            <a class="btn btn-primary btn-sm" href="${esc(t.discordChannelUrl)}" target="_blank" rel="noopener">Open Discord ticket channel</a>
+            ` : `<p style="color:var(--ink-soft);font-size:13px;">No Discord ticket channel yet for this application - it may still be getting created, or the bot isn't configured.</p>`}
           </div>
         </div>
       </div>
@@ -4964,9 +4811,6 @@
         const close = () => { if (ticketPollTimer) clearInterval(ticketPollTimer); openTicketId = null; ticketDetail = null; nextPhaseModalOpen = false; allSetModalOpen = false; paintModal(); paintNextPhaseOverlay(); };
         document.getElementById('ticketModalClose').addEventListener('click', close);
         scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
-        wireImageLightbox(document.getElementById('ticketMessages'));
-        const messagesContainer = document.getElementById('ticketMessages');
-        if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
         document.querySelectorAll('[data-set-status]').forEach(el => {
           el.addEventListener('click', async () => {
@@ -4993,38 +4837,6 @@
             ticketDetail = await loadRecruitmentTicket(openTicketId);
           } catch (e) { }
           paintModal();
-        });
-
-        const imageInput = document.getElementById('ticketImageInput');
-        if (imageInput) imageInput.addEventListener('change', async () => {
-          const file = imageInput.files && imageInput.files[0];
-          if (!file) return;
-          if (file.size > 6 * 1024 * 1024) { alert('That image is too large (max 6MB).'); return; }
-          pendingImage = { dataUrl: await readFileAsDataUrl(file) };
-          paintModal();
-        });
-        const removeImgBtn = document.getElementById('ticketRemoveImageBtn');
-        if (removeImgBtn) removeImgBtn.addEventListener('click', () => { pendingImage = null; paintModal(); });
-
-        const composeEl = document.getElementById('ticketComposeBody');
-        if (composeEl) {
-          composeEl.addEventListener('input', e => { composeBody = e.target.value; });
-        }
-        const noteCheckbox = document.getElementById('ticketComposeNote');
-        if (noteCheckbox) noteCheckbox.addEventListener('change', e => { composeIsNote = e.target.checked; });
-
-        const sendBtn = document.getElementById('ticketComposeSend');
-        if (sendBtn) sendBtn.addEventListener('click', async () => {
-          const body = composeBody.trim();
-          const isNote = composeIsNote;
-          if (!body && !pendingImage) return;
-          busy = true; paintModal();
-          try {
-            await addRecruitmentMessage(openTicketId, body, isNote, pendingImage ? pendingImage.dataUrl : null);
-            composeBody = ''; composeIsNote = false; pendingImage = null;
-            ticketDetail = await loadRecruitmentTicket(openTicketId);
-          } catch (e) { }
-          busy = false; paintModal();
         });
 
         const nextPhaseBtn = document.getElementById('nextPhaseBtn');

@@ -1,6 +1,7 @@
 const {
     Client, GatewayIntentBits, Events,
-    SlashCommandBuilder, EmbedBuilder, REST, Routes
+    SlashCommandBuilder, EmbedBuilder, REST, Routes,
+    ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder
 } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
@@ -9,7 +10,8 @@ const {
     DISCORD_BOT_TOKEN,
     DISCORD_CLIENT_ID,
     DISCORD_GUILD_ID,
-    DISCORD_RECRUITER_ROLE_ID,
+    DISCORD_HR_ROLE_ID,
+    DISCORD_HR_ROLE_IDS,
     DISCORD_LEAD_ROLE_ID,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
@@ -17,6 +19,13 @@ const {
 } = process.env;
 
 const LEAD_ROLE_ID = DISCORD_LEAD_ROLE_ID || '1539922527013572668';
+
+// Comma-separated list supported via DISCORD_HR_ROLE_IDS, or a single id via DISCORD_HR_ROLE_ID.
+const HR_ROLE_IDS = (DISCORD_HR_ROLE_IDS || DISCORD_HR_ROLE_ID || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+if (!HR_ROLE_IDS.length) {
+    console.warn('DISCORD_HR_ROLE_ID(S) not set - the ticket panel (Accept/Reject/Claim/Configure) will be usable by anyone.');
+}
 
 for (const [name, val] of Object.entries({ DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY })) {
     if (!val) { console.error(`Missing required env var: ${name}`); process.exit(1); }
@@ -124,15 +133,15 @@ function nextReconcileUnix() {
     return nextReconcileAt ? Math.floor(nextReconcileAt / 1000) : null;
 }
 
-async function requireRecruiterRole(interaction) {
-    if (!DISCORD_RECRUITER_ROLE_ID) return true;
-    const member = interaction.member;
-    const has = member && member.roles && member.roles.cache && member.roles.cache.has(DISCORD_RECRUITER_ROLE_ID);
-    if (!has) {
-        await interaction.reply({ content: "You don't have the recruiter role for this.", ephemeral: true });
-        return false;
-    }
-    return true;
+function hasHRRole(member) {
+    if (!HR_ROLE_IDS.length) return true;
+    return !!(member && member.roles && member.roles.cache && HR_ROLE_IDS.some(id => member.roles.cache.has(id)));
+}
+
+async function requireHRRole(interaction) {
+    if (hasHRRole(interaction.member)) return true;
+    await interaction.reply({ content: "Only HR roles can use this ticket panel.", ephemeral: true });
+    return false;
 }
 
 async function requireLeadRole(interaction) {
@@ -160,6 +169,18 @@ function ticketEmbed(ticket) {
         )
         .setFooter({ text: `Ticket ${ticket.id}` })
         .setTimestamp(new Date(ticket.created_at));
+}
+
+// Rebuilds and re-sends the pinned panel embed for a ticket channel (used after Accept/Reject/Claim/Configure).
+async function refreshTicketPanel(interaction, ticket) {
+    if (!ticket.ticket_message_id || !ticket.discord_channel_id) return;
+    try {
+        const channel = await client.channels.fetch(ticket.discord_channel_id);
+        const message = await channel.messages.fetch(ticket.ticket_message_id);
+        await message.edit({ embeds: [ticketEmbed(ticket)] });
+    } catch (e) {
+        console.error('refreshTicketPanel failed:', e.message);
+    }
 }
 
 client.once(Events.ClientReady, c => {
@@ -201,21 +222,39 @@ client.on(Events.InteractionCreate, async interaction => {
         }
 
         if (interaction.isButton()) {
-            const [, action, ticketId] = interaction.customId.match(/^recruit_(accept|reject|claim)_(.+)$/) || [];
+            const [, action, ticketId] = interaction.customId.match(/^recruit_(accept|reject|claim|config)_(.+)$/) || [];
             if (!action) return;
 
-            if (!(await requireRecruiterRole(interaction))) return;
+            if (!(await requireHRRole(interaction))) return;
 
             const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', ticketId).maybeSingle();
             if (error || !ticket) { await interaction.reply({ content: 'That ticket no longer exists.', ephemeral: true }); return; }
 
+            if (action === 'config') {
+                const modal = new ModalBuilder()
+                    .setCustomId(`recruit_config_modal_${ticketId}`)
+                    .setTitle('Configure application');
+                const positionInput = new TextInputBuilder()
+                    .setCustomId('position')
+                    .setLabel('Position applied for')
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(false)
+                    .setMaxLength(100)
+                    .setValue(ticket.position || '');
+                modal.addComponents(new ActionRowBuilder().addComponents(positionInput));
+                await interaction.showModal(modal);
+                return;
+            }
+
             if (action === 'claim') {
-                await supabase.from('recruitment_tickets').update({
+                const updates = {
                     assigned_to_username: interaction.user.username,
                     status: ticket.status === 'pending' ? 'in_review' : ticket.status,
                     updated_at: new Date().toISOString()
-                }).eq('id', ticketId);
+                };
+                await supabase.from('recruitment_tickets').update(updates).eq('id', ticketId);
                 await interaction.reply({ content: `Claimed by ${interaction.user}.`, ephemeral: false });
+                await refreshTicketPanel(interaction, { ...ticket, ...updates });
                 return;
             }
 
@@ -231,14 +270,11 @@ client.on(Events.InteractionCreate, async interaction => {
                 updates.first_response_by_username = interaction.user.username;
             }
             await supabase.from('recruitment_tickets').update(updates).eq('id', ticketId);
-            await supabase.from('recruitment_messages').insert({
-                ticket_id: ticketId, author_type: 'staff', author_username: interaction.user.username,
-                body: `Marked ${newStatus} via Discord.`, internal_note: true
-            });
 
             await interaction.reply({
                 content: `**${ticket.roblox_username}**'s application marked **${newStatus}** by ${interaction.user}. <@${ticket.discord_user_id}>`
             });
+            await refreshTicketPanel(interaction, { ...ticket, ...updates });
 
             try {
                 const link = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', ticket.roblox_user_id).maybeSingle();
@@ -250,6 +286,30 @@ client.on(Events.InteractionCreate, async interaction => {
                     await user.send(`Thanks for applying to PlayVerse. Unfortunately your application wasn't accepted this time. You're welcome to apply again in the future.`);
                 }
             } catch (e) { }
+            return;
+        }
+
+        if (interaction.isModalSubmit()) {
+            const [, ticketId] = interaction.customId.match(/^recruit_config_modal_(.+)$/) || [];
+            if (!ticketId) return;
+            if (!hasHRRole(interaction.member)) {
+                await interaction.reply({ content: "Only HR roles can configure this application.", ephemeral: true });
+                return;
+            }
+
+            const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', ticketId).maybeSingle();
+            if (error || !ticket) { await interaction.reply({ content: 'That ticket no longer exists.', ephemeral: true }); return; }
+
+            const position = interaction.fields.getTextInputValue('position').trim() || null;
+            const updates = { position, updated_at: new Date().toISOString() };
+            const { error: updateErr } = await supabase.from('recruitment_tickets').update(updates).eq('id', ticketId);
+            if (updateErr) {
+                await interaction.reply({ content: `Could not save that: ${updateErr.message}`, ephemeral: true });
+                return;
+            }
+
+            await interaction.reply({ content: `Updated by ${interaction.user}: position set to **${position || 'Not specified'}**.`, ephemeral: false });
+            await refreshTicketPanel(interaction, { ...ticket, ...updates });
             return;
         }
 

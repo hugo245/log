@@ -22,17 +22,23 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const DISCORD_NOTIFY_CHANNEL_ID = process.env.DISCORD_NOTIFY_CHANNEL_ID;
-const DISCORD_LEAD_CHANNEL_ID = process.env.DISCORD_LEAD_CHANNEL_ID || DISCORD_NOTIFY_CHANNEL_ID;
+const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID;
+const DISCORD_LEAD_CHANNEL_ID = process.env.DISCORD_LEAD_CHANNEL_ID;
 const DISCORD_LEAD_ROLE_ID = process.env.DISCORD_LEAD_ROLE_ID || '1539922527013572668';
+// Category new per-applicant ticket channels are created under, and the HR role(s) allowed into them.
+const DISCORD_TICKET_CATEGORY_ID = process.env.DISCORD_TICKET_CATEGORY_ID || '1540256971096072295';
+const DISCORD_HR_ROLE_ID = process.env.DISCORD_HR_ROLE_ID || process.env.DISCORD_HR_ROLE_IDS;
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
 const RECRUIT_SESSION_PORTAL_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const DISCORD_CONFIGURED = !!(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI);
 if (!DISCORD_CONFIGURED) {
     console.warn('Discord recruitment OAuth is not configured (DISCORD_CLIENT_ID/SECRET/REDIRECT_URI missing) - the recruitment flow will be disabled until it is.');
 }
-if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) {
-    console.warn('DISCORD_BOT_TOKEN/DISCORD_NOTIFY_CHANNEL_ID not set - new recruitment tickets will not be posted to Discord.');
+if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) {
+    console.warn('DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not set - new recruitment tickets will not get a private Discord ticket channel.');
+}
+if (!DISCORD_HR_ROLE_ID) {
+    console.warn('DISCORD_HR_ROLE_ID not set - ticket channels will only be visible to the applicant, not to HR.');
 }
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
@@ -341,48 +347,94 @@ async function discordApi(path, options) {
     return text ? JSON.parse(text) : null;
 }
 
-async function notifyDiscordNewTicket(ticket) {
-    if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) return;
+function discordChannelUrl(channelId) {
+    if (!channelId || !DISCORD_GUILD_ID) return null;
+    return `https://discord.com/channels/${DISCORD_GUILD_ID}/${channelId}`;
+}
+
+function ticketEmbedPayload(ticket) {
+    const statusColors = { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, rejected: 0xB3311C, withdrawn: 0x8A93A3 };
+    return {
+        title: `Application: ${ticket.roblox_username}`,
+        color: statusColors[ticket.status] || 0x3730D9,
+        fields: [
+            { name: 'Status', value: ticket.status, inline: true },
+            { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
+            { name: 'Position', value: ticket.position || 'Not specified', inline: true },
+            { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
+            { name: 'Why they want to join', value: (ticket.why_join || '').slice(0, 500) || 'N/A' },
+            { name: 'Experience', value: (ticket.experience || '').slice(0, 500) || 'N/A' }
+        ],
+        footer: { text: `Ticket ${ticket.id}` },
+        timestamp: new Date().toISOString()
+    };
+}
+
+// Creates a private per-applicant ticket channel under DISCORD_TICKET_CATEGORY_ID, visible only to the
+// applicant and the HR role(s), with a small Accept/Reject/Claim/Configure panel. This is where all
+// communication with the applicant now happens instead of the old website chat.
+async function createDiscordTicketChannel(ticket) {
+    if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) return null;
     try {
-        await discordApi(`/channels/${DISCORD_NOTIFY_CHANNEL_ID}/messages`, {
+        const VIEW_CHANNEL = 1024, SEND_MESSAGES = 2048, READ_MESSAGE_HISTORY = 65536, ATTACH_FILES = 32768, EMBED_LINKS = 16384;
+        const memberAllow = String(VIEW_CHANNEL + SEND_MESSAGES + READ_MESSAGE_HISTORY + ATTACH_FILES + EMBED_LINKS);
+        const overwrites = [
+            { id: DISCORD_GUILD_ID, type: 0, deny: String(VIEW_CHANNEL) }, // @everyone can't see it
+            { id: ticket.discord_user_id, type: 1, allow: memberAllow } // the applicant
+        ];
+        if (DISCORD_HR_ROLE_ID) overwrites.push({ id: DISCORD_HR_ROLE_ID, type: 0, allow: memberAllow });
+        // The bot's own user id matches its application (client) id - make sure it can always see the channel.
+        if (DISCORD_CLIENT_ID) overwrites.push({ id: DISCORD_CLIENT_ID, type: 1, allow: memberAllow });
+
+        const safeName = `ticket-${(ticket.roblox_username || 'applicant').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || ticket.id}`;
+        const channel = await discordApi(`/guilds/${DISCORD_GUILD_ID}/channels`, {
             method: 'POST',
             body: JSON.stringify({
-                embeds: [{
-                    title: 'New recruitment application',
-                    color: 0x3730D9,
-                    fields: [
-                        { name: 'Roblox', value: ticket.roblox_username, inline: true },
-                        { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
-                        { name: 'Position', value: ticket.position || 'Not specified', inline: true },
-                        { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
-                        { name: 'Why they want to join', value: (ticket.why_join || '').slice(0, 500) || 'N/A' }
-                    ],
-                    footer: { text: `Ticket ${ticket.id}` },
-                    timestamp: new Date().toISOString()
-                }],
+                name: safeName,
+                type: 0,
+                parent_id: DISCORD_TICKET_CATEGORY_ID,
+                topic: `Recruitment ticket ${ticket.id} - ${ticket.roblox_username}`,
+                permission_overwrites: overwrites
+            })
+        });
+        if (!channel || !channel.id) return null;
+
+        const message = await discordApi(`/channels/${channel.id}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                content: `${DISCORD_HR_ROLE_ID ? `<@&${DISCORD_HR_ROLE_ID}> ` : ''}<@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application.`,
+                embeds: [ticketEmbedPayload(ticket)],
                 components: [{
                     type: 1,
                     components: [
                         { type: 2, style: 3, label: 'Accept', custom_id: `recruit_accept_${ticket.id}` },
                         { type: 2, style: 4, label: 'Reject', custom_id: `recruit_reject_${ticket.id}` },
                         { type: 2, style: 2, label: 'Claim', custom_id: `recruit_claim_${ticket.id}` },
-                        { type: 2, style: 5, label: 'Open dashboard', url: `${APP_ORIGIN}/#/recruitment` }
+                        { type: 2, style: 1, label: 'Configure', custom_id: `recruit_config_${ticket.id}` }
                     ]
                 }]
             })
         });
+
+        await supabase.from('recruitment_tickets').update({
+            discord_channel_id: channel.id,
+            ticket_message_id: message ? message.id : null
+        }).eq('id', ticket.id);
+
+        return channel.id;
     } catch (e) {
-        console.error('notifyDiscordNewTicket failed:', e.message);
+        console.error('createDiscordTicketChannel failed:', e.message);
+        return null;
     }
 }
 
 async function notifyDiscordStatusChange(ticket, newStatus, byUsername) {
-    if (!DISCORD_BOT_TOKEN || !DISCORD_NOTIFY_CHANNEL_ID) return;
+    if (!DISCORD_BOT_TOKEN || !ticket.discord_channel_id) return;
     try {
-        await discordApi(`/channels/${DISCORD_NOTIFY_CHANNEL_ID}/messages`, {
+        await discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `**${ticket.roblox_username}**'s application was marked **${newStatus}** by ${byUsername}. <@${ticket.discord_user_id}>`
+                content: `**${ticket.roblox_username}**'s application was marked **${newStatus}** by ${byUsername} on the website.`
             })
         });
     } catch (e) {
@@ -484,21 +536,6 @@ async function sendPushToApplicant(robloxUserId, { title, body, url }) {
     } catch (e) {
         console.error('sendPushToApplicant failed:', e.message);
     }
-}
-
-const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
-async function uploadChatAttachment(dataUrl, pathPrefix) {
-    const match = /^data:(image\/(?:png|jpeg|jpg|gif|webp));base64,(.+)$/.exec(dataUrl || '');
-    if (!match) throw new Error('unsupported_image_type');
-    const contentType = match[1];
-    const buffer = Buffer.from(match[2], 'base64');
-    if (buffer.length > MAX_ATTACHMENT_BYTES) throw new Error('image_too_large');
-    const ext = contentType.split('/')[1].replace('jpeg', 'jpg');
-    const path = `${pathPrefix}/${Date.now()}_${randomToken(6)}.${ext}`;
-    const { error } = await supabase.storage.from('recruitment-attachments').upload(path, buffer, { contentType, upsert: false });
-    if (error) throw new Error(error.message);
-    const { data: publicUrlData } = supabase.storage.from('recruitment-attachments').getPublicUrl(path);
-    return publicUrlData.publicUrl;
 }
 
 async function fetchRobloxGroupRoles(robloxUserId) {
@@ -1369,7 +1406,7 @@ app.post('/recruitment/apply', async (req, res) => {
     const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
     await supabase.from('recruit_sessions').update({ expires_at: portalExpiresAt }).eq('token', recruitSession.token);
 
-    notifyDiscordNewTicket(ticket);
+    createDiscordTicketChannel(ticket);
     res.json({ ok: true, data: { id: ticket.id } });
 });
 
@@ -1387,54 +1424,14 @@ app.get('/recruitment/my-ticket', async (req, res) => {
     if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
     if (!ticket) { res.status(404).json({ ok: false, error: 'no_ticket' }); return; }
 
-    const { data: messages, error: msgErr } = await supabase
-        .from('recruitment_messages')
-        .select('*')
-        .eq('ticket_id', ticket.id)
-        .eq('internal_note', false)
-        .order('created_at', { ascending: true });
-    if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
-
-    res.json({ ok: true, data: { ticket, messages: messages || [], pushConfigured: PUSH_CONFIGURED } });
-});
-
-app.post('/recruitment/my-ticket/message', async (req, res) => {
-    const recruitSession = await getRecruitSession(req);
-    if (!recruitSession) { res.status(401).json({ ok: false, error: 'session_expired' }); return; }
-
-    const body = req.body || {};
-    const text = body.body ? String(body.body).trim() : '';
-    const attachmentDataUrl = body.attachmentDataUrl ? String(body.attachmentDataUrl) : null;
-    if (!text && !attachmentDataUrl) { res.status(400).json({ ok: false, error: 'missing_body' }); return; }
-
-    const { data: ticket, error: ticketErr } = await supabase
-        .from('recruitment_tickets')
-        .select('*')
-        .eq('roblox_user_id', recruitSession.roblox_user_id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-    if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
-    if (!ticket) { res.status(404).json({ ok: false, error: 'no_ticket' }); return; }
-
-    let attachmentUrl = null;
-    if (attachmentDataUrl) {
-        try { attachmentUrl = await uploadChatAttachment(attachmentDataUrl, `ticket-${ticket.id}`); }
-        catch (e) { res.status(400).json({ ok: false, error: e.message }); return; }
-    }
-
-    const { error: msgErr } = await supabase.from('recruitment_messages').insert({
-        ticket_id: ticket.id,
-        author_type: 'applicant',
-        author_username: recruitSession.roblox_username,
-        body: text || '(image)',
-        attachment_url: attachmentUrl,
-        internal_note: false
+    res.json({
+        ok: true,
+        data: {
+            ticket,
+            discordChannelUrl: discordChannelUrl(ticket.discord_channel_id),
+            pushConfigured: PUSH_CONFIGURED
+        }
     });
-    if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
-
-    await supabase.from('recruitment_tickets').update({ updated_at: new Date().toISOString() }).eq('id', ticket.id);
-    res.json({ ok: true });
 });
 
 app.get('/recruitment/push-public-key', (req, res) => {
@@ -3062,78 +3059,10 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'recruitment.view')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        const [{ data: ticket, error: ticketErr }, { data: messages, error: msgErr }] = await Promise.all([
-            supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle(),
-            supabase.from('recruitment_messages').select('*').eq('ticket_id', id).order('created_at', { ascending: true })
-        ]);
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
-        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
-        if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
-        res.json({ ok: true, data: { ticket, messages: messages || [] } });
-        return;
-    }
-
-    if (action === 'recruitment_add_message') {
-        if (!requirePermission(res, session, 'recruitment.respond')) return;
-        const id = payload.id;
-        const body = payload.body ? String(payload.body).trim() : '';
-        const attachmentDataUrl = payload.attachmentDataUrl ? String(payload.attachmentDataUrl) : null;
-        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        if (!body && !attachmentDataUrl) { res.status(400).json({ ok: false, error: 'missing_body' }); return; }
-
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
         if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
-
-        let attachmentUrl = null;
-        if (attachmentDataUrl) {
-            try { attachmentUrl = await uploadChatAttachment(attachmentDataUrl, `ticket-${id}`); }
-            catch (e) { res.status(400).json({ ok: false, error: e.message }); return; }
-        }
-
-        const isInternal = !!payload.internalNote;
-        const { error: msgErr } = await supabase.from('recruitment_messages').insert({
-            ticket_id: id,
-            author_type: 'staff',
-            author_user_id: session.roblox_user_id,
-            author_username: session.roblox_username,
-            body: body || '(image)',
-            attachment_url: attachmentUrl,
-            internal_note: isInternal
-        });
-        if (msgErr) { res.status(500).json({ ok: false, error: msgErr.message }); return; }
-
-        const updates = { updated_at: new Date().toISOString() };
-        if (!ticket.first_response_at) {
-            updates.first_response_at = new Date().toISOString();
-            updates.first_response_by_username = session.roblox_username;
-        }
-        await supabase.from('recruitment_tickets').update(updates).eq('id', id);
-
-        if (!isInternal) {
-            sendPushToApplicant(ticket.roblox_user_id, {
-                title: `New message from ${session.roblox_username}`,
-                body: body ? body.slice(0, 120) : 'Sent an image',
-                url: `${APP_ORIGIN}/#/recruit/status`
-            });
-        }
-
-        logAudit(session, { category: 'recruitment', action: 'message', targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username, details: { ticketId: id } });
-        res.json({ ok: true });
-        return;
-    }
-
-    if (action === 'recruitment_upload_attachment') {
-        if (!requirePermission(res, session, 'recruitment.respond')) return;
-        const dataUrl = payload.dataUrl ? String(payload.dataUrl) : '';
-        const ticketId = payload.ticketId ? String(payload.ticketId) : 'misc';
-        if (!dataUrl) { res.status(400).json({ ok: false, error: 'missing_data_url' }); return; }
-        try {
-            const url = await uploadChatAttachment(dataUrl, `ticket-${ticketId}`);
-            res.json({ ok: true, data: { url } });
-        } catch (e) {
-            res.status(400).json({ ok: false, error: e.message });
-        }
+        res.json({ ok: true, data: { ticket, discordChannelUrl: discordChannelUrl(ticket.discord_channel_id) } });
         return;
     }
 
@@ -3165,11 +3094,11 @@ app.post('/hr-data', async (req, res) => {
         const { error: updateErr } = await supabase.from('recruitment_tickets').update(updates).eq('id', id);
         if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
 
-        if (reason) {
-            await supabase.from('recruitment_messages').insert({
-                ticket_id: id, author_type: 'staff', author_user_id: session.roblox_user_id,
-                author_username: session.roblox_username, body: reason, internal_note: true
-            });
+        if (reason && ticket.discord_channel_id) {
+            discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
+                method: 'POST',
+                body: JSON.stringify({ content: `**Reason (${session.roblox_username}):** ${reason}` })
+            }).catch(e => console.error('posting status reason to Discord failed:', e.message));
         }
 
         const statusLabels = { pending: 'set to pending', in_review: 'marked in review', accepted: 'accepted', rejected: 'rejected', withdrawn: 'marked withdrawn' };
