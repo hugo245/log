@@ -4102,7 +4102,8 @@
       missing_code_or_state: 'Discord sign-in was incomplete, please try again.',
       account_banned: 'This Roblox account is banned and cannot apply.',
       application_already_open: "You already have an application in progress, sit tight - we'll get back to you.",
-      discord_not_linked: 'Please link your Discord account first.'
+      discord_not_linked: 'Please link your Discord account first.',
+      discord_not_in_server: "You'll need to join our Discord server before you can apply - once you're in, come back and try again."
     };
 
     function renderRecruitGate() {
@@ -4415,9 +4416,14 @@
         paint();
 
         if (!pollTimer && data) {
-          pollTimer = setInterval(() => { if (renderGen !== myGen) { clearInterval(pollTimer); return; } load(false); }, 15000);
+          pollTimer = setInterval(() => { if (renderGen !== myGen) { clearInterval(pollTimer); return; } load(false); }, 4000);
         }
       }
+
+      document.addEventListener('visibilitychange', () => {
+        if (renderGen !== myGen) return;
+        if (document.visibilityState === 'visible' && data) load(false);
+      });
 
       function maybeShowNotifyModal() {
         if (notifyModalShown || !data) return;
@@ -4538,6 +4544,7 @@
       let recruiters = [];
       let busy = false;
       let ticketPollTimer = null;
+      let listPollTimer = null;
 
       let nextPhaseModalOpen = false;
       let nextPhaseSkillsets = [];
@@ -4571,6 +4578,31 @@
         }
       }
 
+      // Refreshes the ticket list in the background (no loading spinner) so status changes made
+      // from Discord (Accept/Reject/Claim/Configure) show up here without a manual refresh.
+      async function refreshTicketsQuiet() {
+        try {
+          tickets = await loadRecruitmentTickets(statusFilter);
+          paint();
+        } catch (e) { }
+      }
+
+      if (!listPollTimer) {
+        listPollTimer = setInterval(() => {
+          if (renderGen !== myGen) { clearInterval(listPollTimer); return; }
+          refreshTicketsQuiet();
+        }, 5000);
+      }
+      document.addEventListener('visibilitychange', () => {
+        if (renderGen !== myGen) return;
+        if (document.visibilityState === 'visible') {
+          refreshTicketsQuiet();
+          if (openTicketId) {
+            loadRecruitmentTicket(openTicketId).then(d => { ticketDetail = d; paintModal(); }).catch(() => { });
+          }
+        }
+      });
+
       async function openTicket(id) {
         openTicketId = id; ticketDetail = null; ticketDetailLoading = true;
         nextPhaseModalOpen = false; nextPhaseError = null; nextPhaseSelectedSkillsetId = ''; allSetModalOpen = false;
@@ -4588,7 +4620,7 @@
             ticketDetail = await loadRecruitmentTicket(id);
             paintModal();
           } catch (e) { }
-        }, 15000);
+        }, 4000);
       }
 
 
