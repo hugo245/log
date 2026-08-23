@@ -1403,12 +1403,25 @@ app.post('/recruitment/apply', async (req, res) => {
     const body = req.body || {};
     const experience = body.experience ? String(body.experience).trim() : '';
     const whyJoin = body.whyJoin ? String(body.whyJoin).trim() : '';
-    const portfolioUrl = body.portfolioUrl ? String(body.portfolioUrl).trim() : null;
+    let portfolioUrl = body.portfolioUrl ? String(body.portfolioUrl).trim() : null;
     const position = body.position ? String(body.position).trim() : null;
     const referredByUserId = body.referredByUserId != null && body.referredByUserId !== '' ? Number(body.referredByUserId) : null;
 
     if (!experience) { res.status(400).json({ ok: false, error: 'missing_experience' }); return; }
     if (!whyJoin) { res.status(400).json({ ok: false, error: 'missing_why_join' }); return; }
+
+    // Reject anything that isn't a genuine http(s) link. This is the field HR staff click
+    // on from the review dashboard, so it must never be able to carry a javascript:, data:,
+    // vbscript:, etc. URL through to their browser - that's a stored XSS -> session-theft path.
+    if (portfolioUrl) {
+        let parsed;
+        try { parsed = new URL(portfolioUrl); } catch (e) { parsed = null; }
+        if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+            res.status(400).json({ ok: false, error: 'invalid_portfolio_url' });
+            return;
+        }
+        portfolioUrl = parsed.href;
+    }
 
     const { data: existingOpen } = await supabase
         .from('recruitment_tickets')

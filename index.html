@@ -2799,6 +2799,21 @@
       return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
+    // Only ever put a URL into an href if it's actually http(s). Anything else
+    // (javascript:, data:, vbscript:, etc.) is a stored-XSS vector, since browsers
+    // will execute those schemes on click regardless of target="_blank".
+    function safeUrl(str) {
+      const s = String(str ?? '').trim();
+      if (!s) return null;
+      try {
+        const u = new URL(s, window.location.origin);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        return u.href;
+      } catch (e) {
+        return null;
+      }
+    }
+
     function fmtDate(ts) {
       const d = new Date(ts);
       return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
@@ -4270,6 +4285,7 @@
           const errs = {};
           if (!experience) errs.experience = 'Please share a bit about your experience.';
           if (!whyJoin) errs.whyJoin = "Let us know why you'd like to join.";
+          if (portfolioUrl && !safeUrl(portfolioUrl)) errs.portfolioUrl = 'Please enter a valid http:// or https:// link.';
           if (Object.keys(errs).length) { fieldErrors = errs; submitError = null; paint(); return; }
           fieldErrors = {};
           submitting = true; submitError = null; paint();
@@ -4466,7 +4482,7 @@
 
         <div class="panel" style="padding:20px;">
           <div class="preview-label" style="margin-bottom:10px;">Application details</div>
-          ${data.ticket.portfolio_url ? `<div class="modal-info-row"><strong>Portfolio:</strong> <a href="${esc(data.ticket.portfolio_url)}" target="_blank" rel="noopener">${esc(data.ticket.portfolio_url)}</a></div>` : ''}
+          ${data.ticket.portfolio_url ? (() => { const pu = safeUrl(data.ticket.portfolio_url); return `<div class="modal-info-row"><strong>Portfolio:</strong> ${pu ? `<a href="${esc(pu)}" target="_blank" rel="noopener noreferrer nofollow">${esc(data.ticket.portfolio_url)}</a>` : `${esc(data.ticket.portfolio_url)} <span style="color:var(--danger,#e55);font-size:12px;">(unsafe link removed)</span>`}</div>`; })() : ''}
           <div class="modal-info-row"><strong>Referred by:</strong> ${esc(data.ticket.referred_by_username || 'No one')}</div>
           <div class="modal-info-row" style="white-space:pre-wrap;margin-top:8px;"><strong>Experience:</strong><br>${esc(data.ticket.experience)}</div>
           <div class="modal-info-row" style="white-space:pre-wrap;margin-top:8px;"><strong>Why you want to join:</strong><br>${esc(data.ticket.why_join)}</div>
@@ -4732,7 +4748,7 @@
           <div class="modal-section">
             <div class="modal-section-title">Application</div>
             ${t.position ? `<div class="modal-info-row"><strong>Position:</strong> ${esc(t.position)}</div>` : ''}
-            ${t.portfolio_url ? `<div class="modal-info-row"><strong>Portfolio:</strong> <a href="${esc(t.portfolio_url)}" target="_blank" rel="noopener">${esc(t.portfolio_url)}</a></div>` : ''}
+            ${t.portfolio_url ? (() => { const pu = safeUrl(t.portfolio_url); return `<div class="modal-info-row"><strong>Portfolio:</strong> ${pu ? `<a href="${esc(pu)}" target="_blank" rel="noopener noreferrer nofollow">${esc(t.portfolio_url)}</a>` : `${esc(t.portfolio_url)} <span style="color:var(--danger,#e55);font-size:12px;">(unsafe link removed)</span>`}</div>`; })() : ''}
             <div class="modal-info-row"><strong>Referred by:</strong> ${esc(t.referred_by_username || 'No one')}</div>
             <div class="modal-info-row" style="white-space:pre-wrap;margin-top:8px;"><strong>Experience:</strong><br>${esc(t.experience)}</div>
             <div class="modal-info-row" style="white-space:pre-wrap;margin-top:8px;"><strong>Why they want to join:</strong><br>${esc(t.why_join)}</div>
