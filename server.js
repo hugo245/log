@@ -1357,7 +1357,12 @@ app.get('/discord-auth-callback', async (req, res) => {
             client_secret: DISCORD_CLIENT_SECRET
         })
     });
-    if (!tokenRes.ok) { fail(stateRow.rt, 'token_exchange_failed'); return; }
+    if (!tokenRes.ok) {
+        const errBody = await tokenRes.text().catch(() => '');
+        console.error(`[discord-auth-callback] token exchange failed (status ${tokenRes.status}) for rt ${stateRow.rt}: ${errBody}`);
+        fail(stateRow.rt, 'token_exchange_failed');
+        return;
+    }
     const tokenJson = await tokenRes.json();
 
     const userRes = await fetch('https://discord.com/api/v10/users/@me', {
