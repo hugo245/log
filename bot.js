@@ -47,12 +47,19 @@ const commands = [
 
 async function registerCommands() {
     const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
-    if (DISCORD_GUILD_ID) {
-        await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body: commands });
-        console.log(`Registered slash commands to guild ${DISCORD_GUILD_ID}`);
-    } else {
-        await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), { body: commands });
-        console.log('Registered global slash commands (can take up to an hour to show up everywhere)');
+    try {
+        if (DISCORD_GUILD_ID) {
+            await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body: commands });
+            console.log(`Registered slash commands to guild ${DISCORD_GUILD_ID}`);
+        } else {
+            await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), { body: commands });
+            console.log('Registered global slash commands (can take up to an hour to show up everywhere)');
+        }
+    } catch (e) {
+        if (e && e.status === 429) {
+            console.error(`registerCommands: Discord rate-limited this request (429)${e.retryAfter ? `, retry after ${e.retryAfter}s` : ''}. Not retrying immediately to avoid making the block worse.`);
+        }
+        throw e;
     }
 }
 
@@ -403,8 +410,25 @@ const http = require('http');
 http.createServer((req, res) => res.end('bot is alive')).listen(4000);
 
 (async () => {
-    await registerCommands();
-    await client.login(DISCORD_BOT_TOKEN);
-    await reconcilePlacements();
+    try {
+        await registerCommands();
+    } catch (e) {
+        // Don't let a failed command registration (e.g. Discord's global rate limit, or a
+        // transient network error) take down the whole bot process. Slash commands can be
+        // registered again on a later boot - what matters is that the bot still logs in and
+        // keeps handling tickets/buttons in the meantime.
+        console.error('registerCommands failed, continuing without re-registering slash commands:', e.message);
+    }
+    try {
+        await client.login(DISCORD_BOT_TOKEN);
+    } catch (e) {
+        console.error('client.login failed - the bot will not be able to handle interactions:', e.message);
+        return;
+    }
+    try {
+        await reconcilePlacements();
+    } catch (e) {
+        console.error('initial reconcilePlacements failed:', e.message);
+    }
     setInterval(reconcilePlacements, RECONCILE_INTERVAL_MS);
 })();
