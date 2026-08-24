@@ -4115,6 +4115,7 @@
       token_exchange_failed: 'Discord could not confirm your sign-in, please try again.',
       userinfo_failed: 'Could not read your Discord profile, please try again.',
       missing_code_or_state: 'Discord sign-in was incomplete, please try again.',
+      link_save_failed: "Discord confirmed your sign-in, but we couldn't save the link to your account. Please try again - if it keeps happening, this is a server-side issue.",
       account_banned: 'This Roblox account is banned and cannot apply.',
       application_already_open: "You already have an application in progress, sit tight - we'll get back to you.",
       discord_not_linked: 'Please link your Discord account first.',
@@ -4229,6 +4230,7 @@
         ` : !info.discordLinked ? `
           <h2>Link your Discord</h2>
           <p>Recruitment applications need a linked Discord account.</p>
+          ${submitError ? `<div class="error-box"><span>${esc(submitError)}</span></div>` : ''}
           <button type="button" class="btn btn-primary" id="applyLinkDiscordBtn">Link Discord account</button>
         ` : `
           <h2 style="text-align:left;">Apply to PlayVerse</h2>

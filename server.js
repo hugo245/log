@@ -1371,11 +1371,19 @@ app.get('/discord-auth-callback', async (req, res) => {
         ? `https://cdn.discordapp.com/avatars/${discordUserId}/${discordUser.avatar}.png`
         : null;
 
-    await supabase.from('recruit_sessions').update({
+    const { error: linkErr } = await supabase.from('recruit_sessions').update({
         discord_user_id: discordUserId,
         discord_username: discordUsername,
         discord_avatar: discordAvatar
     }).eq('token', recruitSession.token);
+
+    if (linkErr) {
+        // Don't redirect as if this succeeded - discordLinked would still be false and the
+        // user would just land back on the "Link your Discord" screen with no explanation.
+        console.error(`[discord-auth-callback] failed to save discord link for rt ${stateRow.rt}:`, linkErr.message);
+        fail(stateRow.rt, 'link_save_failed');
+        return;
+    }
 
     res.redirect(`${APP_ORIGIN}/#/recruit/apply?rt=${encodeURIComponent(recruitSession.token)}`);
 });
