@@ -63,6 +63,122 @@ async function registerCommands() {
     }
 }
 
+function generateRequestId() {
+    const rand = Math.floor(100000 + Math.random() * 900000);
+    const stamp = Date.now().toString(36).slice(-4);
+    return `PV_${rand}_${stamp}`;
+}
+
+// Configurable recruitment auto-hire settings, mirrors server.js's copy - kept in app_settings so
+// both processes (and the dashboard) read/write the same source of truth.
+async function getRecruitmentConfig() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('recruitment_auto_role_id, recruitment_discord_role_id, recruitment_grace_period_hours')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return {
+        autoRoleId: data && data.recruitment_auto_role_id != null ? String(data.recruitment_auto_role_id) : null,
+        discordRoleId: data && data.recruitment_discord_role_id ? String(data.recruitment_discord_role_id) : null,
+        gracePeriodHours: data && data.recruitment_grace_period_hours != null ? Number(data.recruitment_grace_period_hours) : null
+    };
+}
+
+async function grantAutoHireRole(ticket, roleId) {
+    if (!roleId || !ticket.roblox_user_id) return;
+    const { error } = await supabase.from('user_role_assignments').insert({
+        roblox_user_id: ticket.roblox_user_id,
+        role_id: roleId,
+        roblox_username: ticket.roblox_username
+    });
+    if (error && error.code !== '23505') console.error('grantAutoHireRole failed:', error.message);
+}
+
+async function grantDiscordRole(guild, discordUserId, roleId) {
+    if (!guild || !discordUserId || !roleId) return;
+    try {
+        const member = await guild.members.fetch(discordUserId);
+        await member.roles.add(roleId);
+    } catch (e) {
+        console.error(`grantDiscordRole: failed to add role ${roleId} to ${discordUserId}:`, e.message);
+    }
+}
+
+async function logSystemPaymentRequest({ robloxUserId, robloxUsername, taskName, note }) {
+    if (!robloxUserId || !robloxUsername) return null;
+    const id = generateRequestId();
+    const { error } = await supabase.from('payment_requests').insert({
+        id,
+        requested_by: 'System',
+        roblox_username: robloxUsername,
+        roblox_user_id: robloxUserId,
+        task_name: taskName,
+        game: 'Recruitment',
+        work_raw: note || '',
+        time_worked: '',
+        payment: 1000,
+        currency: 'ROBUX',
+        paid: false,
+        paid_at: null,
+        created_at: new Date().toISOString()
+    });
+    if (error) { console.error('logSystemPaymentRequest failed:', error.message); return null; }
+    return id;
+}
+
+// Resolves the Roblox identity of a staff member from their Discord id, via the same discord_links
+// table applicants use to link their accounts (staff go through the same Roblox+Discord linking).
+async function resolveRobloxForDiscordUser(discordUserId) {
+    if (!discordUserId) return null;
+    const { data } = await supabase.from('discord_links').select('roblox_user_id, roblox_username').eq('discord_user_id', discordUserId).maybeSingle();
+    return data || null;
+}
+
+// Runs once per ticket the moment it becomes "accepted": grants the configured tool/Discord roles,
+// and auto-logs 1,000 Robux payment requests (from "System") to the referrer and the reviewer.
+// Idempotency flags on the ticket keep this from double-granting/double-paying.
+async function processHire(ticket, { reviewerUserId, reviewerUsername, guild }) {
+    try {
+        const config = await getRecruitmentConfig();
+        const flagUpdates = {};
+
+        if (!ticket.hire_role_granted) {
+            if (config.autoRoleId) await grantAutoHireRole(ticket, config.autoRoleId);
+            if (config.discordRoleId && ticket.discord_user_id) await grantDiscordRole(guild, ticket.discord_user_id, config.discordRoleId);
+            flagUpdates.hire_role_granted = true;
+        }
+
+        if (!ticket.referral_reward_logged && ticket.referred_by_user_id
+            && String(ticket.referred_by_user_id) !== String(ticket.roblox_user_id)) {
+            await logSystemPaymentRequest({
+                robloxUserId: ticket.referred_by_user_id,
+                robloxUsername: ticket.referred_by_username,
+                taskName: 'Referral bonus',
+                note: `Referral bonus for ${ticket.roblox_username} being hired (ticket ${ticket.id}).`
+            });
+            flagUpdates.referral_reward_logged = true;
+        }
+
+        if (!ticket.reviewer_reward_logged && reviewerUserId && reviewerUsername
+            && String(reviewerUserId) !== String(ticket.roblox_user_id)) {
+            await logSystemPaymentRequest({
+                robloxUserId: reviewerUserId,
+                robloxUsername: reviewerUsername,
+                taskName: 'Recruitment ticket review',
+                note: `Reviewed and accepted ${ticket.roblox_username}'s application (ticket ${ticket.id}).`
+            });
+            flagUpdates.reviewer_reward_logged = true;
+        }
+
+        if (Object.keys(flagUpdates).length) {
+            await supabase.from('recruitment_tickets').update(flagUpdates).eq('id', ticket.id);
+        }
+    } catch (e) {
+        console.error(`processHire failed for ticket ${ticket.id}:`, e.message);
+    }
+}
+
 function statusColor(status) {
     return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
 }
@@ -266,10 +382,19 @@ client.on(Events.InteractionCreate, async interaction => {
             }
 
             const newStatus = action === 'accept' ? 'accepted' : 'rejected';
+            let reviewerLink = null;
+            if (newStatus === 'accepted') {
+                reviewerLink = await resolveRobloxForDiscordUser(interaction.user.id);
+                if (!reviewerLink) {
+                    console.warn(`recruit_accept: ${interaction.user.tag} (${interaction.user.id}) has no discord_links entry - skipping their reviewer bonus.`);
+                }
+            }
             const updates = {
                 status: newStatus,
                 closed_at: new Date().toISOString(),
                 closed_by_username: interaction.user.username,
+                closed_by_roblox_user_id: reviewerLink ? reviewerLink.roblox_user_id : null,
+                closed_by_roblox_username: reviewerLink ? reviewerLink.roblox_username : null,
                 updated_at: new Date().toISOString()
             };
             if (!ticket.first_response_at) {
@@ -282,6 +407,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 content: `**${ticket.roblox_username}**'s application marked **${newStatus}** by ${interaction.user}. <@${ticket.discord_user_id}>`
             });
             await refreshTicketPanel(interaction, { ...ticket, ...updates });
+
+            if (newStatus === 'accepted' && ticket.status !== 'accepted') {
+                await processHire({ ...ticket, ...updates }, {
+                    reviewerUserId: reviewerLink ? reviewerLink.roblox_user_id : null,
+                    reviewerUsername: reviewerLink ? reviewerLink.roblox_username : null,
+                    guild: interaction.guild
+                });
+            }
 
             try {
                 const link = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', ticket.roblox_user_id).maybeSingle();

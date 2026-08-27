@@ -3406,6 +3406,15 @@
       await callHrData('save_base_access', { groupId, minRank });
     }
 
+    async function getRecruitmentConfig() {
+      const json = await callHrData('recruitment_get_config');
+      return json.data || { autoRoleId: null, discordRoleId: null, gracePeriodHours: null };
+    }
+
+    async function saveRecruitmentConfig(autoRoleId, discordRoleId, gracePeriodHours) {
+      await callHrData('recruitment_save_config', { autoRoleId, discordRoleId, gracePeriodHours });
+    }
+
     async function getIgnoreEligibility() {
       const json = await callHrData('get_ignore_eligibility');
       return !!(json.data && json.data.ignoreEligibility);
@@ -6681,6 +6690,12 @@
       let addLinkError = null;
       let lastCreatedLink = null;
 
+      let recruitmentConfig = { autoRoleId: null, discordRoleId: null, gracePeriodHours: null };
+      let recruitmentConfigLoading = canManageOnboarding;
+      let recruitmentConfigError = null;
+      let savingRecruitmentConfig = false;
+      let recruitmentConfigSuccess = false;
+
       let broadcasts = [];
       let broadcastTeams = [];
       let broadcastsLoading = canManageBroadcasts;
@@ -7069,6 +7084,37 @@
           <div class="field"><label>Label <span class="hint">(optional)</span></label><input type="text" id="newLinkLabel" placeholder="e.g. August builders batch"></div>
           <button type="button" class="btn btn-primary" id="createLinkBtn" ${addingLink ? 'disabled' : ''}>${addingLink ? 'Creating...' : 'Create link'}</button>
         </div>
+      </div>
+
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">Recruitment</span>
+        <h1>Auto-hire settings</h1>
+        <p class="sub">Control what happens automatically when someone is hired: which role(s) they're given, and how long HR has to respond before an application accepts itself.</p>
+      </div>
+      <div class="panel" style="max-width:640px;">
+        ${recruitmentConfigError ? `<div class="error-box"><span>${esc(recruitmentConfigError)}</span></div>` : ''}
+        ${recruitmentConfigSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Auto-hire settings updated</strong></div></div>` : ''}
+        ${recruitmentConfigLoading ? `<div class="dash-loading">Loading auto-hire settings...</div>` : `
+        <div class="field">
+          <label>Auto-assigned tool role <span class="hint">(optional)</span></label>
+          <select id="recruitAutoRole">
+            <option value="">No automatic role</option>
+            ${roles.map(r => `<option value="${esc(r.id)}" ${recruitmentConfig.autoRoleId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+          </select>
+          <p class="sub" style="margin:6px 0 0;">Granted automatically in the Tool the moment an application is accepted.</p>
+        </div>
+        <div class="field">
+          <label>Auto-assigned Discord role ID <span class="hint">(optional)</span></label>
+          <input type="text" id="recruitDiscordRole" placeholder="e.g. 123456789012345678" value="${recruitmentConfig.discordRoleId ? esc(recruitmentConfig.discordRoleId) : ''}">
+          <p class="sub" style="margin:6px 0 0;">The bot needs a role above this one in the server's role list to be able to grant it.</p>
+        </div>
+        <div class="field">
+          <label>Grace period before auto-accept <span class="hint">(hours, blank to disable)</span></label>
+          <input type="number" id="recruitGraceHours" min="0" step="0.5" placeholder="e.g. 6" value="${recruitmentConfig.gracePeriodHours != null ? esc(recruitmentConfig.gracePeriodHours) : ''}">
+          <p class="sub" style="margin:6px 0 0;">If nobody accepts, rejects, or claims an application within this window, it's automatically accepted and gets the role(s) above. Leave blank to always require a human decision.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="saveRecruitConfigBtn" ${savingRecruitmentConfig ? 'disabled' : ''}>${savingRecruitmentConfig ? 'Saving...' : 'Save auto-hire settings'}</button>
+        `}
       </div>` : ''}
 
       ${manageTab === 'broadcasts' && canManageBroadcasts ? `
@@ -7151,6 +7197,28 @@
             } catch (err) {
               savingBaseAccess = false;
               baseAccessError = (err && err.message) ? err.message : 'Could not save the sign-in requirement. Check your connection and try again.';
+              paint();
+            }
+          });
+        }
+
+        if (canManageOnboarding) {
+          const saveRecruitConfigBtn = document.getElementById('saveRecruitConfigBtn');
+          if (saveRecruitConfigBtn) saveRecruitConfigBtn.addEventListener('click', async () => {
+            const autoRoleRaw = document.getElementById('recruitAutoRole').value;
+            const discordRoleId = document.getElementById('recruitDiscordRole').value.trim() || null;
+            const graceRaw = document.getElementById('recruitGraceHours').value.trim();
+            const autoRoleId = autoRoleRaw === '' ? null : autoRoleRaw;
+            const gracePeriodHours = graceRaw === '' ? null : Number(graceRaw);
+            if (gracePeriodHours != null && !(gracePeriodHours >= 0)) { recruitmentConfigError = 'Enter a valid, non-negative number of hours, or leave it blank to disable auto-accept.'; recruitmentConfigSuccess = false; paint(); return; }
+            savingRecruitmentConfig = true; recruitmentConfigError = null; recruitmentConfigSuccess = false; paint();
+            try {
+              await saveRecruitmentConfig(autoRoleId, discordRoleId, gracePeriodHours);
+              recruitmentConfig = { autoRoleId, discordRoleId, gracePeriodHours };
+              savingRecruitmentConfig = false; recruitmentConfigSuccess = true; paint();
+            } catch (err) {
+              savingRecruitmentConfig = false;
+              recruitmentConfigError = (err && err.message) ? err.message : 'Could not save auto-hire settings. Check your connection and try again.';
               paint();
             }
           });
@@ -7553,6 +7621,18 @@
         paint();
       }
 
+      async function loadRecruitmentConfig() {
+        recruitmentConfigLoading = true; recruitmentConfigError = null; paint();
+        try {
+          recruitmentConfig = await getRecruitmentConfig();
+        } catch (err) {
+          recruitmentConfigError = (err && err.message) ? err.message : 'Could not load auto-hire settings.';
+        }
+        if (myGen !== renderGen) return;
+        recruitmentConfigLoading = false;
+        paint();
+      }
+
       async function loadAssignments() {
         try {
           assignments = await listRoleAssignments();
@@ -7610,7 +7690,7 @@
       } else if (canManageOnboarding) {
         loadRoles();
       }
-      if (canManageOnboarding) loadTeamsData();
+      if (canManageOnboarding) { loadTeamsData(); loadRecruitmentConfig(); }
       if (canManageBroadcasts) loadBroadcastsData();
     }
 

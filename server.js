@@ -549,6 +549,171 @@ async function notifyDiscordPlacement(ticket, team, byUsername) {
     }
 }
 
+// Adds a configured Discord role to a member via the bot's REST token. Safe to call even if the
+// member already has the role (Discord treats it as a no-op).
+async function addDiscordRoleToMember(discordUserId, roleId) {
+    if (!discordUserId || !roleId || !DISCORD_GUILD_ID) return false;
+    try {
+        await discordApi(`/guilds/${DISCORD_GUILD_ID}/members/${discordUserId}/roles/${roleId}`, { method: 'PUT' });
+        return true;
+    } catch (e) {
+        console.error(`addDiscordRoleToMember: failed to add role ${roleId} to ${discordUserId}:`, e.message);
+        return false;
+    }
+}
+
+// Grants the configured in-app tool role to a freshly-hired user. Ignores the unique-constraint
+// error if they somehow already have it.
+async function grantAutoHireRole(ticket, roleId) {
+    if (!roleId || !ticket.roblox_user_id) return false;
+    const { error } = await supabase.from('user_role_assignments').insert({
+        roblox_user_id: ticket.roblox_user_id,
+        role_id: roleId,
+        roblox_username: ticket.roblox_username
+    });
+    if (error && error.code !== '23505') { console.error('grantAutoHireRole failed:', error.message); return false; }
+    return true;
+}
+
+// Logs a 1,000 Robux payment request from "System" (not a real staff member) for referral/review bonuses.
+async function logSystemPaymentRequest({ robloxUserId, robloxUsername, taskName, note }) {
+    if (!robloxUserId || !robloxUsername) return null;
+    const id = generateRequestId();
+    const { error } = await supabase.from('payment_requests').insert({
+        id,
+        requested_by: 'System',
+        roblox_username: robloxUsername,
+        roblox_user_id: robloxUserId,
+        task_name: taskName,
+        game: 'Recruitment',
+        work_raw: note || '',
+        time_worked: '',
+        payment: 1000,
+        currency: 'ROBUX',
+        paid: false,
+        paid_at: null,
+        created_at: new Date().toISOString()
+    });
+    if (error) { console.error('logSystemPaymentRequest failed:', error.message); return null; }
+    return id;
+}
+
+// Runs exactly once per ticket the moment it becomes "accepted" (whether by HR or auto-accept):
+// grants the configured tool/Discord roles, and auto-logs 1,000 Robux payment requests (from
+// "System") to the referrer and the reviewer who accepted them. Idempotency flags on the ticket
+// keep this from double-granting roles or double-paying if the status is touched again later.
+async function processHire(ticket, { reviewerUserId, reviewerUsername }) {
+    try {
+        const config = await getRecruitmentConfig();
+        const flagUpdates = {};
+
+        if (!ticket.hire_role_granted) {
+            if (config.autoRoleId) await grantAutoHireRole(ticket, config.autoRoleId);
+            if (config.discordRoleId && ticket.discord_user_id) await addDiscordRoleToMember(ticket.discord_user_id, config.discordRoleId);
+            flagUpdates.hire_role_granted = true;
+        }
+
+        if (!ticket.referral_reward_logged && ticket.referred_by_user_id
+            && String(ticket.referred_by_user_id) !== String(ticket.roblox_user_id)) {
+            const paymentId = await logSystemPaymentRequest({
+                robloxUserId: ticket.referred_by_user_id,
+                robloxUsername: ticket.referred_by_username,
+                taskName: 'Referral bonus',
+                note: `Referral bonus for ${ticket.roblox_username} being hired (ticket ${ticket.id}).`
+            });
+            flagUpdates.referral_reward_logged = true;
+            if (paymentId) {
+                logAudit(null, {
+                    category: 'payments', action: 'auto_referral_bonus',
+                    targetUserId: ticket.referred_by_user_id, targetUsername: ticket.referred_by_username,
+                    details: { actor: 'System', ticketId: ticket.id, paymentId, hiredUser: ticket.roblox_username }
+                });
+            }
+        }
+
+        if (!ticket.reviewer_reward_logged && reviewerUserId && reviewerUsername
+            && String(reviewerUserId) !== String(ticket.roblox_user_id)) {
+            const paymentId = await logSystemPaymentRequest({
+                robloxUserId: reviewerUserId,
+                robloxUsername: reviewerUsername,
+                taskName: 'Recruitment ticket review',
+                note: `Reviewed and accepted ${ticket.roblox_username}'s application (ticket ${ticket.id}).`
+            });
+            flagUpdates.reviewer_reward_logged = true;
+            if (paymentId) {
+                logAudit(null, {
+                    category: 'payments', action: 'auto_reviewer_bonus',
+                    targetUserId: reviewerUserId, targetUsername: reviewerUsername,
+                    details: { actor: 'System', ticketId: ticket.id, paymentId, hiredUser: ticket.roblox_username }
+                });
+            }
+        }
+
+        if (Object.keys(flagUpdates).length) {
+            await supabase.from('recruitment_tickets').update(flagUpdates).eq('id', ticket.id);
+        }
+    } catch (e) {
+        console.error(`processHire failed for ticket ${ticket.id}:`, e.message);
+    }
+}
+
+const RECRUITMENT_AUTO_ACCEPT_INTERVAL_MS = 15 * 60 * 1000;
+
+// Sweeps pending/in_review tickets that have sat longer than the configured grace period with no
+// HR response, and auto-accepts them as "System" - same role grants and referral/reviewer payouts
+// as a normal accept, minus the reviewer payout (nobody actually reviewed it).
+async function runRecruitmentAutoAccept() {
+    try {
+        const config = await getRecruitmentConfig();
+        if (!config.gracePeriodHours || config.gracePeriodHours <= 0) return;
+
+        const cutoff = new Date(Date.now() - config.gracePeriodHours * 60 * 60 * 1000).toISOString();
+        const { data: tickets, error } = await supabase
+            .from('recruitment_tickets')
+            .select('*')
+            .in('status', ['pending', 'in_review'])
+            .lte('created_at', cutoff);
+        if (error) { console.error('runRecruitmentAutoAccept: could not load tickets:', error.message); return; }
+
+        for (const ticket of (tickets || [])) {
+            const nowIso = new Date().toISOString();
+            const updates = {
+                status: 'accepted',
+                closed_at: nowIso,
+                closed_by_username: 'System',
+                closed_by_roblox_user_id: null,
+                closed_by_roblox_username: null,
+                close_reason: `Auto-accepted after the ${config.gracePeriodHours}-hour grace period with no HR response.`,
+                auto_accepted: true,
+                updated_at: nowIso
+            };
+            if (!ticket.first_response_at) {
+                updates.first_response_at = nowIso;
+                updates.first_response_by_username = 'System';
+            }
+            const { error: updateErr } = await supabase.from('recruitment_tickets').update(updates).eq('id', ticket.id);
+            if (updateErr) { console.error(`runRecruitmentAutoAccept: failed updating ticket ${ticket.id}:`, updateErr.message); continue; }
+
+            const merged = { ...ticket, ...updates };
+            await processHire(merged, { reviewerUserId: null, reviewerUsername: null });
+
+            sendPushToApplicant(ticket.roblox_user_id, {
+                title: 'Your PlayVerse application was updated',
+                body: 'Your application was automatically accepted after the review window passed.',
+                url: `${APP_ORIGIN}/#/recruit/status`
+            });
+            notifyDiscordStatusChange(merged, 'accepted', 'System (auto-accept)');
+            logAudit(null, {
+                category: 'recruitment', action: 'auto_accept',
+                targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+                details: { actor: 'System', ticketId: ticket.id, gracePeriodHours: config.gracePeriodHours }
+            });
+        }
+    } catch (e) {
+        console.error('runRecruitmentAutoAccept failed:', e.message);
+    }
+}
+
 async function sendPushToApplicant(robloxUserId, { title, body, url }) {
     if (!PUSH_CONFIGURED) return;
     try {
@@ -624,6 +789,22 @@ async function getDevexRate() {
         .maybeSingle();
     if (error) throw error;
     return data && data.devex_rate != null ? Number(data.devex_rate) : 0;
+}
+
+// Configurable recruitment auto-hire settings: the in-app tool role and Discord role given
+// automatically on acceptance, and how long HR has to respond before an application auto-accepts.
+async function getRecruitmentConfig() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('recruitment_auto_role_id, recruitment_discord_role_id, recruitment_grace_period_hours')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return {
+        autoRoleId: data && data.recruitment_auto_role_id != null ? String(data.recruitment_auto_role_id) : null,
+        discordRoleId: data && data.recruitment_discord_role_id ? String(data.recruitment_discord_role_id) : null,
+        gracePeriodHours: data && data.recruitment_grace_period_hours != null ? Number(data.recruitment_grace_period_hours) : null
+    };
 }
 
 async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, method) {
@@ -1094,6 +1275,13 @@ setTimeout(() => {
 setInterval(() => {
     runBackup('scheduled', 'system').catch(e => console.error('scheduled backup failed:', e.message));
 }, BACKUP_INTERVAL_MS);
+
+setTimeout(() => {
+    runRecruitmentAutoAccept().catch(e => console.error('initial runRecruitmentAutoAccept failed:', e.message));
+}, 60 * 1000);
+setInterval(() => {
+    runRecruitmentAutoAccept().catch(e => console.error('scheduled runRecruitmentAutoAccept failed:', e.message));
+}, RECRUITMENT_AUTO_ACCEPT_INTERVAL_MS);
 
 async function getSession(req) {
     const token = getBearerToken(req);
@@ -2060,6 +2248,41 @@ app.post('/hr-data', async (req, res) => {
             .from('app_settings')
             .upsert({ id: 1, base_group_id: groupId, base_min_rank: minRank, updated_at: new Date().toISOString() });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'recruitment_get_config') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        try {
+            const data = await getRecruitmentConfig();
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+        return;
+    }
+
+    if (action === 'recruitment_save_config') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const autoRoleId = payload.autoRoleId != null && payload.autoRoleId !== '' ? String(payload.autoRoleId) : null;
+        const discordRoleId = payload.discordRoleId ? String(payload.discordRoleId).trim() : null;
+        const gracePeriodHours = payload.gracePeriodHours != null && payload.gracePeriodHours !== '' ? Number(payload.gracePeriodHours) : null;
+        if (gracePeriodHours != null && !(gracePeriodHours >= 0)) { res.status(400).json({ ok: false, error: 'invalid_grace_period' }); return; }
+        const { error } = await supabase
+            .from('app_settings')
+            .upsert({
+                id: 1,
+                recruitment_auto_role_id: autoRoleId,
+                recruitment_discord_role_id: discordRoleId,
+                recruitment_grace_period_hours: gracePeriodHours,
+                updated_at: new Date().toISOString()
+            });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'settings', action: 'update_recruitment_config',
+            details: { autoRoleId, discordRoleId, gracePeriodHours }
+        });
         res.json({ ok: true });
         return;
     }
@@ -3159,13 +3382,24 @@ app.post('/hr-data', async (req, res) => {
         if (['accepted', 'rejected', 'withdrawn'].includes(status)) {
             updates.closed_at = new Date().toISOString();
             updates.closed_by_username = session.roblox_username;
+            updates.closed_by_roblox_user_id = session.roblox_user_id;
+            updates.closed_by_roblox_username = session.roblox_username;
             updates.close_reason = reason;
         } else {
-            updates.closed_at = null; updates.closed_by_username = null; updates.close_reason = null;
+            updates.closed_at = null; updates.closed_by_username = null;
+            updates.closed_by_roblox_user_id = null; updates.closed_by_roblox_username = null;
+            updates.close_reason = null;
         }
 
         const { error: updateErr } = await supabase.from('recruitment_tickets').update(updates).eq('id', id);
         if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+
+        if (status === 'accepted' && ticket.status !== 'accepted') {
+            await processHire({ ...ticket, ...updates }, {
+                reviewerUserId: session.roblox_user_id,
+                reviewerUsername: session.roblox_username
+            });
+        }
 
         if (reason && ticket.discord_channel_id) {
             discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
