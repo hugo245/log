@@ -355,7 +355,7 @@ function discordChannelUrl(channelId) {
 }
 
 function ticketEmbedPayload(ticket) {
-    const statusColors = { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, rejected: 0xB3311C, withdrawn: 0x8A93A3 };
+    const statusColors = { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 };
     return {
         title: `Application: ${ticket.roblox_username}`,
         color: statusColors[ticket.status] || 0x3730D9,
@@ -711,6 +711,80 @@ async function runRecruitmentAutoAccept() {
         }
     } catch (e) {
         console.error('runRecruitmentAutoAccept failed:', e.message);
+    }
+}
+
+const TICKET_AUTO_DELETE_DELAY_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// Marks a ticket "finalised" once it's been placed on a team AND actually roled in (in
+// user_assignments) - the very end of the recruitment pipeline. Posts a heads-up in the ticket's
+// Discord channel that it'll be auto-deleted in 12 hours, and schedules that deletion.
+async function finalizeAfterRoling(ticket, byUsername) {
+    if (!ticket || ticket.status === 'finalised') return;
+    const nowIso = new Date().toISOString();
+    const deleteAt = new Date(Date.now() + TICKET_AUTO_DELETE_DELAY_MS).toISOString();
+    const { error } = await supabase.from('recruitment_tickets').update({
+        status: 'finalised',
+        finalised_at: nowIso,
+        channel_delete_at: deleteAt,
+        updated_at: nowIso
+    }).eq('id', ticket.id);
+    if (error) { console.error(`finalizeAfterRoling: failed updating ticket ${ticket.id}:`, error.message); return; }
+
+    if (ticket.discord_channel_id) {
+        try {
+            await discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    content: `✅ **${ticket.roblox_username}** has been fully placed and roled onto their team. This ticket channel will be automatically deleted in 12 hours.`
+                })
+            });
+        } catch (e) {
+            console.error(`finalizeAfterRoling: failed to post message in channel ${ticket.discord_channel_id}:`, e.message);
+        }
+    }
+
+    logAudit(null, {
+        category: 'recruitment', action: 'finalised',
+        targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+        details: { actor: byUsername || 'System', ticketId: ticket.id }
+    });
+}
+
+const TICKET_CHANNEL_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+
+// Deletes ticket channels whose 12-hour post-finalise window has passed. If the channel's already
+// gone (404), we still mark it deleted rather than retrying forever; any other error is retried
+// on the next sweep.
+async function runTicketChannelCleanup() {
+    try {
+        const nowIso = new Date().toISOString();
+        const { data: tickets, error } = await supabase
+            .from('recruitment_tickets')
+            .select('id, discord_channel_id')
+            .eq('channel_deleted', false)
+            .not('channel_delete_at', 'is', null)
+            .lte('channel_delete_at', nowIso);
+        if (error) { console.error('runTicketChannelCleanup: could not load tickets:', error.message); return; }
+
+        for (const ticket of (tickets || [])) {
+            let done = true;
+            if (ticket.discord_channel_id) {
+                try {
+                    await discordApi(`/channels/${ticket.discord_channel_id}`, { method: 'DELETE' });
+                } catch (e) {
+                    if (String(e.message).startsWith('discord_api_404')) {
+                        // channel's already gone - nothing left to clean up
+                    } else {
+                        console.error(`runTicketChannelCleanup: failed to delete channel ${ticket.discord_channel_id} for ticket ${ticket.id}:`, e.message);
+                        done = false;
+                    }
+                }
+            }
+            if (done) await supabase.from('recruitment_tickets').update({ channel_deleted: true }).eq('id', ticket.id);
+        }
+    } catch (e) {
+        console.error('runTicketChannelCleanup failed:', e.message);
     }
 }
 
@@ -1282,6 +1356,13 @@ setTimeout(() => {
 setInterval(() => {
     runRecruitmentAutoAccept().catch(e => console.error('scheduled runRecruitmentAutoAccept failed:', e.message));
 }, RECRUITMENT_AUTO_ACCEPT_INTERVAL_MS);
+
+setTimeout(() => {
+    runTicketChannelCleanup().catch(e => console.error('initial runTicketChannelCleanup failed:', e.message));
+}, 90 * 1000);
+setInterval(() => {
+    runTicketChannelCleanup().catch(e => console.error('scheduled runTicketChannelCleanup failed:', e.message));
+}, TICKET_CHANNEL_CLEANUP_INTERVAL_MS);
 
 async function getSession(req) {
     const token = getBearerToken(req);
@@ -3548,6 +3629,8 @@ app.post('/hr-data', async (req, res) => {
             skillsetId: ticket.skillset_id || null
         });
         if (!result.ok) { res.status(500).json({ ok: false, error: result.error }); return; }
+
+        await finalizeAfterRoling(ticket, session.roblox_username);
 
         logAudit(session, {
             category: 'recruitment', action: 'manual_roling',

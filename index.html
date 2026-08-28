@@ -4326,6 +4326,7 @@
         in_review: ['In review', '--accent-soft', '--accent', '--accent-soft-strong'],
         accepted: ['Accepted', '--ok-bg', '--ok-text', '--ok-line'],
         team_selection: ['Team selection', '--accent-soft', '--accent', '--accent-soft-strong'],
+        finalised: ['Finalised', '--ok-bg', '--ok-text', '--ok-line'],
         rejected: ['Rejected', '--err-bg', '--err-text', '--err-line'],
         withdrawn: ['Withdrawn', '--row-alt', '--muted', '--line']
       };
@@ -4338,6 +4339,7 @@
       in_review: "Someone's actively looking at your application.",
       accepted: "You're in! Someone from the team will reach out here shortly.",
       team_selection: "You're in! Please wait for higher ups to put you in a team.",
+      finalised: "You're fully set up and roled onto your team. Welcome aboard!",
       rejected: "This one didn't work out, but you're welcome to apply again in the future.",
       withdrawn: 'This application was marked as withdrawn.'
     };
@@ -4666,7 +4668,7 @@
 
 
       function counts() {
-        const c = { all: tickets.length, pending: 0, in_review: 0, accepted: 0, team_selection: 0, rejected: 0, withdrawn: 0 };
+        const c = { all: tickets.length, pending: 0, in_review: 0, accepted: 0, team_selection: 0, finalised: 0, rejected: 0, withdrawn: 0 };
         tickets.forEach(t => { c[t.status] = (c[t.status] || 0) + 1; });
         return c;
       }
@@ -4691,7 +4693,7 @@
 
       <div class="filter-bar">
         <div class="tabs">
-          ${['all', 'pending', 'in_review', 'accepted', 'team_selection', 'rejected', 'withdrawn'].map(s => `<button type="button" class="tab-btn ${statusFilter === s ? 'active' : ''}" data-status-filter="${s}">${s === 'all' ? 'All' : s.replace('_', ' ')} (${c[s] || 0})</button>`).join('')}
+          ${['all', 'pending', 'in_review', 'accepted', 'team_selection', 'finalised', 'rejected', 'withdrawn'].map(s => `<button type="button" class="tab-btn ${statusFilter === s ? 'active' : ''}" data-status-filter="${s}">${s === 'all' ? 'All' : s.replace('_', ' ')} (${c[s] || 0})</button>`).join('')}
         </div>
       </div>
 
@@ -4784,7 +4786,7 @@
             <div class="modal-section-title">Status</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               ${t.status !== 'in_review' ? `<button type="button" class="btn btn-ghost btn-sm" data-set-status="in_review" ${busy ? 'disabled' : ''}>Mark in review</button>` : ''}
-              ${t.status !== 'accepted' && t.status !== 'team_selection' ? `<button type="button" class="btn btn-ok btn-sm" data-set-status="accepted" ${busy ? 'disabled' : ''}>Accept &amp; hire</button>` : ''}
+              ${t.status !== 'accepted' && t.status !== 'team_selection' && t.status !== 'finalised' ? `<button type="button" class="btn btn-ok btn-sm" data-set-status="accepted" ${busy ? 'disabled' : ''}>Accept &amp; hire</button>` : ''}
               ${t.status !== 'rejected' ? `<button type="button" class="btn btn-danger btn-sm" data-set-status="rejected" style="background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);" ${busy ? 'disabled' : ''}>Reject</button>` : ''}
               ${t.status !== 'withdrawn' ? `<button type="button" class="btn btn-ghost btn-sm" data-set-status="withdrawn" ${busy ? 'disabled' : ''}>Mark withdrawn</button>` : ''}
             </div>
@@ -4805,11 +4807,15 @@
                 <button type="button" class="btn btn-primary btn-sm" id="placeTeamBtn" ${placeTeamBusy ? 'disabled' : ''}>${placeTeamBusy ? 'Placing...' : 'Place on team'}</button>
               </div>
             </div>` : ''}
-            ${t.placed_team_id ? `
+            ${t.placed_team_id && t.status !== 'finalised' ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
               <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. This rolls into the system automatically on the next scheduled batch (runs every 6 hours) - or apply it right now:</div>
               <button type="button" class="btn btn-primary btn-sm" id="manualRolingBtn" ${manualRolingBusy ? 'disabled' : ''}>${manualRolingBusy ? 'Roling...' : 'Manual Roling - apply now'}</button>
               ${manualRolingMsg ? `<div style="margin-top:8px;font-weight:600;color:${manualRolingMsg.ok ? 'var(--ok-text)' : 'var(--err-text)'};">${esc(manualRolingMsg.text)}</div>` : ''}
+            </div>` : ''}
+            ${t.status === 'finalised' ? `
+            <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
+              <div>Finalised - placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''} and roled. Their Discord ticket channel ${t.channel_deleted ? 'has been deleted.' : t.channel_delete_at ? `will be auto-deleted ${new Date(t.channel_delete_at).toLocaleString()}.` : 'will be auto-deleted 12 hours after finalising.'}</div>
             </div>` : ''}
             ${recruiters.length ? `
             <div style="margin-top:12px;">
@@ -4953,6 +4959,7 @@
           try {
             const data = await manualRolingRecruitmentTicket(openTicketId);
             manualRolingMsg = { ok: true, text: data && data.mode === 'inserted' ? 'Rolled in - access granted just now.' : 'Already up to date - roled in.' };
+            try { ticketDetail = await loadRecruitmentTicket(openTicketId); } catch (e) { }
           } catch (e) {
             manualRolingMsg = { ok: false, text: e.message || 'Could not roll them in.' };
           }

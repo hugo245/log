@@ -180,7 +180,7 @@ async function processHire(ticket, { reviewerUserId, reviewerUsername, guild }) 
 }
 
 function statusColor(status) {
-    return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
+    return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
 }
 
 async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skillsetId }) {
@@ -220,13 +220,39 @@ async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skil
 
 const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let nextReconcileAt = null;
+const TICKET_AUTO_DELETE_DELAY_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// Marks a ticket "finalised" once it's been placed on a team AND actually roled in (in
+// user_assignments) - the very end of the recruitment pipeline. Posts a heads-up in the ticket's
+// Discord channel that it'll be auto-deleted in 12 hours; server.js schedules that deletion.
+async function finalizeAfterRoling(ticket) {
+    if (!ticket || ticket.status === 'finalised') return;
+    const nowIso = new Date().toISOString();
+    const deleteAt = new Date(Date.now() + TICKET_AUTO_DELETE_DELAY_MS).toISOString();
+    const { error } = await supabase.from('recruitment_tickets').update({
+        status: 'finalised',
+        finalised_at: nowIso,
+        channel_delete_at: deleteAt,
+        updated_at: nowIso
+    }).eq('id', ticket.id);
+    if (error) { console.error(`finalizeAfterRoling: failed updating ticket ${ticket.id}:`, error.message); return; }
+
+    if (ticket.discord_channel_id) {
+        try {
+            const channel = await client.channels.fetch(ticket.discord_channel_id);
+            await channel.send(`✅ **${ticket.roblox_username}** has been fully placed and roled onto their team. This ticket channel will be automatically deleted in 12 hours.`);
+        } catch (e) {
+            console.error(`finalizeAfterRoling: failed to post message in channel ${ticket.discord_channel_id}:`, e.message);
+        }
+    }
+}
 
 async function reconcilePlacements() {
     nextReconcileAt = Date.now() + RECONCILE_INTERVAL_MS;
 
     const { data: tickets, error } = await supabase
         .from('recruitment_tickets')
-        .select('roblox_user_id, roblox_username, skillset_id, skillset_name, placed_team_id, placed_team_name')
+        .select('id, status, roblox_user_id, roblox_username, skillset_id, skillset_name, placed_team_id, placed_team_name, discord_channel_id')
         .not('placed_team_id', 'is', null);
     if (error) { console.error('reconcilePlacements: could not load tickets:', error.message); return; }
 
@@ -245,9 +271,10 @@ async function reconcilePlacements() {
         });
         if (!result.ok) {
             console.error(`reconcilePlacements: failed for ${ticket.roblox_username} (${ticket.roblox_user_id}):`, result.error);
-        } else if (result.mode === 'inserted') {
-            fixed++;
+            continue;
         }
+        if (result.mode === 'inserted') fixed++;
+        if (ticket.status !== 'finalised') await finalizeAfterRoling(ticket);
     }
     if (fixed) console.log(`reconcilePlacements: rolled in ${fixed} pending placement(s).`);
 }
