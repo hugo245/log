@@ -4605,12 +4605,25 @@
         }
       }
 
+      // True while focus is inside a currently-open select/input in the ticket (or next-phase) modal,
+      // so a background poll doesn't rebuild that DOM out from under an in-progress selection.
+      function isModalInteractionActive() {
+        const active = document.activeElement;
+        if (!active || active === document.body) return false;
+        const ticketContainer = document.getElementById('ticketModalContainer');
+        const nextPhaseContainer = document.getElementById('nextPhaseOverlayContainer');
+        return !!((ticketContainer && ticketContainer.contains(active)) || (nextPhaseContainer && nextPhaseContainer.contains(active)));
+      }
+
       // Refreshes the ticket list in the background (no loading spinner) so status changes made
-      // from Discord (Accept/Reject/Claim/Configure) show up here without a manual refresh.
+      // from Discord (Accept/Reject/Claim/Configure) show up here without a manual refresh. While a
+      // ticket modal is open, this only refreshes the underlying data - it never repaints, so it
+      // can't rebuild a select out from under someone mid-selection. The list catches up once the
+      // modal closes.
       async function refreshTicketsQuiet() {
         try {
           tickets = await loadRecruitmentTickets(statusFilter);
-          paint();
+          if (!openTicketId) paint();
         } catch (e) { }
       }
 
@@ -4643,6 +4656,7 @@
         if (ticketPollTimer) clearInterval(ticketPollTimer);
         ticketPollTimer = setInterval(async () => {
           if (renderGen !== myGen || openTicketId !== id) { clearInterval(ticketPollTimer); return; }
+          if (isModalInteractionActive()) return; // don't rebuild the modal while someone's mid-selection
           try {
             ticketDetail = await loadRecruitmentTicket(id);
             paintModal();
@@ -4867,7 +4881,7 @@
       function wireTicketModal() {
         const scrim = document.getElementById('ticketModalScrim');
         if (!scrim) return;
-        const close = () => { if (ticketPollTimer) clearInterval(ticketPollTimer); openTicketId = null; ticketDetail = null; nextPhaseModalOpen = false; allSetModalOpen = false; paintModal(); paintNextPhaseOverlay(); };
+        const close = () => { if (ticketPollTimer) clearInterval(ticketPollTimer); openTicketId = null; ticketDetail = null; nextPhaseModalOpen = false; allSetModalOpen = false; paint(); };
         document.getElementById('ticketModalClose').addEventListener('click', close);
         scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
 
