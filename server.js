@@ -364,6 +364,7 @@ function ticketEmbedPayload(ticket) {
             { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
             { name: 'Position', value: ticket.position || 'Not specified', inline: true },
             { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
+            { name: 'Assigned to', value: ticket.assigned_to_username || 'Unassigned', inline: true },
             { name: 'Why they want to join', value: (ticket.why_join || '').slice(0, 500) || 'N/A' },
             { name: 'Experience', value: (ticket.experience || '').slice(0, 500) || 'N/A' }
         ],
@@ -403,8 +404,9 @@ async function isMemberOfAnyGuild(discordUserId, guildIds) {
 }
 
 // Creates a private per-applicant ticket channel under DISCORD_TICKET_CATEGORY_ID, visible only to the
-// applicant and the HR role(s), with a small Accept/Reject/Claim/Configure panel. This is where all
-// communication with the applicant now happens instead of the old website chat.
+// applicant and the HR role(s), with a status panel embed (no buttons - manage the application from the
+// website dashboard). This is where all communication with the applicant now happens instead of the old
+// website chat.
 async function createDiscordTicketChannel(ticket) {
     if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) {
         console.error('createDiscordTicketChannel: skipped - DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not configured.');
@@ -444,17 +446,8 @@ async function createDiscordTicketChannel(ticket) {
         const message = await discordApi(`/channels/${channel.id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `${DISCORD_HR_ROLE_IDS.map(id => `<@&${id}>`).join(' ')} <@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application.`,
-                embeds: [ticketEmbedPayload(ticket)],
-                components: [{
-                    type: 1,
-                    components: [
-                        { type: 2, style: 3, label: 'Accept', custom_id: `recruit_accept_${ticket.id}` },
-                        { type: 2, style: 4, label: 'Reject', custom_id: `recruit_reject_${ticket.id}` },
-                        { type: 2, style: 2, label: 'Claim', custom_id: `recruit_claim_${ticket.id}` },
-                        { type: 2, style: 1, label: 'Configure', custom_id: `recruit_config_${ticket.id}` }
-                    ]
-                }]
+                content: `${DISCORD_HR_ROLE_IDS.map(id => `<@&${id}>`).join(' ')} <@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application. Manage this application (accept, reject, assign, etc.) from the dashboard on the website.`,
+                embeds: [ticketEmbedPayload(ticket)]
             })
         });
 
@@ -472,6 +465,44 @@ async function createDiscordTicketChannel(ticket) {
         console.error(`createDiscordTicketChannel failed for ticket ${ticket.id}:`, e.message);
         return null;
     }
+}
+
+// Opens (or reuses) a DM channel with a Discord user and sends them a message via the bot's REST
+// token. Silently no-ops if they have DMs closed to the bot, aren't found, etc - a failed DM
+// should never block the underlying status change from saving.
+async function sendDiscordDM(discordUserId, content) {
+    if (!DISCORD_BOT_TOKEN || !discordUserId) return;
+    try {
+        const dmChannel = await discordApi('/users/@me/channels', {
+            method: 'POST',
+            body: JSON.stringify({ recipient_id: discordUserId })
+        });
+        if (!dmChannel || !dmChannel.id) return;
+        await discordApi(`/channels/${dmChannel.id}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({ content })
+        });
+    } catch (e) {
+        console.error(`sendDiscordDM: failed to DM ${discordUserId}:`, e.message);
+    }
+}
+
+// One message per possible ticket status - kept in one place so every status change (however it
+// happens - website, auto-accept, etc.) DMs the applicant the same way, instead of only some paths
+// remembering to do it.
+const STATUS_DM_MESSAGES = {
+    in_review: () => `👀 Your PlayVerse application is now **in review** - someone's actively looking at it.`,
+    accepted: () => `🎉 Congrats! Your PlayVerse application was **accepted**. Someone from the team will reach out here shortly.`,
+    rejected: () => `Thanks for applying to PlayVerse. Unfortunately your application wasn't accepted this time. You're welcome to apply again in the future.`,
+    withdrawn: () => `Your PlayVerse application has been marked as **withdrawn**.`,
+    team_selection: () => `You're in! Your application moved to team selection - hang tight while leads finish placing you.`,
+    finalised: () => `✅ You're fully placed and roled onto your team. Welcome aboard!`
+};
+
+async function dmApplicantStatusChange(ticket, newStatus) {
+    const buildMessage = STATUS_DM_MESSAGES[newStatus];
+    if (!buildMessage || !ticket.discord_user_id) return;
+    await sendDiscordDM(ticket.discord_user_id, buildMessage());
 }
 
 async function notifyDiscordStatusChange(ticket, newStatus, byUsername) {
@@ -556,6 +587,36 @@ async function notifyDiscordPlacement(ticket, team, byUsername) {
         });
     } catch (e) {
         console.error('notifyDiscordPlacement failed:', e.message);
+    }
+}
+
+async function notifyDiscordAssignment(ticket, assigneeUsername, byUsername) {
+    if (!DISCORD_BOT_TOKEN || !ticket.discord_channel_id) return;
+    try {
+        await discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                content: assigneeUsername
+                    ? `🔧 **${ticket.roblox_username}**'s application was assigned to **${assigneeUsername}** by ${byUsername} on the website.`
+                    : `🔧 **${ticket.roblox_username}**'s application was unassigned by ${byUsername} on the website.`
+            })
+        });
+    } catch (e) {
+        console.error('notifyDiscordAssignment failed:', e.message);
+    }
+}
+
+// Edits the ticket's pinned panel embed in place so it always reflects the latest status/assignee/
+// position/etc, regardless of whether the change came from the website or (for status) from Discord.
+async function refreshDiscordTicketPanel(ticket) {
+    if (!DISCORD_BOT_TOKEN || !ticket.discord_channel_id || !ticket.ticket_message_id) return;
+    try {
+        await discordApi(`/channels/${ticket.discord_channel_id}/messages/${ticket.ticket_message_id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ embeds: [ticketEmbedPayload(ticket)] })
+        });
+    } catch (e) {
+        console.error(`refreshDiscordTicketPanel: failed to update panel for ticket ${ticket.id}:`, e.message);
     }
 }
 
@@ -713,6 +774,8 @@ async function runRecruitmentAutoAccept() {
                 url: `${APP_ORIGIN}/#/recruit/status`
             });
             notifyDiscordStatusChange(merged, 'accepted', 'System (auto-accept)');
+            dmApplicantStatusChange(merged, 'accepted');
+            refreshDiscordTicketPanel(merged);
             logAudit(null, {
                 category: 'recruitment', action: 'auto_accept',
                 targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
@@ -753,6 +816,10 @@ async function finalizeAfterRoling(ticket, byUsername) {
             console.error(`finalizeAfterRoling: failed to post message in channel ${ticket.discord_channel_id}:`, e.message);
         }
     }
+
+    const finalisedTicket = { ...ticket, status: 'finalised', finalised_at: nowIso, channel_delete_at: deleteAt };
+    dmApplicantStatusChange(finalisedTicket, 'finalised');
+    refreshDiscordTicketPanel(finalisedTicket);
 
     logAudit(null, {
         category: 'recruitment', action: 'finalised',
@@ -3574,7 +3641,10 @@ app.post('/hr-data', async (req, res) => {
             targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
             details: { ticketId: id, from: ticket.status, to: status }
         });
-        notifyDiscordStatusChange({ ...ticket, status }, status, session.roblox_username);
+        const updatedTicket = { ...ticket, ...updates };
+        notifyDiscordStatusChange(updatedTicket, status, session.roblox_username);
+        dmApplicantStatusChange(updatedTicket, status);
+        refreshDiscordTicketPanel(updatedTicket);
         res.json({ ok: true });
         return;
     }
@@ -3622,6 +3692,8 @@ app.post('/hr-data', async (req, res) => {
             targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
             details: { ticketId: id, skillsetId: skillset.id, skillsetName: skillset.name }
         });
+        dmApplicantStatusChange(updatedTicket, 'team_selection');
+        refreshDiscordTicketPanel(updatedTicket);
 
         res.json({ ok: true, data: { discordPosted: !!messageId } });
         return;
@@ -3658,12 +3730,16 @@ app.post('/hr-data', async (req, res) => {
             body: `You've been placed on ${team.name}${ticket.skillset_name ? ' as ' + ticket.skillset_name : ''}.`,
             url: `${APP_ORIGIN}/#/recruit/status`
         });
+        if (ticket.discord_user_id) {
+            sendDiscordDM(ticket.discord_user_id, `You've been accepted and placed on the **${team.name}** team!${ticket.skillset_name ? ` Skillset: **${ticket.skillset_name}**.` : ''} Your access will finish setting up automatically, or a lead can speed this up with Manual Roling.`);
+        }
 
         logAudit(session, {
             category: 'recruitment', action: 'team_placement',
             targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
             details: { ticketId: id, teamId: team.id, teamName: team.name, skillsetId: ticket.skillset_id, skillsetName: ticket.skillset_name }
         });
+        refreshDiscordTicketPanel({ ...ticket, placed_team_id: team.id, placed_team_name: team.name });
 
         res.json({ ok: true, data: { teamId: team.id, teamName: team.name } });
         return;
@@ -3675,12 +3751,28 @@ app.post('/hr-data', async (req, res) => {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const assignToUserId = payload.assignToUserId != null ? Number(payload.assignToUserId) : null;
         const assignToUsername = payload.assignToUsername ? String(payload.assignToUsername) : null;
+
+        const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+
         const { error } = await supabase.from('recruitment_tickets').update({
             assigned_to_user_id: assignToUserId,
             assigned_to_username: assignToUsername,
             updated_at: new Date().toISOString()
         }).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+
+        const updatedTicket = { ...ticket, assigned_to_user_id: assignToUserId, assigned_to_username: assignToUsername };
+        notifyDiscordAssignment(updatedTicket, assignToUsername, session.roblox_username);
+        refreshDiscordTicketPanel(updatedTicket);
+
+        logAudit(session, {
+            category: 'recruitment', action: 'assign',
+            targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+            details: { ticketId: id, assignToUserId, assignToUsername }
+        });
+
         res.json({ ok: true });
         return;
     }

@@ -1,7 +1,6 @@
 const {
     Client, GatewayIntentBits, Events,
-    SlashCommandBuilder, EmbedBuilder, REST, Routes,
-    ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder
+    SlashCommandBuilder, EmbedBuilder, REST, Routes
 } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
@@ -10,8 +9,6 @@ const {
     DISCORD_BOT_TOKEN,
     DISCORD_CLIENT_ID,
     DISCORD_GUILD_ID,
-    DISCORD_HR_ROLE_ID,
-    DISCORD_HR_ROLE_IDS,
     DISCORD_LEAD_ROLE_ID,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
@@ -19,13 +16,6 @@ const {
 } = process.env;
 
 const LEAD_ROLE_ID = DISCORD_LEAD_ROLE_ID || '1539922527013572668';
-
-// Comma-separated list supported via DISCORD_HR_ROLE_IDS, or a single id via DISCORD_HR_ROLE_ID.
-const HR_ROLE_IDS = (DISCORD_HR_ROLE_IDS || DISCORD_HR_ROLE_ID || '')
-    .split(',').map(s => s.trim()).filter(Boolean);
-if (!HR_ROLE_IDS.length) {
-    console.warn('DISCORD_HR_ROLE_ID(S) not set - the ticket panel (Accept/Reject/Claim/Configure) will be usable by anyone.');
-}
 
 for (const [name, val] of Object.entries({ DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY })) {
     if (!val) { console.error(`Missing required env var: ${name}`); process.exit(1); }
@@ -60,122 +50,6 @@ async function registerCommands() {
             console.error(`registerCommands: Discord rate-limited this request (429)${e.retryAfter ? `, retry after ${e.retryAfter}s` : ''}. Not retrying immediately to avoid making the block worse.`);
         }
         throw e;
-    }
-}
-
-function generateRequestId() {
-    const rand = Math.floor(100000 + Math.random() * 900000);
-    const stamp = Date.now().toString(36).slice(-4);
-    return `PV_${rand}_${stamp}`;
-}
-
-// Configurable recruitment auto-hire settings, mirrors server.js's copy - kept in app_settings so
-// both processes (and the dashboard) read/write the same source of truth.
-async function getRecruitmentConfig() {
-    const { data, error } = await supabase
-        .from('app_settings')
-        .select('recruitment_auto_role_id, recruitment_discord_role_id, recruitment_grace_period_hours')
-        .eq('id', 1)
-        .maybeSingle();
-    if (error) throw error;
-    return {
-        autoRoleId: data && data.recruitment_auto_role_id != null ? String(data.recruitment_auto_role_id) : null,
-        discordRoleId: data && data.recruitment_discord_role_id ? String(data.recruitment_discord_role_id) : null,
-        gracePeriodHours: data && data.recruitment_grace_period_hours != null ? Number(data.recruitment_grace_period_hours) : null
-    };
-}
-
-async function grantAutoHireRole(ticket, roleId) {
-    if (!roleId || !ticket.roblox_user_id) return;
-    const { error } = await supabase.from('user_role_assignments').insert({
-        roblox_user_id: ticket.roblox_user_id,
-        role_id: roleId,
-        roblox_username: ticket.roblox_username
-    });
-    if (error && error.code !== '23505') console.error('grantAutoHireRole failed:', error.message);
-}
-
-async function grantDiscordRole(guild, discordUserId, roleId) {
-    if (!guild || !discordUserId || !roleId) return;
-    try {
-        const member = await guild.members.fetch(discordUserId);
-        await member.roles.add(roleId);
-    } catch (e) {
-        console.error(`grantDiscordRole: failed to add role ${roleId} to ${discordUserId}:`, e.message);
-    }
-}
-
-async function logSystemPaymentRequest({ robloxUserId, robloxUsername, taskName, note }) {
-    if (!robloxUserId || !robloxUsername) return null;
-    const id = generateRequestId();
-    const { error } = await supabase.from('payment_requests').insert({
-        id,
-        requested_by: 'System',
-        roblox_username: robloxUsername,
-        roblox_user_id: robloxUserId,
-        task_name: taskName,
-        game: 'Recruitment',
-        work_raw: note || '',
-        time_worked: '',
-        payment: 1000,
-        currency: 'ROBUX',
-        paid: false,
-        paid_at: null,
-        created_at: new Date().toISOString()
-    });
-    if (error) { console.error('logSystemPaymentRequest failed:', error.message); return null; }
-    return id;
-}
-
-// Resolves the Roblox identity of a staff member from their Discord id, via the same discord_links
-// table applicants use to link their accounts (staff go through the same Roblox+Discord linking).
-async function resolveRobloxForDiscordUser(discordUserId) {
-    if (!discordUserId) return null;
-    const { data } = await supabase.from('discord_links').select('roblox_user_id, roblox_username').eq('discord_user_id', discordUserId).maybeSingle();
-    return data || null;
-}
-
-// Runs once per ticket the moment it becomes "accepted": grants the configured tool/Discord roles,
-// and auto-logs 1,000 Robux payment requests (from "System") to the referrer and the reviewer.
-// Idempotency flags on the ticket keep this from double-granting/double-paying.
-async function processHire(ticket, { reviewerUserId, reviewerUsername, guild }) {
-    try {
-        const config = await getRecruitmentConfig();
-        const flagUpdates = {};
-
-        if (!ticket.hire_role_granted) {
-            if (config.autoRoleId) await grantAutoHireRole(ticket, config.autoRoleId);
-            if (config.discordRoleId && ticket.discord_user_id) await grantDiscordRole(guild, ticket.discord_user_id, config.discordRoleId);
-            flagUpdates.hire_role_granted = true;
-        }
-
-        if (!ticket.referral_reward_logged && ticket.referred_by_user_id
-            && String(ticket.referred_by_user_id) !== String(ticket.roblox_user_id)) {
-            await logSystemPaymentRequest({
-                robloxUserId: ticket.referred_by_user_id,
-                robloxUsername: ticket.referred_by_username,
-                taskName: 'Referral bonus',
-                note: `Referral bonus for ${ticket.roblox_username} being hired (ticket ${ticket.id}).`
-            });
-            flagUpdates.referral_reward_logged = true;
-        }
-
-        if (!ticket.reviewer_reward_logged && reviewerUserId && reviewerUsername
-            && String(reviewerUserId) !== String(ticket.roblox_user_id)) {
-            await logSystemPaymentRequest({
-                robloxUserId: reviewerUserId,
-                robloxUsername: reviewerUsername,
-                taskName: 'Recruitment ticket review',
-                note: `Reviewed and accepted ${ticket.roblox_username}'s application (ticket ${ticket.id}).`
-            });
-            flagUpdates.reviewer_reward_logged = true;
-        }
-
-        if (Object.keys(flagUpdates).length) {
-            await supabase.from('recruitment_tickets').update(flagUpdates).eq('id', ticket.id);
-        }
-    } catch (e) {
-        console.error(`processHire failed for ticket ${ticket.id}:`, e.message);
     }
 }
 
@@ -283,17 +157,6 @@ function nextReconcileUnix() {
     return nextReconcileAt ? Math.floor(nextReconcileAt / 1000) : null;
 }
 
-function hasHRRole(member) {
-    if (!HR_ROLE_IDS.length) return true;
-    return !!(member && member.roles && member.roles.cache && HR_ROLE_IDS.some(id => member.roles.cache.has(id)));
-}
-
-async function requireHRRole(interaction) {
-    if (hasHRRole(interaction.member)) return true;
-    await interaction.reply({ content: "Only HR roles can use this ticket panel.", ephemeral: true });
-    return false;
-}
-
 async function requireLeadRole(interaction) {
     const member = interaction.member;
     const has = member && member.roles && member.roles.cache && member.roles.cache.has(LEAD_ROLE_ID);
@@ -319,18 +182,6 @@ function ticketEmbed(ticket) {
         )
         .setFooter({ text: `Ticket ${ticket.id}` })
         .setTimestamp(new Date(ticket.created_at));
-}
-
-// Rebuilds and re-sends the pinned panel embed for a ticket channel (used after Accept/Reject/Claim/Configure).
-async function refreshTicketPanel(interaction, ticket) {
-    if (!ticket.ticket_message_id || !ticket.discord_channel_id) return;
-    try {
-        const channel = await client.channels.fetch(ticket.discord_channel_id);
-        const message = await channel.messages.fetch(ticket.ticket_message_id);
-        await message.edit({ embeds: [ticketEmbed(ticket)] });
-    } catch (e) {
-        console.error('refreshTicketPanel failed:', e.message);
-    }
 }
 
 client.once(Events.ClientReady, c => {
@@ -369,115 +220,6 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.editReply({ embeds: [ticketEmbed(ticket)] });
                 return;
             }
-        }
-
-        if (interaction.isButton()) {
-            const [, action, ticketId] = interaction.customId.match(/^recruit_(accept|reject|claim|config)_(.+)$/) || [];
-            if (!action) return;
-
-            if (!(await requireHRRole(interaction))) return;
-
-            const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', ticketId).maybeSingle();
-            if (error || !ticket) { await interaction.reply({ content: 'That ticket no longer exists.', ephemeral: true }); return; }
-
-            if (action === 'config') {
-                const modal = new ModalBuilder()
-                    .setCustomId(`recruit_config_modal_${ticketId}`)
-                    .setTitle('Configure application');
-                const positionInput = new TextInputBuilder()
-                    .setCustomId('position')
-                    .setLabel('Position applied for')
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(false)
-                    .setMaxLength(100)
-                    .setValue(ticket.position || '');
-                modal.addComponents(new ActionRowBuilder().addComponents(positionInput));
-                await interaction.showModal(modal);
-                return;
-            }
-
-            if (action === 'claim') {
-                const updates = {
-                    assigned_to_username: interaction.user.username,
-                    status: ticket.status === 'pending' ? 'in_review' : ticket.status,
-                    updated_at: new Date().toISOString()
-                };
-                await supabase.from('recruitment_tickets').update(updates).eq('id', ticketId);
-                await interaction.reply({ content: `Claimed by ${interaction.user}.`, ephemeral: false });
-                await refreshTicketPanel(interaction, { ...ticket, ...updates });
-                return;
-            }
-
-            const newStatus = action === 'accept' ? 'accepted' : 'rejected';
-            let reviewerLink = null;
-            if (newStatus === 'accepted') {
-                reviewerLink = await resolveRobloxForDiscordUser(interaction.user.id);
-                if (!reviewerLink) {
-                    console.warn(`recruit_accept: ${interaction.user.tag} (${interaction.user.id}) has no discord_links entry - skipping their reviewer bonus.`);
-                }
-            }
-            const updates = {
-                status: newStatus,
-                closed_at: new Date().toISOString(),
-                closed_by_username: interaction.user.username,
-                closed_by_roblox_user_id: reviewerLink ? reviewerLink.roblox_user_id : null,
-                closed_by_roblox_username: reviewerLink ? reviewerLink.roblox_username : null,
-                updated_at: new Date().toISOString()
-            };
-            if (!ticket.first_response_at) {
-                updates.first_response_at = new Date().toISOString();
-                updates.first_response_by_username = interaction.user.username;
-            }
-            await supabase.from('recruitment_tickets').update(updates).eq('id', ticketId);
-
-            await interaction.reply({
-                content: `**${ticket.roblox_username}**'s application marked **${newStatus}** by ${interaction.user}. <@${ticket.discord_user_id}>`
-            });
-            await refreshTicketPanel(interaction, { ...ticket, ...updates });
-
-            if (newStatus === 'accepted' && ticket.status !== 'accepted') {
-                await processHire({ ...ticket, ...updates }, {
-                    reviewerUserId: reviewerLink ? reviewerLink.roblox_user_id : null,
-                    reviewerUsername: reviewerLink ? reviewerLink.roblox_username : null,
-                    guild: interaction.guild
-                });
-            }
-
-            try {
-                const link = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', ticket.roblox_user_id).maybeSingle();
-                const discordUserId = (link.data && link.data.discord_user_id) || ticket.discord_user_id;
-                const user = await client.users.fetch(discordUserId);
-                if (newStatus === 'accepted') {
-                    await user.send(`Congrats! Your PlayVerse application was **accepted**. Someone from the team will reach out here shortly.`);
-                } else {
-                    await user.send(`Thanks for applying to PlayVerse. Unfortunately your application wasn't accepted this time. You're welcome to apply again in the future.`);
-                }
-            } catch (e) { }
-            return;
-        }
-
-        if (interaction.isModalSubmit()) {
-            const [, ticketId] = interaction.customId.match(/^recruit_config_modal_(.+)$/) || [];
-            if (!ticketId) return;
-            if (!hasHRRole(interaction.member)) {
-                await interaction.reply({ content: "Only HR roles can configure this application.", ephemeral: true });
-                return;
-            }
-
-            const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', ticketId).maybeSingle();
-            if (error || !ticket) { await interaction.reply({ content: 'That ticket no longer exists.', ephemeral: true }); return; }
-
-            const position = interaction.fields.getTextInputValue('position').trim() || null;
-            const updates = { position, updated_at: new Date().toISOString() };
-            const { error: updateErr } = await supabase.from('recruitment_tickets').update(updates).eq('id', ticketId);
-            if (updateErr) {
-                await interaction.reply({ content: `Could not save that: ${updateErr.message}`, ephemeral: true });
-                return;
-            }
-
-            await interaction.reply({ content: `Updated by ${interaction.user}: position set to **${position || 'Not specified'}**.`, ephemeral: false });
-            await refreshTicketPanel(interaction, { ...ticket, ...updates });
-            return;
         }
 
         if (interaction.isStringSelectMenu()) {

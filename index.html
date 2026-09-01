@@ -4381,7 +4381,8 @@
 
       async function load(showSpinner) {
         if (showSpinner) { loading = true; paint(); }
-        const prevStatus = data ? data.ticket.status : undefined;
+        const prevData = data;
+        const prevLoadError = loadError;
         try {
           const [ticketData, sessionInfo] = await Promise.all([
             fetchMyTicket(rt),
@@ -4401,7 +4402,10 @@
         }
         if (renderGen !== myGen) return;
 
-        paint();
+        // Only repaint when something actually changed - a background poll that redraws the whole
+        // page every 4s even when nothing's different just flashes the screen for no reason.
+        const changed = showSpinner || loadError !== prevLoadError || JSON.stringify(data) !== JSON.stringify(prevData);
+        if (changed) paint();
 
         if (!pollTimer && data) {
           pollTimer = setInterval(() => { if (renderGen !== myGen) { clearInterval(pollTimer); return; } load(false); }, 4000);
@@ -4446,9 +4450,9 @@
 
         <div class="panel" style="padding:20px;margin-bottom:16px;">
           <div class="preview-label" style="margin-bottom:10px;">Communication</div>
-          ${data.ticket.discordChannelUrl ? `
+          ${data.discordChannelUrl ? `
           <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">We've opened a private ticket channel for your application on Discord - that's where staff will message you and where you can ask questions.</p>
-          <a class="btn btn-primary btn-sm" href="${esc(data.ticket.discordChannelUrl)}" target="_blank" rel="noopener">Open your Discord ticket channel</a>
+          <a class="btn btn-primary btn-sm" href="${esc(data.discordChannelUrl)}" target="_blank" rel="noopener">Open your Discord ticket channel</a>
           ` : `<p style="color:var(--ink-soft);font-size:13px;">Your private Discord ticket channel is being set up - check your Discord server, staff will message you there.</p>`}
         </div>
 
@@ -4619,8 +4623,13 @@
           if (renderGen !== myGen || openTicketId !== id) { clearInterval(ticketPollTimer); return; }
           if (isModalInteractionActive()) return; // don't rebuild the modal while someone's mid-selection
           try {
-            ticketDetail = await loadRecruitmentTicket(id);
-            paintModal();
+            const fresh = await loadRecruitmentTicket(id);
+            // Only repaint if something actually changed - otherwise this fires every 4s and
+            // flashes the modal for no reason even when nothing on the ticket is different.
+            if (JSON.stringify(fresh) !== JSON.stringify(ticketDetail)) {
+              ticketDetail = fresh;
+              paintModal();
+            }
           } catch (e) { }
         }, 4000);
       }
@@ -4722,6 +4731,7 @@
           return `<div class="modal-scrim" id="ticketModalScrim"><div class="modal-card"><button type="button" class="modal-close" id="ticketModalClose">&times;</button><div class="modal-body" style="text-align:center;padding:40px;color:var(--muted);">Loading...</div></div></div>`;
         }
         const t = ticketDetail.ticket;
+        const discordChannelUrl = ticketDetail.discordChannelUrl;
         return `
     <div class="modal-scrim" id="ticketModalScrim">
       <div class="modal-card" style="max-width:640px;">
@@ -4788,9 +4798,9 @@
 
           <div class="modal-section">
             <div class="modal-section-title">Communication</div>
-            ${t.discordChannelUrl ? `
-            <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">This applicant has a private ticket channel on Discord - accept, reject, claim, and configure their application from the panel there.</p>
-            <a class="btn btn-primary btn-sm" href="${esc(t.discordChannelUrl)}" target="_blank" rel="noopener">Open Discord ticket channel</a>
+            ${discordChannelUrl ? `
+            <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">This applicant has a private ticket channel on Discord - chat with them there.</p>
+            <a class="btn btn-primary btn-sm" href="${esc(discordChannelUrl)}" target="_blank" rel="noopener">Open Discord ticket channel</a>
             ` : `<p style="color:var(--ink-soft);font-size:13px;">No Discord ticket channel yet for this application - it may still be getting created, or the bot isn't configured.</p>`}
           </div>
         </div>
