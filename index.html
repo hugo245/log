@@ -5404,8 +5404,13 @@
 
       function paintTable() {
         const area = document.getElementById('reqTableArea');
-        if (area) area.innerHTML = tableHtml();
+        if (!area) return;
+        const existingScroll = area.querySelector('.table-scroll');
+        const scrollLeft = existingScroll ? existingScroll.scrollLeft : 0;
+        area.innerHTML = tableHtml();
         wireTableEvents();
+        const newScroll = area.querySelector('.table-scroll');
+        if (newScroll) newScroll.scrollLeft = scrollLeft;
       }
 
       // Updates just the stat-strip numbers and tab counts in place, without touching anything
