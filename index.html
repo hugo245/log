@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PlayVerse Payment Log</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="icon" type="image/x-icon" href="/favicon.ico">
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
     rel="stylesheet">
@@ -2559,35 +2558,6 @@
       padding: 16px;
     }
 
-    .group-join-banner {
-      position: sticky;
-      top: 0;
-      z-index: 500;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      padding: 10px 16px;
-      background: var(--err-bg);
-      border-bottom: 1px solid var(--err-line);
-      color: var(--err-text);
-      font-size: 13.5px;
-      font-weight: 600;
-      text-align: center;
-    }
-
-    .group-join-banner a {
-      color: var(--err-text);
-      text-decoration: underline;
-      font-weight: 700;
-    }
-
-    .group-join-banner .btn-sm {
-      border-color: var(--err-line);
-      color: var(--err-text);
-    }
-
     .roling-steps {
       display: flex;
       align-items: center;
@@ -2755,8 +2725,6 @@
     let authReady = false;
     let appDataReady = false;
     let needsOnboarding = false;
-    let needsGroupJoin = false;
-    let baseGroupId = null;
 
     let renderGen = 0;
 
@@ -3072,8 +3040,6 @@
           hrPermissions = json.permissions || [];
           hrMaxHierarchy = json.maxHierarchy || 0;
           needsOnboarding = onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false;
-          needsGroupJoin = !!json.needsGroupJoin;
-          baseGroupId = json.baseGroupId != null ? json.baseGroupId : null;
         } else {
           isHrAuthed = false;
           hrUsername = '';
@@ -3081,8 +3047,6 @@
           hrPermissions = [];
           hrMaxHierarchy = 0;
           needsOnboarding = false;
-          needsGroupJoin = false;
-          baseGroupId = null;
           clearToken();
         }
       } catch (e) {
@@ -3092,8 +3056,6 @@
         hrPermissions = [];
         hrMaxHierarchy = 0;
         needsOnboarding = false;
-        needsGroupJoin = false;
-        baseGroupId = null;
       }
     }
 
@@ -3398,13 +3360,30 @@
       return json.data || [];
     }
 
-    async function getBaseAccess() {
-      const json = await callHrData('get_base_access');
-      return json.data || { groupId: null, minRank: null };
+    async function getBaseAccessGroups() {
+      const json = await callHrData('list_base_access_groups');
+      return json.data || [];
     }
 
-    async function saveBaseAccess(groupId, minRank) {
-      await callHrData('save_base_access', { groupId, minRank });
+    async function addBaseAccessGroup(robloxGroupId, minRank, name) {
+      await callHrData('add_base_access_group', { robloxGroupId, minRank, name });
+    }
+
+    async function deleteBaseAccessGroup(id) {
+      await callHrData('delete_base_access_group', { id });
+    }
+
+    async function getBaseAccessDiscordServers() {
+      const json = await callHrData('list_base_access_discord_servers');
+      return json.data || [];
+    }
+
+    async function addBaseAccessDiscordServer(discordGuildId, name) {
+      await callHrData('add_base_access_discord_server', { discordGuildId, name });
+    }
+
+    async function deleteBaseAccessDiscordServer(id) {
+      await callHrData('delete_base_access_discord_server', { id });
     }
 
     async function getRecruitmentConfig() {
@@ -3837,8 +3816,6 @@
       hrRoles = [];
       hrPermissions = [];
       hrMaxHierarchy = 0;
-      needsGroupJoin = false;
-      baseGroupId = null;
       window.location.hash = '#/';
     }
 
@@ -3937,28 +3914,9 @@
           renderHrGate();
         }
       }
-
-      renderGroupJoinBanner();
     }
     window.addEventListener('hashchange', route);
     initAuth();
-
-    function renderGroupJoinBanner() {
-      const show = isHrAuthed && needsGroupJoin;
-      let el = document.getElementById('groupJoinBanner');
-      if (!show) {
-        if (el) el.remove();
-        return;
-      }
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'groupJoinBanner';
-        el.className = 'group-join-banner';
-        document.body.insertBefore(el, document.body.firstChild);
-      }
-      const joinLink = baseGroupId != null ? `https://www.roblox.com/groups/${esc(baseGroupId)}` : 'https://www.roblox.com/groups';
-      el.innerHTML = `<span>⚠️ You're in, but you still need to join the PlayVerse Roblox group ASAP to keep your access.</span><a href="${joinLink}" target="_blank" rel="noopener">Join the group now</a>`;
-    }
 
     function canSeeAnalytics() {
       return isHrAuthed && hasPermission('dashboard.view');
@@ -4904,7 +4862,7 @@
               ticketDetail = detail;
               tickets = freshTickets;
             } catch (e) { }
-            busy = false; paint();
+            busy = false; paintModal();
           });
         });
 
@@ -4951,7 +4909,7 @@
           } catch (e) {
             placeTeamError = e.message || 'Could not place them on that team.';
           }
-          placeTeamBusy = false; paint();
+          placeTeamBusy = false; paintModal();
         });
 
         const manualRolingBtn = document.getElementById('manualRolingBtn');
@@ -5366,7 +5324,8 @@
             r.status = 'paid';
             r.paidAt = Date.now();
             await updateRequest(r);
-            paintShell();
+            updateStatsAndTabs();
+            paintTable();
           } catch (err) {
             e.currentTarget.disabled = false;
             e.currentTarget.textContent = 'Mark paid';
@@ -5389,7 +5348,8 @@
             r.paid = false;
             r.paidAt = null;
             await rejectRequest(id, note);
-            paintShell();
+            updateStatsAndTabs();
+            paintTable();
           } catch (err) {
             e.currentTarget.disabled = false;
             e.currentTarget.textContent = 'Reject';
@@ -5411,7 +5371,8 @@
             r.paid = false;
             r.paidAt = null;
             await reopenRequest(id);
-            paintShell();
+            updateStatsAndTabs();
+            paintTable();
           } catch (err) {
             e.currentTarget.disabled = false;
             e.currentTarget.textContent = 'Reopen';
@@ -5431,7 +5392,8 @@
           try {
             await deleteRequest(id);
             allRequests = allRequests.filter(x => x.id !== id);
-            paintShell();
+            updateStatsAndTabs();
+            paintTable();
           } catch (err) {
             e.currentTarget.disabled = false;
             e.currentTarget.textContent = 'Delete Request';
@@ -5444,6 +5406,40 @@
         const area = document.getElementById('reqTableArea');
         if (area) area.innerHTML = tableHtml();
         wireTableEvents();
+      }
+
+      // Updates just the stat-strip numbers and tab counts in place, without touching anything
+      // else on the page - so accepting/rejecting/paying/deleting a request doesn't rebuild the
+      // whole dashboard (and reset your scroll position) the way a full paintShell() would.
+      function updateStatsAndTabs() {
+        const counts = {
+          all: allRequests.length,
+          pending: allRequests.filter(r => r.status === 'pending').length,
+          paid: allRequests.filter(r => r.status === 'paid').length,
+          rejected: allRequests.filter(r => r.status === 'rejected').length
+        };
+        const pendingRows = allRequests.filter(r => r.status === 'pending');
+        const missingMethodCount = pendingRows.filter(r => !r.paymentMethod).length;
+        const pendingRobux = pendingRows.filter(r => r.currency === 'ROBUX').reduce((sum, r) => sum + (Number(r.payment) || 0), 0);
+        const pendingUsd = pendingRows.filter(r => r.currency === 'USD').reduce((sum, r) => sum + (Number(r.payment) || 0), 0);
+        const now = new Date();
+        const paidThisMonth = allRequests.filter(r => r.status === 'paid' && r.paidAt && new Date(r.paidAt).getMonth() === now.getMonth() && new Date(r.paidAt).getFullYear() === now.getFullYear()).length;
+
+        const pendingRobuxEl = document.getElementById('statPendingRobux');
+        if (pendingRobuxEl) pendingRobuxEl.innerHTML = `<img src="${ROBUX_IMG}" alt="Robux">${pendingRobux.toLocaleString()}`;
+        const pendingUsdEl = document.getElementById('statPendingUsd');
+        if (pendingUsdEl) pendingUsdEl.textContent = `$${pendingUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const paidThisMonthEl = document.getElementById('statPaidThisMonth');
+        if (paidThisMonthEl) paidThisMonthEl.textContent = String(paidThisMonth);
+        const missingMethodEl = document.getElementById('statMissingMethod');
+        if (missingMethodEl) {
+          missingMethodEl.textContent = String(missingMethodCount);
+          missingMethodEl.style.color = missingMethodCount > 0 ? 'var(--warn-text)' : '';
+        }
+        document.querySelectorAll('[data-count-for]').forEach(el => {
+          const key = el.dataset.countFor;
+          if (counts[key] != null) el.textContent = counts[key];
+        });
       }
 
       function paintShell() {
@@ -5483,28 +5479,28 @@
       <div class="stat-strip">
         <div class="strip-card">
           <div class="strip-label">Pending Robux</div>
-          <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${pendingRobux.toLocaleString()}</div>
+          <div class="strip-value" id="statPendingRobux"><img src="${ROBUX_IMG}" alt="Robux">${pendingRobux.toLocaleString()}</div>
         </div>
         <div class="strip-card">
           <div class="strip-label">Pending USD</div>
-          <div class="strip-value">$${pendingUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div class="strip-value" id="statPendingUsd">$${pendingUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
         </div>
         <div class="strip-card">
           <div class="strip-label">Paid this month</div>
-          <div class="strip-value">${paidThisMonth}</div>
+          <div class="strip-value" id="statPaidThisMonth">${paidThisMonth}</div>
         </div>
         <div class="strip-card">
           <div class="strip-label">Missing payment method</div>
-          <div class="strip-value" style="${missingMethodCount > 0 ? 'color:var(--warn-text);' : ''}">${missingMethodCount}</div>
+          <div class="strip-value" id="statMissingMethod" style="${missingMethodCount > 0 ? 'color:var(--warn-text);' : ''}">${missingMethodCount}</div>
         </div>
       </div>
 
       <div class="filter-bar">
-        <div class="tabs">
-          <button type="button" class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (${counts.all})</button>
-          <button type="button" class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (${counts.pending})</button>
-          <button type="button" class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (${counts.paid})</button>
-          <button type="button" class="tab-btn ${filter === 'rejected' ? 'active' : ''}" data-filter="rejected">Rejected (${counts.rejected})</button>
+        <div class="tabs" id="dashFilterTabs">
+          <button type="button" class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (<span class="tab-count" data-count-for="all">${counts.all}</span>)</button>
+          <button type="button" class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (<span class="tab-count" data-count-for="pending">${counts.pending}</span>)</button>
+          <button type="button" class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (<span class="tab-count" data-count-for="paid">${counts.paid}</span>)</button>
+          <button type="button" class="tab-btn ${filter === 'rejected' ? 'active' : ''}" data-filter="rejected">Rejected (<span class="tab-count" data-count-for="rejected">${counts.rejected}</span>)</button>
         </div>
         <div class="search-input-wrap">
           <input type="text" id="searchInput" placeholder="Search by username, task, or game" value="${esc(search)}">
@@ -5535,7 +5531,11 @@
         wireTopbarSignOut();
         wireTableEvents();
 
-        document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => { filter = b.dataset.filter; paintShell(); }));
+        document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
+          filter = b.dataset.filter;
+          document.querySelectorAll('#dashFilterTabs .tab-btn').forEach(t => t.classList.toggle('active', t.dataset.filter === filter));
+          paintTable();
+        }));
 
         const searchInput = document.getElementById('searchInput');
         if (searchInput) {
@@ -6678,11 +6678,17 @@
       let ignoreEligibilitySaving = false;
       let ignoreEligibilityError = null;
 
-      let baseAccess = { groupId: null, minRank: null };
-      let baseAccessLoading = canManageBaseAccess;
-      let baseAccessError = null;
-      let savingBaseAccess = false;
-      let baseAccessSuccess = false;
+      let baseAccessGroups = [];
+      let baseAccessGroupsLoading = canManageBaseAccess;
+      let baseAccessGroupsError = null;
+      let addingBaseAccessGroup = false;
+      let addBaseAccessGroupError = null;
+
+      let baseAccessDiscordServers = [];
+      let baseAccessDiscordServersLoading = canManageBaseAccess;
+      let baseAccessDiscordServersError = null;
+      let addingBaseAccessDiscordServer = false;
+      let addBaseAccessDiscordServerError = null;
 
       let roles = [];
       let assignments = [];
@@ -6746,18 +6752,56 @@
       <div class="heading-block">
         <span class="eyebrow">Sign-in access</span>
         <h1>Who can sign in</h1>
-        <p class="sub">Choose the Roblox group and minimum rank required to sign in. Anyone below that rank, or not in the group, gets blocked at login. Leave the group ID blank to let any Roblox account sign in.</p>
+        <p class="sub">Someone can sign in if they're in at least one of the Roblox groups below (at that group's minimum rank, if set), or if their linked Discord account is in at least one of the servers below - handy for keeping a separate tester group/server alongside the main one. Anyone who matches neither gets sent to the application flow instead. Leave both lists empty to let any Roblox account sign in.</p>
       </div>
-      <div class="panel" style="max-width:520px;margin-bottom:36px;">
-        ${baseAccessError ? `<div class="error-box"><span>${esc(baseAccessError)}</span></div>` : ''}
-        ${baseAccessSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Sign-in requirement updated</strong><span>New sign-ins will be checked against this from now on.</span></div></div>` : ''}
-        ${baseAccessLoading ? `<div class="dash-loading">Loading current setting...</div>` : `
+      <div class="panel" style="max-width:640px;margin-bottom:20px;">
+        ${baseAccessGroupsError ? `<div class="error-box"><span>${esc(baseAccessGroupsError)}</span></div>` : ''}
+        ${baseAccessGroupsLoading ? `<div class="dash-loading">Loading groups...</div>` : baseAccessGroups.length === 0 ? `<div class="empty-note">No sign-in groups configured yet - any Roblox account can currently sign in (unless a Discord server is configured below).</div>` : baseAccessGroups.map(g => `
+          <div class="role-row">
+            <div class="role-row-top">
+              <div>
+                <strong>${esc(g.name || 'Sign-in group')}</strong>
+                <div class="role-meta">Group ID ${esc(g.roblox_group_id)}${g.min_rank != null ? ` &middot; min rank ${esc(g.min_rank)}` : ''}</div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" data-del-base-group="${esc(g.id)}">Remove</button>
+            </div>
+          </div>`).join('')}
+
+        <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
+          <div class="preview-label">Add a sign-in group</div>
+          ${addBaseAccessGroupError ? `<div class="error-box"><span>${esc(addBaseAccessGroupError)}</span></div>` : ''}
           <div class="row2">
-            <div class="field"><label>Roblox group ID</label><input type="number" id="baseGroupId" placeholder="e.g. 123456" value="${baseAccess.groupId != null ? esc(baseAccess.groupId) : ''}"></div>
-            <div class="field"><label>Minimum rank <span class="hint">(optional, 0-255)</span></label><input type="number" id="baseMinRank" min="0" max="255" placeholder="e.g. 1" value="${baseAccess.minRank != null ? esc(baseAccess.minRank) : ''}"></div>
+            <div class="field"><label>Roblox group ID</label><input type="number" id="newBaseGroupId" placeholder="e.g. 123456"></div>
+            <div class="field"><label>Minimum rank <span class="hint">(optional, 0-255)</span></label><input type="number" id="newBaseGroupMinRank" min="0" max="255" placeholder="e.g. 1"></div>
           </div>
-          <button type="button" class="btn btn-primary" id="saveBaseAccessBtn" ${savingBaseAccess ? 'disabled' : ''}>${savingBaseAccess ? 'Saving...' : 'Save sign-in requirement'}</button>
-        `}
+          <div class="field"><label>Display name <span class="hint">(optional)</span></label><input type="text" id="newBaseGroupName" placeholder="e.g. PlayVerse Studio, Testers"></div>
+          <button type="button" class="btn btn-ok" id="addBaseGroupBtn" ${addingBaseAccessGroup ? 'disabled' : ''}>${addingBaseAccessGroup ? 'Adding...' : 'Add group'}</button>
+        </div>
+      </div>
+
+      <div class="panel" style="max-width:640px;margin-bottom:36px;">
+        ${baseAccessDiscordServersError ? `<div class="error-box"><span>${esc(baseAccessDiscordServersError)}</span></div>` : ''}
+        ${baseAccessDiscordServersLoading ? `<div class="dash-loading">Loading Discord servers...</div>` : baseAccessDiscordServers.length === 0 ? `<div class="empty-note">No sign-in Discord servers configured yet.</div>` : baseAccessDiscordServers.map(s => `
+          <div class="role-row">
+            <div class="role-row-top">
+              <div>
+                <strong>${esc(s.name || 'Sign-in Discord server')}</strong>
+                <div class="role-meta">Server ID ${esc(s.discord_guild_id)}</div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" data-del-base-discord="${esc(s.id)}">Remove</button>
+            </div>
+          </div>`).join('')}
+
+        <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
+          <div class="preview-label">Add a sign-in Discord server</div>
+          ${addBaseAccessDiscordServerError ? `<div class="error-box"><span>${esc(addBaseAccessDiscordServerError)}</span></div>` : ''}
+          <div class="row2">
+            <div class="field"><label>Discord server (guild) ID</label><input type="text" id="newBaseDiscordId" placeholder="e.g. 123456789012345678"></div>
+            <div class="field"><label>Display name <span class="hint">(optional)</span></label><input type="text" id="newBaseDiscordName" placeholder="e.g. Testers server"></div>
+          </div>
+          <p class="sub" style="margin:0 0 12px;">This only works for someone who has already linked a Discord account (e.g. by going through the application flow once) - checked via their linked account, not a live Discord login.</p>
+          <button type="button" class="btn btn-ok" id="addBaseDiscordBtn" ${addingBaseAccessDiscordServer ? 'disabled' : ''}>${addingBaseAccessDiscordServer ? 'Adding...' : 'Add server'}</button>
+        </div>
       </div>` : ''}
       ` : ''}
 
@@ -7204,24 +7248,63 @@
         document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', () => { manageTab = b.dataset.manageTab; paint(); }));
 
         if (canManageBaseAccess) {
-          const saveBaseAccessBtn = document.getElementById('saveBaseAccessBtn');
-          if (saveBaseAccessBtn) saveBaseAccessBtn.addEventListener('click', async () => {
-            const groupIdRaw = document.getElementById('baseGroupId').value;
-            const minRankRaw = document.getElementById('baseMinRank').value;
-            const groupId = groupIdRaw === '' ? null : Number(groupIdRaw);
+          const addBaseGroupBtn = document.getElementById('addBaseGroupBtn');
+          if (addBaseGroupBtn) addBaseGroupBtn.addEventListener('click', async () => {
+            const groupId = document.getElementById('newBaseGroupId').value;
+            const minRankRaw = document.getElementById('newBaseGroupMinRank').value;
             const minRank = minRankRaw === '' ? null : Number(minRankRaw);
-            if (groupId != null && !(groupId > 0)) { baseAccessError = 'Enter a valid Roblox group ID, or leave it blank to allow anyone.'; baseAccessSuccess = false; paint(); return; }
-            savingBaseAccess = true; baseAccessError = null; baseAccessSuccess = false; paint();
+            const name = document.getElementById('newBaseGroupName').value.trim();
+            if (!groupId || !(Number(groupId) > 0)) { addBaseAccessGroupError = 'Enter a valid Roblox group ID.'; paint(); return; }
+            addingBaseAccessGroup = true; addBaseAccessGroupError = null; paint();
             try {
-              await saveBaseAccess(groupId, minRank);
-              baseAccess = { groupId, minRank };
-              savingBaseAccess = false; baseAccessSuccess = true; paint();
+              await addBaseAccessGroup(groupId, minRank, name || null);
+              addingBaseAccessGroup = false;
+              await loadBaseAccessGroups();
             } catch (err) {
-              savingBaseAccess = false;
-              baseAccessError = (err && err.message) ? err.message : 'Could not save the sign-in requirement. Check your connection and try again.';
+              addingBaseAccessGroup = false;
+              addBaseAccessGroupError = (err && err.message) ? err.message : 'Could not add that group.';
               paint();
             }
           });
+
+          document.querySelectorAll('[data-del-base-group]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delBaseGroup;
+            if (!confirm('Remove this sign-in group?')) return;
+            try {
+              await deleteBaseAccessGroup(id);
+              await loadBaseAccessGroups();
+            } catch (err) {
+              alert('Could not remove that group. Check your connection and try again.');
+            }
+          }));
+
+          const addBaseDiscordBtn = document.getElementById('addBaseDiscordBtn');
+          if (addBaseDiscordBtn) addBaseDiscordBtn.addEventListener('click', async () => {
+            const guildId = document.getElementById('newBaseDiscordId').value.trim();
+            const name = document.getElementById('newBaseDiscordName').value.trim();
+            if (!guildId) { addBaseAccessDiscordServerError = 'Enter a Discord server ID.'; paint(); return; }
+            addingBaseAccessDiscordServer = true; addBaseAccessDiscordServerError = null; paint();
+            try {
+              await addBaseAccessDiscordServer(guildId, name || null);
+              addingBaseAccessDiscordServer = false;
+              await loadBaseAccessDiscordServers();
+            } catch (err) {
+              addingBaseAccessDiscordServer = false;
+              addBaseAccessDiscordServerError = (err && err.message) ? err.message : 'Could not add that server.';
+              paint();
+            }
+          });
+
+          document.querySelectorAll('[data-del-base-discord]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delBaseDiscord;
+            if (!confirm('Remove this sign-in Discord server?')) return;
+            try {
+              await deleteBaseAccessDiscordServer(id);
+              await loadBaseAccessDiscordServers();
+            } catch (err) {
+              alert('Could not remove that server. Check your connection and try again.');
+            }
+          }));
         }
 
         if (canManageOnboarding) {
@@ -7619,15 +7702,27 @@
         paint();
       }
 
-      async function loadBaseAccess() {
-        baseAccessLoading = true; baseAccessError = null; paint();
+      async function loadBaseAccessGroups() {
+        baseAccessGroupsLoading = true; baseAccessGroupsError = null; paint();
         try {
-          baseAccess = await getBaseAccess();
+          baseAccessGroups = await getBaseAccessGroups();
         } catch (err) {
-          baseAccessError = (err && err.message) ? err.message : 'Could not load the current sign-in requirement.';
+          baseAccessGroupsError = (err && err.message) ? err.message : 'Could not load the sign-in groups.';
         }
         if (myGen !== renderGen) return;
-        baseAccessLoading = false;
+        baseAccessGroupsLoading = false;
+        paint();
+      }
+
+      async function loadBaseAccessDiscordServers() {
+        baseAccessDiscordServersLoading = true; baseAccessDiscordServersError = null; paint();
+        try {
+          baseAccessDiscordServers = await getBaseAccessDiscordServers();
+        } catch (err) {
+          baseAccessDiscordServersError = (err && err.message) ? err.message : 'Could not load the sign-in Discord servers.';
+        }
+        if (myGen !== renderGen) return;
+        baseAccessDiscordServersLoading = false;
         paint();
       }
 
@@ -7706,7 +7801,7 @@
 
       paint();
       if (canManageGroups) { loadGroups(); loadIgnoreEligibility(); }
-      if (canManageBaseAccess) loadBaseAccess();
+      if (canManageBaseAccess) { loadBaseAccessGroups(); loadBaseAccessDiscordServers(); }
       if (canManageRoles) {
         loadRoles().then(loadAssignments);
       } else if (canManageOnboarding) {

@@ -373,16 +373,16 @@ function ticketEmbedPayload(ticket) {
 }
 
 // True if the given Discord user is currently a member of the configured guild.
-async function isDiscordGuildMember(discordUserId) {
-    if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID || !discordUserId) return false;
+async function isDiscordGuildMember(discordUserId, guildId = DISCORD_GUILD_ID) {
+    if (!DISCORD_BOT_TOKEN || !guildId || !discordUserId) return false;
     try {
-        const res = await fetch(`https://discord.com/api/v10/guilds/${DISCORD_GUILD_ID}/members/${discordUserId}`, {
+        const res = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${discordUserId}`, {
             headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` }
         });
         if (res.status === 404) return false;
         if (!res.ok) {
             const bodyText = await res.text().catch(() => '');
-            console.error(`isDiscordGuildMember: unexpected status ${res.status} checking ${discordUserId} in guild ${DISCORD_GUILD_ID}: ${bodyText}`);
+            console.error(`isDiscordGuildMember: unexpected status ${res.status} checking ${discordUserId} in guild ${guildId}: ${bodyText}`);
             return false;
         }
         return true;
@@ -390,6 +390,16 @@ async function isDiscordGuildMember(discordUserId) {
         console.error('isDiscordGuildMember failed:', e.message);
         return false;
     }
+}
+
+// Checks membership across several Discord servers at once, e.g. a main studio server plus a
+// separate testers-only server, returning true on the first match.
+async function isMemberOfAnyGuild(discordUserId, guildIds) {
+    if (!discordUserId || !guildIds || !guildIds.length) return false;
+    for (const guildId of guildIds) {
+        if (await isDiscordGuildMember(discordUserId, guildId)) return true;
+    }
+    return false;
 }
 
 // Creates a private per-applicant ticket channel under DISCORD_TICKET_CATEGORY_ID, visible only to the
@@ -832,17 +842,22 @@ async function resolveRobloxUserId(username) {
     return match ? match.id : null;
 }
 
-async function getBaseAccessConfig() {
-    const { data, error } = await supabase
-        .from('app_settings')
-        .select('base_group_id, base_min_rank')
-        .eq('id', 1)
-        .maybeSingle();
+async function getBaseAccessGroups() {
+    const { data, error } = await supabase.from('base_access_groups').select('*').order('created_at', { ascending: true });
     if (error) throw error;
-    return {
-        groupId: data && data.base_group_id != null ? Number(data.base_group_id) : null,
-        minRank: data && data.base_min_rank != null ? Number(data.base_min_rank) : null
-    };
+    return data || [];
+}
+
+async function getBaseAccessDiscordServers() {
+    const { data, error } = await supabase.from('base_access_discord_servers').select('*').order('created_at', { ascending: true });
+    if (error) throw error;
+    return data || [];
+}
+
+async function getLinkedDiscordUserId(robloxUserId) {
+    const { data, error } = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', robloxUserId).maybeSingle();
+    if (error) return null;
+    return data ? data.discord_user_id : null;
 }
 
 async function getIgnoreEligibilityConfig() {
@@ -972,9 +987,17 @@ async function convertPendingRobuxForCashMethodUsers(filter) {
     }
 }
 
+// Sign-in access is granted if the Roblox account belongs to at least one of the configured
+// Roblox groups (at that group's minimum rank, if set) OR their linked Discord account belongs to
+// at least one of the configured Discord servers - so a separate "tester" group/server can be
+// added alongside the main one without anyone needing to be in both. If neither list has any
+// entries, sign-in is unrestricted (matches the old "leave the group ID blank" behavior).
 async function checkBaseAccess(robloxUserId) {
-    const base = await getBaseAccessConfig();
-    if (!base.groupId) return { allowed: true, base, isGroupMember: true, viaPlacement: false };
+    const [groups, discordServers] = await Promise.all([getBaseAccessGroups(), getBaseAccessDiscordServers()]);
+
+    if (!groups.length && !discordServers.length) {
+        return { allowed: true, isMember: true, viaPlacement: false };
+    }
 
     const [{ data: manualRows, error: manualErr }, { data: placementRows, error: placementErr }] = await Promise.all([
         supabase.from('user_role_assignments').select('id').eq('roblox_user_id', robloxUserId).limit(1),
@@ -984,13 +1007,26 @@ async function checkBaseAccess(robloxUserId) {
     if (placementErr) throw placementErr;
     const hasBypass = (manualRows && manualRows.length > 0) || (placementRows && placementRows.length > 0);
 
-    const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
-    const membership = groupRoles.find(g => g.group && g.group.id === base.groupId);
-    const isGroupMember = !!membership && (base.minRank == null || membership.role.rank >= base.minRank);
+    let isMember = false;
 
-    if (isGroupMember) return { allowed: true, base, isGroupMember: true, viaPlacement: false };
-    if (hasBypass) return { allowed: true, base, isGroupMember: false, viaPlacement: true };
-    return { allowed: false, base, isGroupMember: false, viaPlacement: false };
+    if (groups.length) {
+        const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
+        isMember = groups.some(g => {
+            const membership = groupRoles.find(gr => gr.group && gr.group.id === Number(g.roblox_group_id));
+            return !!membership && (g.min_rank == null || membership.role.rank >= g.min_rank);
+        });
+    }
+
+    if (!isMember && discordServers.length) {
+        const discordUserId = await getLinkedDiscordUserId(robloxUserId);
+        if (discordUserId) {
+            isMember = await isMemberOfAnyGuild(discordUserId, discordServers.map(s => s.discord_guild_id));
+        }
+    }
+
+    if (isMember) return { allowed: true, isMember: true, viaPlacement: false };
+    if (hasBypass) return { allowed: true, isMember: false, viaPlacement: true };
+    return { allowed: false, isMember: false, viaPlacement: false };
 }
 
 async function computeAccess(robloxUserId) {
@@ -1828,23 +1864,13 @@ app.get('/hr-session', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false }); return; }
 
-    let needsGroupJoin = false;
-    let baseGroupId = null;
-    try {
-        const baseCheck = await checkBaseAccess(session.roblox_user_id);
-        needsGroupJoin = !!(baseCheck.base && baseCheck.base.groupId && !baseCheck.isGroupMember);
-        baseGroupId = (baseCheck.base && baseCheck.base.groupId) || null;
-    } catch (e) { }
-
     res.json({
         ok: true,
         robloxUserId: session.roblox_user_id,
         robloxUsername: session.roblox_username,
         roles: session.roles || [],
         permissions: session.permissions || [],
-        maxHierarchy: session.max_hierarchy || 0,
-        needsGroupJoin,
-        baseGroupId
+        maxHierarchy: session.max_hierarchy || 0
     });
 });
 
@@ -2310,24 +2336,71 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-    if (action === 'get_base_access') {
+    if (action === 'list_base_access_groups') {
         try {
-            const base = await getBaseAccessConfig();
-            res.json({ ok: true, data: base });
+            const data = await getBaseAccessGroups();
+            res.json({ ok: true, data });
         } catch (e) {
-            res.status(500).json({ ok: false, error: 'Could not load the sign-in access requirement.' });
+            res.status(500).json({ ok: false, error: 'Could not load the sign-in group requirements.' });
         }
         return;
     }
 
-    if (action === 'save_base_access') {
+    if (action === 'add_base_access_group') {
         if (!requirePermission(res, session, 'settings.manage_base_access')) return;
-        const groupId = payload.groupId === '' || payload.groupId == null ? null : Number(payload.groupId);
+        const robloxGroupId = Number(payload.robloxGroupId);
         const minRank = payload.minRank === '' || payload.minRank == null ? null : Number(payload.minRank);
-        if (groupId != null && !(groupId > 0)) { res.status(400).json({ ok: false, error: 'invalid_group_id' }); return; }
-        const { error } = await supabase
-            .from('app_settings')
-            .upsert({ id: 1, base_group_id: groupId, base_min_rank: minRank, updated_at: new Date().toISOString() });
+        const name = payload.name ? String(payload.name).trim() : null;
+        if (!robloxGroupId || !(robloxGroupId > 0)) { res.status(400).json({ ok: false, error: 'invalid_group_id' }); return; }
+        const { error } = await supabase.from('base_access_groups').insert({
+            roblox_group_id: robloxGroupId,
+            min_rank: minRank,
+            name
+        });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_base_access_group') {
+        if (!requirePermission(res, session, 'settings.manage_base_access')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('base_access_groups').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_base_access_discord_servers') {
+        try {
+            const data = await getBaseAccessDiscordServers();
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not load the sign-in Discord server requirements.' });
+        }
+        return;
+    }
+
+    if (action === 'add_base_access_discord_server') {
+        if (!requirePermission(res, session, 'settings.manage_base_access')) return;
+        const discordGuildId = payload.discordGuildId ? String(payload.discordGuildId).trim() : '';
+        const name = payload.name ? String(payload.name).trim() : null;
+        if (!discordGuildId) { res.status(400).json({ ok: false, error: 'invalid_guild_id' }); return; }
+        const { error } = await supabase.from('base_access_discord_servers').insert({
+            discord_guild_id: discordGuildId,
+            name
+        });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_base_access_discord_server') {
+        if (!requirePermission(res, session, 'settings.manage_base_access')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('base_access_discord_servers').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;
