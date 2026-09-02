@@ -476,10 +476,26 @@
       opacity: 1;
     }
 
+    .btn-danger-ghost {
+      background: var(--err-bg);
+      color: var(--err-text);
+    }
+
+    .btn-danger-ghost:hover {
+      background: var(--err-line);
+    }
+
     .btn-sm {
       padding: 7px 12px;
       font-size: 12.5px;
       border-radius: 7px;
+    }
+
+    .btn-xs {
+      padding: 5px 10px;
+      font-size: 11.5px;
+      border-radius: 6px;
+      gap: 4px;
     }
 
     .btn-equal {
@@ -1019,6 +1035,7 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
+      table-layout: fixed;
     }
 
     table.req-table thead th {
@@ -2685,7 +2702,11 @@
       'broadcasts.manage': 'Send broadcasts',
       'audit.view': 'View audit logs',
       'audit.revert': 'Revert audit log actions',
-      'backups.manage': 'Create, load, and restore database backups'
+      'backups.manage': 'Create, load, and restore database backups',
+      'recruitment.view': 'View recruitment tickets',
+      'recruitment.respond': 'Show up as a recruiter (referral list)',
+      'recruitment.manage': 'Manage recruitment tickets (accept, reject, assign, place teams, sign off)',
+      'recruitment.analytics': 'View recruitment analytics'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
 
@@ -5342,10 +5363,10 @@
               <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
               <td class="actions-cell">
                 <div class="actions-group">
-                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
-                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
-                  ${r.status !== 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
-                  ${canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-delete-request="${esc(r.id)}">Delete</button>` : ''}
+                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-xs" data-paid="${esc(r.id)}">Paid</button>` : ''}
+                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-xs" data-reject="${esc(r.id)}">Reject</button>` : ''}
+                  ${r.status !== 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-xs" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
+                  ${canMarkPaid ? `<button type="button" class="btn btn-danger-ghost btn-xs" data-delete-request="${esc(r.id)}">Delete</button>` : ''}
                 </div>
               </td>
             </tr>`;
@@ -5396,12 +5417,12 @@
             <thead>
               <tr>
                 <th style="width:32px;"></th>
-                <th>Requested by</th>
-                <th>Task</th>
-                <th>Payment</th>
-                <th>Status</th>
-                <th style="width:90px;">Date</th>
-                <th style="width:1%;white-space:nowrap;">Actions</th>
+                <th style="width:19%;">Requested by</th>
+                <th style="width:27%;">Task</th>
+                <th style="width:11%;">Payment</th>
+                <th style="width:12%;">Status</th>
+                <th style="width:92px;">Date</th>
+                <th style="width:190px;">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -6652,7 +6673,7 @@
         ${summary.requests.length === 0 ? `<div class="dash-empty"><h3>Nothing here yet</h3><p>Once a producer logs a request for you, it'll show up here.</p></div>` : `
         <div class="table-scroll">
           <table class="req-table">
-            <thead><tr><th>ID</th><th>Task</th><th>Game</th><th>Payment</th><th>Status</th><th>Date</th></tr></thead>
+            <thead><tr><th style="width:16%;">ID</th><th style="width:34%;">Task</th><th style="width:16%;">Game</th><th style="width:14%;">Payment</th><th style="width:12%;">Status</th><th style="width:100px;">Date</th></tr></thead>
             <tbody>
               ${summary.requests.map(r => `
                 <tr>
