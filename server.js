@@ -409,12 +409,12 @@ async function isMemberOfAnyGuild(discordUserId, guildIds) {
 // applicant and the HR role(s), with a status panel embed (no buttons - manage the application from the
 // website dashboard). This is where all communication with the applicant now happens instead of the old
 // website chat.
-async function createDiscordTicketChannel(ticket) {
+async function createDiscordTicketChannel(ticket, positionRoleId) {
     if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) {
         console.error('createDiscordTicketChannel: skipped - DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not configured.');
         return null;
     }
-    console.log(`createDiscordTicketChannel: creating channel for ticket ${ticket.id} in guild ${DISCORD_GUILD_ID}, category ${DISCORD_TICKET_CATEGORY_ID}, HR role(s): ${DISCORD_HR_ROLE_IDS.join(', ') || '(none configured)'}`);
+    console.log(`createDiscordTicketChannel: creating channel for ticket ${ticket.id} in guild ${DISCORD_GUILD_ID}, category ${DISCORD_TICKET_CATEGORY_ID}, HR role(s): ${DISCORD_HR_ROLE_IDS.join(', ') || '(none configured)'}, position role: ${positionRoleId || '(none)'}`);
     try {
         const VIEW_CHANNEL = 1024, SEND_MESSAGES = 2048, READ_MESSAGE_HISTORY = 65536, ATTACH_FILES = 32768, EMBED_LINKS = 16384;
         const memberAllow = String(VIEW_CHANNEL + SEND_MESSAGES + READ_MESSAGE_HISTORY + ATTACH_FILES + EMBED_LINKS);
@@ -422,7 +422,9 @@ async function createDiscordTicketChannel(ticket) {
             { id: DISCORD_GUILD_ID, type: 0, deny: String(VIEW_CHANNEL) }, // @everyone can't see it
             { id: ticket.discord_user_id, type: 1, allow: memberAllow } // the applicant
         ];
-        for (const roleId of DISCORD_HR_ROLE_IDS) {
+        const rolesWithAccess = new Set(DISCORD_HR_ROLE_IDS);
+        if (positionRoleId) rolesWithAccess.add(positionRoleId);
+        for (const roleId of rolesWithAccess) {
             overwrites.push({ id: roleId, type: 0, allow: memberAllow });
         }
         // The bot's own user id matches its application (client) id - make sure it can always see the channel.
@@ -445,10 +447,14 @@ async function createDiscordTicketChannel(ticket) {
         }
         console.log(`createDiscordTicketChannel: created channel ${channel.id} for ticket ${ticket.id}`);
 
+        // Ping the role configured for this specific position if there is one, instead of the
+        // general HR role(s) - keeps the noise down to whichever team actually owns that position.
+        // Falls back to the general HR role(s) when the position has no role configured.
+        const pingRoleIds = positionRoleId ? [positionRoleId] : DISCORD_HR_ROLE_IDS;
         const message = await discordApi(`/channels/${channel.id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `${DISCORD_HR_ROLE_IDS.map(id => `<@&${id}>`).join(' ')} <@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application. Manage this application (accept, reject, assign, etc.) from the dashboard on the website.`,
+                content: `${pingRoleIds.map(id => `<@&${id}>`).join(' ')} <@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application. Manage this application (accept, reject, assign, etc.) from the dashboard on the website.`,
                 embeds: [ticketEmbedPayload(ticket)]
             })
         });
@@ -2069,11 +2075,21 @@ app.post('/recruitment/apply', async (req, res) => {
     const experience = body.experience ? String(body.experience).trim() : '';
     const whyJoin = body.whyJoin ? String(body.whyJoin).trim() : '';
     let portfolioUrl = body.portfolioUrl ? String(body.portfolioUrl).trim() : null;
-    const position = body.position ? String(body.position).trim() : null;
+    const positionId = body.positionId != null && body.positionId !== '' ? Number(body.positionId) : null;
     const referredByUserId = body.referredByUserId != null && body.referredByUserId !== '' ? Number(body.referredByUserId) : null;
 
     if (!experience) { res.status(400).json({ ok: false, error: 'missing_experience' }); return; }
     if (!whyJoin) { res.status(400).json({ ok: false, error: 'missing_why_join' }); return; }
+
+    let position = null;
+    let positionRoleId = null;
+    if (positionId) {
+        const { data: positionRow } = await supabase.from('recruitment_positions').select('*').eq('id', positionId).maybeSingle();
+        if (positionRow) {
+            position = positionRow.name;
+            positionRoleId = positionRow.discord_role_id || null;
+        }
+    }
 
     // Reject anything that isn't a genuine http(s) link. This is the field HR staff click
     // on from the review dashboard, so it must never be able to carry a javascript:, data:,
@@ -2124,6 +2140,7 @@ app.post('/recruitment/apply', async (req, res) => {
         experience,
         why_join: whyJoin,
         position,
+        position_id: positionId,
         referred_by_user_id: referredByUserId,
         referred_by_username: referredByUsername,
         status: 'pending'
@@ -2134,7 +2151,7 @@ app.post('/recruitment/apply', async (req, res) => {
     const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
     await supabase.from('recruit_sessions').update({ expires_at: portalExpiresAt }).eq('token', recruitSession.token);
 
-    createDiscordTicketChannel(ticket);
+    createDiscordTicketChannel(ticket, positionRoleId);
     res.json({ ok: true, data: { id: ticket.id } });
 });
 
@@ -2196,6 +2213,12 @@ app.get('/recruitment/recruiters', async (req, res) => {
     } catch (e) {
         res.status(500).json({ ok: false, error: e.message });
     }
+});
+
+app.get('/recruitment/positions', async (req, res) => {
+    const { data, error } = await supabase.from('recruitment_positions').select('id, name').order('name', { ascending: true });
+    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+    res.json({ ok: true, data: data || [] });
 });
 
 app.get('/onboarding-link-preview', async (req, res) => {
@@ -3373,6 +3396,49 @@ app.post('/hr-data', async (req, res) => {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('skillsets').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_recruitment_positions') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const { data, error } = await supabase.from('recruitment_positions').select('*').order('name', { ascending: true });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data || [] });
+        return;
+    }
+
+    if (action === 'add_recruitment_position') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const name = payload.name && String(payload.name).trim();
+        const discordRoleId = payload.discordRoleId ? String(payload.discordRoleId).trim() : null;
+        if (!name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
+        const { error } = await supabase.from('recruitment_positions').insert({ name, discord_role_id: discordRoleId });
+        if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A position with that name already exists.' }); return; }
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'update_recruitment_position') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const update = {};
+        if (payload.name != null) update.name = String(payload.name).trim();
+        if (payload.discordRoleId !== undefined) update.discord_role_id = payload.discordRoleId ? String(payload.discordRoleId).trim() : null;
+        const { error } = await supabase.from('recruitment_positions').update(update).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_recruitment_position') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('recruitment_positions').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;

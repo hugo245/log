@@ -3186,6 +3186,13 @@
       return json.data || [];
     }
 
+    async function loadPublicPositions() {
+      const res = await fetch(EDGE_BASE + '/recruitment/positions', { headers: { 'ngrok-skip-browser-warning': 'true' } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) return [];
+      return json.data || [];
+    }
+
     async function submitRecruitmentApplication(rt, data) {
       const res = await fetch(EDGE_BASE + '/recruitment/apply', {
         method: 'POST',
@@ -3440,6 +3447,19 @@
 
     async function deleteBaseAccessDiscordServer(id) {
       await callHrData('delete_base_access_discord_server', { id });
+    }
+
+    async function getRecruitmentPositions() {
+      const json = await callHrData('list_recruitment_positions');
+      return json.data || [];
+    }
+
+    async function addRecruitmentPosition(name, discordRoleId) {
+      await callHrData('add_recruitment_position', { name, discordRoleId });
+    }
+
+    async function deleteRecruitmentPosition(id) {
+      await callHrData('delete_recruitment_position', { id });
     }
 
     async function getRecruitmentConfig() {
@@ -4277,6 +4297,7 @@
       const myGen = renderGen;
       let info = null;
       let recruiters = [];
+      let positions = [];
       let loading = true;
       let loadFailed = false;
       let submitting = false;
@@ -4284,10 +4305,11 @@
       let fieldErrors = {};
 
       paint();
-      Promise.all([fetchRecruitSession(rt), loadPublicRecruiters()]).then(([sessionInfo, recruiterList]) => {
+      Promise.all([fetchRecruitSession(rt), loadPublicRecruiters(), loadPublicPositions()]).then(([sessionInfo, recruiterList, positionList]) => {
         if (renderGen !== myGen) return;
         info = sessionInfo;
         recruiters = recruiterList;
+        positions = positionList;
         fetchMyTicket(rt).then(() => {
           if (renderGen !== myGen) return;
           window.location.hash = '#/recruit/status';
@@ -4323,7 +4345,10 @@
           <div style="text-align:left;display:flex;flex-direction:column;gap:14px;margin-top:6px;">
             <div class="field">
               <label>Position you're applying for <span class="hint">(optional)</span></label>
-              <input type="text" id="ap_position" placeholder="Scripter, Builder, UI designer...">
+              <select id="ap_position">
+                <option value="">Not sure / general application</option>
+                ${positions.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}
+              </select>
             </div>
             <div class="field">
               <label>Portfolio link <span class="hint">(optional)</span></label>
@@ -4366,7 +4391,7 @@
           const experience = (document.getElementById('ap_experience').value || '').trim();
           const whyJoin = (document.getElementById('ap_why').value || '').trim();
           const portfolioUrl = (document.getElementById('ap_portfolio').value || '').trim() || null;
-          const position = (document.getElementById('ap_position').value || '').trim() || null;
+          const position = document.getElementById('ap_position').value || null;
           const referredByUserId = document.getElementById('ap_referrer').value || null;
           const errs = {};
           if (!experience) errs.experience = 'Please share a bit about your experience.';
@@ -4380,7 +4405,7 @@
               experience,
               whyJoin,
               portfolioUrl,
-              position,
+              positionId: position,
               referredByUserId
             });
             submitting = false;
@@ -6934,6 +6959,12 @@
       let addLinkError = null;
       let lastCreatedLink = null;
 
+      let positions = [];
+      let positionsLoading = canManageOnboarding;
+      let positionsError = null;
+      let addingPosition = false;
+      let addPositionError = null;
+
       let recruitmentConfig = { autoRoleId: null, discordRoleId: null, gracePeriodHours: null, notifyRoleId: null };
       let recruitmentConfigLoading = canManageOnboarding;
       let recruitmentConfigError = null;
@@ -6965,6 +6996,7 @@
           onboarding: [
             { id: 'sec-teams', label: 'Teams & skillsets' },
             { id: 'sec-invites', label: 'Invite links' },
+            { id: 'sec-positions', label: 'Positions' },
             { id: 'sec-autohire', label: 'Auto-hire settings' },
             { id: 'sec-signoff', label: 'Sign-off & finalise' }
           ],
@@ -7415,6 +7447,33 @@
         </div>
       </div>
 
+      <div class="heading-block" id="sec-positions" style="margin-top:36px;">
+        <span class="eyebrow">Recruitment</span>
+        <h1>Positions</h1>
+        <p class="sub">These show up as a dropdown on the application form. Attach a Discord role to a position to ping and give channel access to that specific team instead of the general HR role(s) whenever someone applies for it.</p>
+      </div>
+      <div class="panel" style="max-width:640px;">
+        ${positionsError ? `<div class="error-box"><span>${esc(positionsError)}</span></div>` : ''}
+        ${positionsLoading ? `<div class="dash-loading">Loading positions...</div>` : positions.length === 0 ? `<div class="empty-note">No positions configured yet - the application form will just show a general "Not sure" option.</div>` : positions.map(p => `
+          <div class="role-row">
+            <div class="role-row-top">
+              <div>
+                <strong>${esc(p.name)}</strong>
+                <div class="role-meta">${p.discord_role_id ? `Pings Discord role ${esc(p.discord_role_id)}` : 'No Discord role attached - pings the general HR role(s)'}</div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" data-del-position="${esc(p.id)}">Remove</button>
+            </div>
+          </div>`).join('')}
+
+        <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:18px;">
+          <div class="preview-label">Add a position</div>
+          ${addPositionError ? `<div class="error-box"><span>${esc(addPositionError)}</span></div>` : ''}
+          <div class="field"><label>Name</label><input type="text" id="newPositionName" placeholder="e.g. Scripter, Builder, UI Designer"></div>
+          <div class="field"><label>Discord role ID <span class="hint">(optional)</span></label><input type="text" id="newPositionRoleId" placeholder="e.g. 123456789012345678"></div>
+          <button type="button" class="btn btn-ok" id="addPositionBtn" ${addingPosition ? 'disabled' : ''}>${addingPosition ? 'Adding...' : 'Add position'}</button>
+        </div>
+      </div>
+
       <div class="heading-block" id="sec-autohire" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Auto-hire settings</h1>
@@ -7615,6 +7674,34 @@
         }
 
         if (canManageOnboarding) {
+          const addPositionBtn = document.getElementById('addPositionBtn');
+          if (addPositionBtn) addPositionBtn.addEventListener('click', async () => {
+            const name = document.getElementById('newPositionName').value.trim();
+            const discordRoleId = document.getElementById('newPositionRoleId').value.trim() || null;
+            if (!name) { addPositionError = 'Enter a position name.'; paint(); return; }
+            addingPosition = true; addPositionError = null; paint();
+            try {
+              await addRecruitmentPosition(name, discordRoleId);
+              addingPosition = false;
+              await loadPositions();
+            } catch (err) {
+              addingPosition = false;
+              addPositionError = (err && err.message) ? err.message : 'Could not add that position.';
+              paint();
+            }
+          });
+
+          document.querySelectorAll('[data-del-position]').forEach(el => el.addEventListener('click', async () => {
+            const id = el.dataset.delPosition;
+            if (!confirm('Remove this position? It will disappear from the application dropdown.')) return;
+            try {
+              await deleteRecruitmentPosition(id);
+              await loadPositions();
+            } catch (err) {
+              alert('Could not remove that position. Check your connection and try again.');
+            }
+          }));
+
           const saveRecruitConfigBtn = document.getElementById('saveRecruitConfigBtn');
           if (saveRecruitConfigBtn) saveRecruitConfigBtn.addEventListener('click', async () => {
             const autoRoleRaw = document.getElementById('recruitAutoRole').value;
@@ -8092,6 +8179,18 @@
         paint();
       }
 
+      async function loadPositions() {
+        positionsLoading = true; positionsError = null; paint();
+        try {
+          positions = await getRecruitmentPositions();
+        } catch (err) {
+          positionsError = (err && err.message) ? err.message : 'Could not load positions.';
+        }
+        if (myGen !== renderGen) return;
+        positionsLoading = false;
+        paint();
+      }
+
       async function loadUsdMinimum() {
         try {
           const data = await getUsdMinimum();
@@ -8170,7 +8269,7 @@
       } else if (canManageOnboarding) {
         loadRoles();
       }
-      if (canManageOnboarding) { loadTeamsData(); loadRecruitmentConfig(); loadApprovalConfig(); }
+      if (canManageOnboarding) { loadTeamsData(); loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); }
       if (canManageRate) loadUsdMinimum();
       if (canManageBroadcasts) loadBroadcastsData();
     }
