@@ -266,10 +266,26 @@ async function getRecruitSession(req) {
 async function createRecruitSession(robloxUserId, robloxUsername) {
     const token = randomToken(24);
     const expiresAt = new Date(Date.now() + RECRUIT_SESSION_LIFETIME_MS).toISOString();
-    const { error } = await supabase.from('recruit_sessions').insert({
-        token, roblox_user_id: robloxUserId, roblox_username: robloxUsername, expires_at: expiresAt
+
+    // If this person already linked a Discord account before (from a previous application attempt,
+    // or as staff), carry it over onto the new session so they land straight back on their existing
+    // ticket status instead of being asked to "link Discord" again every time they sign back in.
+    const { data: existingLink } = await supabase
+        .from('discord_links')
+        .select('discord_user_id, discord_username, discord_avatar')
+        .eq('roblox_user_id', robloxUserId)
+        .maybeSingle();
+
+    const { error: insertErr } = await supabase.from('recruit_sessions').insert({
+        token,
+        roblox_user_id: robloxUserId,
+        roblox_username: robloxUsername,
+        discord_user_id: existingLink ? existingLink.discord_user_id : null,
+        discord_username: existingLink ? existingLink.discord_username : null,
+        discord_avatar: existingLink ? existingLink.discord_avatar : null,
+        expires_at: expiresAt
     });
-    if (error) throw new Error(error.message);
+    if (insertErr) throw new Error(insertErr.message);
     return token;
 }
 
@@ -2168,6 +2184,15 @@ app.get('/recruitment/my-ticket', async (req, res) => {
         .maybeSingle();
     if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
     if (!ticket) { res.status(404).json({ ok: false, error: 'no_ticket' }); return; }
+
+    // Now that we know they already have a ticket, keep them signed in to their status page for
+    // the long "portal" lifetime instead of the short initial session window - so coming back
+    // later doesn't force another Roblox sign-in just to see where their application stands.
+    const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
+    if (new Date(recruitSession.expires_at).getTime() < new Date(portalExpiresAt).getTime()) {
+        supabase.from('recruit_sessions').update({ expires_at: portalExpiresAt }).eq('token', recruitSession.token)
+            .then(({ error }) => { if (error) console.error('my-ticket: could not extend recruit session:', error.message); });
+    }
 
     res.json({
         ok: true,
