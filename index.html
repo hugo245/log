@@ -2705,7 +2705,9 @@
       'backups.manage': 'Create, load, and restore database backups',
       'recruitment.view': 'View recruitment tickets',
       'recruitment.respond': 'Show up as a recruiter (referral list)',
-      'recruitment.manage': 'Manage recruitment tickets (accept, reject, assign, place teams, sign off)',
+      'recruitment.manage': 'Manage recruitment tickets (accept, reject, assign, place teams)',
+      'recruitment.signoff': 'Sign off recruitment placements as ready',
+      'recruitment.finalise': 'Finalise recruitment placements (grant roles/access)',
       'recruitment.analytics': 'View recruitment analytics'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
@@ -7455,7 +7457,7 @@
       <div class="heading-block" id="sec-signoff" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Sign-off &amp; finalise settings</h1>
-        <p class="sub">Once a recruit is placed on a team, the sign-off role confirms it's ready, then a producer on that team finalises it and grants access. Pick which roles do each step.</p>
+        <p class="sub">Once a recruit is placed on a team, the sign-off role confirms it's ready, then a producer on that team finalises it and grants access. Pick which roles do each step. These are separate from "Manage recruitment tickets" - someone with that permission alone cannot sign off or finalise unless they also hold the role picked here (or the dedicated recruitment.signoff / recruitment.finalise permission).</p>
       </div>
       <div class="panel" style="max-width:640px;">
         ${approvalConfigError ? `<div class="error-box"><span>${esc(approvalConfigError)}</span></div>` : ''}
@@ -7464,18 +7466,18 @@
         <div class="field">
           <label>Sign-off role <span class="hint">(recruiter / senior developer)</span></label>
           <select id="signoffRoleSelect">
-            <option value="">Anyone with recruitment.manage</option>
+            <option value="">No role - only recruitment.signoff permission holders</option>
             ${roles.map(r => `<option value="${esc(r.id)}" ${approvalConfig.signoffRoleId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
           </select>
-          <p class="sub" style="margin:6px 0 0;">Only this role (or recruitment.manage holders) can sign off a placement as ready.</p>
+          <p class="sub" style="margin:6px 0 0;">Only this role, or anyone granted the recruitment.signoff permission directly, can sign off a placement as ready.</p>
         </div>
         <div class="field">
           <label>Producer role</label>
           <select id="producerRoleSelect">
-            <option value="">Anyone with recruitment.manage</option>
+            <option value="">No role - only recruitment.finalise permission holders</option>
             ${roles.map(r => `<option value="${esc(r.id)}" ${approvalConfig.producerRoleId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
           </select>
-          <p class="sub" style="margin:6px 0 0;">Only members with this role, who are also assigned to the recruit's team, get notified and can finalise. Team membership comes from team assignments.</p>
+          <p class="sub" style="margin:6px 0 0;">Only members with this role who are also assigned to the recruit's team (via team assignments), or anyone granted the recruitment.finalise permission directly, get notified and can finalise.</p>
         </div>
         <button type="button" class="btn btn-primary" id="saveApprovalConfigBtn" ${savingApprovalConfig ? 'disabled' : ''}>${savingApprovalConfig ? 'Saving...' : 'Save settings'}</button>
         `}

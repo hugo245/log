@@ -88,6 +88,8 @@ const PERMISSIONS = [
     'recruitment.view',
     'recruitment.respond',
     'recruitment.manage',
+    'recruitment.signoff',
+    'recruitment.finalise',
     'recruitment.analytics'
 ];
 
@@ -4166,9 +4168,9 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'recruitment_sign_off') {
-        const canManage = hasPermission(session, 'recruitment.manage');
+        const hasSignoffPermission = hasPermission(session, 'recruitment.signoff');
         const approvalConfig = await getRecruitmentApprovalConfig();
-        const isEligible = canManage || await userHasConfiguredRole(session, approvalConfig.signoffRoleId);
+        const isEligible = hasSignoffPermission || await userHasConfiguredRole(session, approvalConfig.signoffRoleId);
         if (!isEligible) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
 
         const id = payload.id;
@@ -4249,9 +4251,9 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'recruitment_manual_roling') {
-        const canManage = hasPermission(session, 'recruitment.manage');
+        const hasFinalisePermission = hasPermission(session, 'recruitment.finalise');
         const approvalConfig = await getRecruitmentApprovalConfig();
-        const isProducer = canManage || await userHasConfiguredRole(session, approvalConfig.producerRoleId);
+        const isProducer = hasFinalisePermission || await userHasConfiguredRole(session, approvalConfig.producerRoleId);
         if (!isProducer) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
 
         const id = payload.id;
