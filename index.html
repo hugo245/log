@@ -3957,6 +3957,14 @@
     window.addEventListener('hashchange', route);
     initAuth();
 
+    const DISCORD_LINK_ERROR_MESSAGES = {
+      discord_already_linked: 'That Discord account is already linked to a different account. Each Discord account can only be linked to one account here - use a different Discord account, or contact an admin if this is a mistake.',
+      link_save_failed: 'Something went wrong saving that link. Please try again.',
+      token_exchange_failed: 'Discord did not confirm that sign-in. Please try again.',
+      userinfo_failed: 'Could not read your Discord account details. Please try again.',
+      session_expired: 'Your session expired before the link finished. Please refresh and try again.'
+    };
+
     function renderDiscordLinkModal() {
       const show = isHrAuthed && needsDiscordLink;
       let el = document.getElementById('discordLinkModal');
@@ -3973,11 +3981,16 @@
       }
       const token = getStoredToken();
       const linkUrl = EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(token || '');
+      const hashQuery = (window.location.hash.split('?')[1] || '');
+      const params = new URLSearchParams(hashQuery);
+      const errorCode = params.get('discordLinkError');
+      const errorMsg = errorCode ? (DISCORD_LINK_ERROR_MESSAGES[errorCode] || 'Could not link that Discord account. Please try again.') : null;
       el.innerHTML = `
         <div class="modal-card" style="max-width:420px;text-align:center;">
           <div class="modal-body" style="padding:32px 24px;">
             <h3 style="margin:0 0 10px;">Link your Discord account</h3>
             <p style="color:var(--ink-soft);font-size:14px;margin-bottom:22px;">You need to link your Discord account to continue using this tool. This is required so we can reach you about recruitment tickets and other notifications.</p>
+            ${errorMsg ? `<div class="error-box" style="text-align:left;margin-bottom:18px;"><span>${esc(errorMsg)}</span></div>` : ''}
             <a class="btn btn-primary" href="${linkUrl}">Link Discord account</a>
           </div>
         </div>`;

@@ -1881,6 +1881,12 @@ app.get('/discord-auth-callback', async (req, res) => {
             ? `https://cdn.discordapp.com/avatars/${discordUserId}/${discordUser.avatar}.png`
             : null;
 
+        const { data: existingLink } = await supabase.from('discord_links').select('roblox_user_id, roblox_username').eq('discord_user_id', discordUserId).maybeSingle();
+        if (existingLink && String(existingLink.roblox_user_id) !== String(hrSession.roblox_user_id)) {
+            failStaff('discord_already_linked');
+            return;
+        }
+
         const { error: linkErr } = await supabase.from('discord_links').upsert({
             roblox_user_id: hrSession.roblox_user_id,
             roblox_username: hrSession.roblox_username,
@@ -1889,7 +1895,10 @@ app.get('/discord-auth-callback', async (req, res) => {
             discord_avatar: discordAvatar,
             linked_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
-        if (linkErr) { failStaff('link_save_failed'); return; }
+        if (linkErr) {
+            failStaff(linkErr.code === '23505' ? 'discord_already_linked' : 'link_save_failed');
+            return;
+        }
 
         res.redirect(`${APP_ORIGIN}/#/dashboard?discordLinked=1`);
         return;
@@ -2003,7 +2012,7 @@ app.post('/recruitment/apply', async (req, res) => {
         if (match) referredByUsername = match.robloxUsername;
     }
 
-    await supabase.from('discord_links').upsert({
+    const { error: discordLinkErr } = await supabase.from('discord_links').upsert({
         roblox_user_id: recruitSession.roblox_user_id,
         roblox_username: recruitSession.roblox_username,
         discord_user_id: recruitSession.discord_user_id,
@@ -2011,6 +2020,9 @@ app.post('/recruitment/apply', async (req, res) => {
         discord_avatar: recruitSession.discord_avatar,
         linked_at: new Date().toISOString()
     }, { onConflict: 'roblox_user_id' });
+    if (discordLinkErr) {
+        console.error(`recruitment/apply: could not save discord_links for ${recruitSession.roblox_username} (Discord already linked to a different account? code ${discordLinkErr.code}):`, discordLinkErr.message);
+    }
 
     const { data: ticket, error } = await supabase.from('recruitment_tickets').insert({
         roblox_user_id: recruitSession.roblox_user_id,
