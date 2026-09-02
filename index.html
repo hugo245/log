@@ -2725,6 +2725,7 @@
     let authReady = false;
     let appDataReady = false;
     let needsOnboarding = false;
+    let needsDiscordLink = false;
 
     let renderGen = 0;
 
@@ -3040,6 +3041,7 @@
           hrPermissions = json.permissions || [];
           hrMaxHierarchy = json.maxHierarchy || 0;
           needsOnboarding = onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false;
+          needsDiscordLink = json.discordLinked === false;
         } else {
           isHrAuthed = false;
           hrUsername = '';
@@ -3047,6 +3049,7 @@
           hrPermissions = [];
           hrMaxHierarchy = 0;
           needsOnboarding = false;
+          needsDiscordLink = false;
           clearToken();
         }
       } catch (e) {
@@ -3056,6 +3059,7 @@
         hrPermissions = [];
         hrMaxHierarchy = 0;
         needsOnboarding = false;
+        needsDiscordLink = false;
       }
     }
 
@@ -3230,6 +3234,10 @@
       const json = await callHrData('recruitment_manual_roling', { id });
       return json.data;
     }
+    async function signOffRecruitmentTicket(id) {
+      const json = await callHrData('recruitment_sign_off', { id });
+      return json.data;
+    }
     async function loadSkillsetsForNextPhase() {
       const json = await callHrData('list_skillsets');
       return json.data || [];
@@ -3328,6 +3336,16 @@
       return json.data || null;
     }
 
+    async function getUsdEligibility() {
+      const json = await callHrData('get_usd_eligibility');
+      return json.data || null;
+    }
+
+    async function getUsdEligibilityForUser(robloxUserId, robloxUsername) {
+      const json = await callHrData('get_usd_eligibility_for_user', { robloxUserId, robloxUsername });
+      return json.data || null;
+    }
+
     async function getPaymentMethodForUser(robloxUsername) {
       const json = await callHrData('get_payment_method_for_user', { robloxUsername });
       return json.data || null;
@@ -3393,6 +3411,24 @@
 
     async function saveRecruitmentConfig(autoRoleId, discordRoleId, gracePeriodHours) {
       await callHrData('recruitment_save_config', { autoRoleId, discordRoleId, gracePeriodHours });
+    }
+
+    async function getRecruitmentApprovalConfig() {
+      const json = await callHrData('recruitment_get_approval_config');
+      return json.data || { signoffRoleId: null, producerRoleId: null };
+    }
+
+    async function saveRecruitmentApprovalConfig(signoffRoleId, producerRoleId) {
+      await callHrData('recruitment_save_approval_config', { signoffRoleId, producerRoleId });
+    }
+
+    async function getUsdMinimum() {
+      const json = await callHrData('get_usd_minimum');
+      return json.data || { threshold: 0 };
+    }
+
+    async function saveUsdMinimum(threshold) {
+      await callHrData('save_usd_minimum', { threshold });
     }
 
     async function getIgnoreEligibility() {
@@ -3816,6 +3852,7 @@
       hrRoles = [];
       hrPermissions = [];
       hrMaxHierarchy = 0;
+      needsDiscordLink = false;
       window.location.hash = '#/';
     }
 
@@ -3914,9 +3951,37 @@
           renderHrGate();
         }
       }
+
+      renderDiscordLinkModal();
     }
     window.addEventListener('hashchange', route);
     initAuth();
+
+    function renderDiscordLinkModal() {
+      const show = isHrAuthed && needsDiscordLink;
+      let el = document.getElementById('discordLinkModal');
+      if (!show) {
+        if (el) el.remove();
+        return;
+      }
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'discordLinkModal';
+        el.className = 'modal-scrim';
+        el.style.zIndex = '900';
+        document.body.appendChild(el);
+      }
+      const token = getStoredToken();
+      const linkUrl = EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(token || '');
+      el.innerHTML = `
+        <div class="modal-card" style="max-width:420px;text-align:center;">
+          <div class="modal-body" style="padding:32px 24px;">
+            <h3 style="margin:0 0 10px;">Link your Discord account</h3>
+            <p style="color:var(--ink-soft);font-size:14px;margin-bottom:22px;">You need to link your Discord account to continue using this tool. This is required so we can reach you about recruitment tickets and other notifications.</p>
+            <a class="btn btn-primary" href="${linkUrl}">Link Discord account</a>
+          </div>
+        </div>`;
+    }
 
     function canSeeAnalytics() {
       return isHrAuthed && hasPermission('dashboard.view');
@@ -4285,6 +4350,7 @@
         in_review: ['In review', '--accent-soft', '--accent', '--accent-soft-strong'],
         accepted: ['Accepted', '--ok-bg', '--ok-text', '--ok-line'],
         team_selection: ['Team selection', '--accent-soft', '--accent', '--accent-soft-strong'],
+        signed_off: ['Signed off', '--accent-soft', '--accent', '--accent-soft-strong'],
         finalised: ['Finalised', '--ok-bg', '--ok-text', '--ok-line'],
         rejected: ['Rejected', '--err-bg', '--err-text', '--err-line'],
         withdrawn: ['Withdrawn', '--row-alt', '--muted', '--line']
@@ -4298,6 +4364,7 @@
       in_review: "Someone's actively looking at your application.",
       accepted: "You're in! Someone from the team will reach out here shortly.",
       team_selection: "You're in! Please wait for higher ups to put you in a team.",
+      signed_off: "Your placement has been reviewed and is waiting on final approval.",
       finalised: "You're fully set up and roled onto your team. Welcome aboard!",
       rejected: "This one didn't work out, but you're welcome to apply again in the future.",
       withdrawn: 'This application was marked as withdrawn.'
@@ -4547,6 +4614,8 @@
       let allSetModalOpen = false;
       let manualRolingBusy = false;
       let manualRolingMsg = null;
+      let signOffBusy = false;
+      let signOffMsg = null;
 
       let placeTeamOptions = [];
       let placeTeamSelectedId = '';
@@ -4612,6 +4681,7 @@
         openTicketId = id; ticketDetail = null; ticketDetailLoading = true;
         nextPhaseModalOpen = false; nextPhaseError = null; nextPhaseSelectedSkillsetId = ''; allSetModalOpen = false;
         manualRolingBusy = false; manualRolingMsg = null;
+        signOffBusy = false; signOffMsg = null;
         placeTeamSelectedId = ''; placeTeamBusy = false; placeTeamError = null;
         paintModal(); paintNextPhaseOverlay();
         try {
@@ -4636,7 +4706,7 @@
 
 
       function counts() {
-        const c = { all: tickets.length, pending: 0, in_review: 0, accepted: 0, team_selection: 0, finalised: 0, rejected: 0, withdrawn: 0 };
+        const c = { all: tickets.length, pending: 0, in_review: 0, accepted: 0, team_selection: 0, signed_off: 0, finalised: 0, rejected: 0, withdrawn: 0 };
         tickets.forEach(t => { c[t.status] = (c[t.status] || 0) + 1; });
         return c;
       }
@@ -4661,7 +4731,7 @@
 
       <div class="filter-bar">
         <div class="tabs">
-          ${['all', 'pending', 'in_review', 'accepted', 'team_selection', 'finalised', 'rejected', 'withdrawn'].map(s => `<button type="button" class="tab-btn ${statusFilter === s ? 'active' : ''}" data-status-filter="${s}">${s === 'all' ? 'All' : s.replace('_', ' ')} (${c[s] || 0})</button>`).join('')}
+          ${['all', 'pending', 'in_review', 'accepted', 'team_selection', 'signed_off', 'finalised', 'rejected', 'withdrawn'].map(s => `<button type="button" class="tab-btn ${statusFilter === s ? 'active' : ''}" data-status-filter="${s}">${s === 'all' ? 'All' : s.replace('_', ' ')} (${c[s] || 0})</button>`).join('')}
         </div>
       </div>
 
@@ -4755,7 +4825,7 @@
             <div class="modal-section-title">Status</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               ${t.status !== 'in_review' ? `<button type="button" class="btn btn-ghost btn-sm" data-set-status="in_review" ${busy ? 'disabled' : ''}>Mark in review</button>` : ''}
-              ${t.status !== 'accepted' && t.status !== 'team_selection' && t.status !== 'finalised' ? `<button type="button" class="btn btn-ok btn-sm" data-set-status="accepted" ${busy ? 'disabled' : ''}>Accept &amp; hire</button>` : ''}
+              ${t.status !== 'accepted' && t.status !== 'team_selection' && t.status !== 'signed_off' && t.status !== 'finalised' ? `<button type="button" class="btn btn-ok btn-sm" data-set-status="accepted" ${busy ? 'disabled' : ''}>Accept &amp; hire</button>` : ''}
               ${t.status !== 'rejected' ? `<button type="button" class="btn btn-danger btn-sm" data-set-status="rejected" style="background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);" ${busy ? 'disabled' : ''}>Reject</button>` : ''}
               ${t.status !== 'withdrawn' ? `<button type="button" class="btn btn-ghost btn-sm" data-set-status="withdrawn" ${busy ? 'disabled' : ''}>Mark withdrawn</button>` : ''}
             </div>
@@ -4776,10 +4846,16 @@
                 <button type="button" class="btn btn-primary btn-sm" id="placeTeamBtn" ${placeTeamBusy ? 'disabled' : ''}>${placeTeamBusy ? 'Placing...' : 'Place on team'}</button>
               </div>
             </div>` : ''}
-            ${t.placed_team_id && t.status !== 'finalised' ? `
+            ${t.placed_team_id && t.status === 'team_selection' ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
-              <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. This rolls into the system automatically on the next scheduled batch (runs every 6 hours) - or apply it right now:</div>
-              <button type="button" class="btn btn-primary btn-sm" id="manualRolingBtn" ${manualRolingBusy ? 'disabled' : ''}>${manualRolingBusy ? 'Roling...' : 'Manual Roling - apply now'}</button>
+              <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Sign off once this is ready for a producer to finalise.</div>
+              <button type="button" class="btn btn-primary btn-sm" id="signOffBtn" ${signOffBusy ? 'disabled' : ''}>${signOffBusy ? 'Signing off...' : 'Sign off'}</button>
+              ${signOffMsg ? `<div style="margin-top:8px;font-weight:600;color:${signOffMsg.ok ? 'var(--ok-text)' : 'var(--err-text)'};">${esc(signOffMsg.text)}</div>` : ''}
+            </div>` : ''}
+            ${t.placed_team_id && t.status === 'signed_off' ? `
+            <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
+              <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Signed off by ${esc(t.signed_off_by_username || 'a recruiter')}. A producer for this team can finalise and grant access below.</div>
+              <button type="button" class="btn btn-primary btn-sm" id="manualRolingBtn" ${manualRolingBusy ? 'disabled' : ''}>${manualRolingBusy ? 'Finalising...' : 'Finalise'}</button>
               ${manualRolingMsg ? `<div style="margin-top:8px;font-weight:600;color:${manualRolingMsg.ok ? 'var(--ok-text)' : 'var(--err-text)'};">${esc(manualRolingMsg.text)}</div>` : ''}
             </div>` : ''}
             ${t.status === 'finalised' ? `
@@ -4927,12 +5003,25 @@
           manualRolingBusy = true; manualRolingMsg = null; paintModal();
           try {
             const data = await manualRolingRecruitmentTicket(openTicketId);
-            manualRolingMsg = { ok: true, text: data && data.mode === 'inserted' ? 'Rolled in - access granted just now.' : 'Already up to date - roled in.' };
+            manualRolingMsg = { ok: true, text: data && data.mode === 'inserted' ? 'Finalised - access granted just now.' : 'Already up to date - roled in.' };
             try { ticketDetail = await loadRecruitmentTicket(openTicketId); } catch (e) { }
           } catch (e) {
-            manualRolingMsg = { ok: false, text: e.message || 'Could not roll them in.' };
+            manualRolingMsg = { ok: false, text: e.message || 'Could not finalise this recruit.' };
           }
           manualRolingBusy = false; paintModal();
+        });
+
+        const signOffBtn = document.getElementById('signOffBtn');
+        if (signOffBtn) signOffBtn.addEventListener('click', async () => {
+          signOffBusy = true; signOffMsg = null; paintModal();
+          try {
+            const data = await signOffRecruitmentTicket(openTicketId);
+            signOffMsg = { ok: true, text: data && data.producersNotified ? `Signed off - notified ${data.producersNotified} producer(s).` : 'Signed off.' };
+            try { ticketDetail = await loadRecruitmentTicket(openTicketId); } catch (e) { }
+          } catch (e) {
+            signOffMsg = { ok: false, text: e.message || 'Could not sign this off.' };
+          }
+          signOffBusy = false; paintModal();
         });
       }
 
@@ -6379,6 +6468,8 @@
       let eligibilityLoading = true;
       let eligibilityError = null;
 
+      let usdEligibility = null;
+
       let warnings = [];
       let warningsLoading = true;
       let warningsError = null;
@@ -6459,14 +6550,19 @@
           ${methodLoading ? `<div class="dash-loading">Loading your saved details...</div>` : `
             <div class="field">
               <label>How would you like to be paid?</label>
-              ${Object.keys(PAYMENT_METHODS).map(key => `
-                <label class="method-option ${selectedMethod === key ? 'active' : ''}">
-                  <input type="radio" name="methodChoice" value="${key}" ${selectedMethod === key ? 'checked' : ''}>
+              ${Object.keys(PAYMENT_METHODS).map(key => {
+          const isUsdMethod = key === 'PAYPAL' || key === 'VENMO';
+          const blocked = isUsdMethod && usdEligibility && !usdEligibility.eligible;
+          return `
+                <label class="method-option ${selectedMethod === key ? 'active' : ''}" style="${blocked ? 'opacity:0.5;cursor:not-allowed;' : ''}">
+                  <input type="radio" name="methodChoice" value="${key}" ${selectedMethod === key ? 'checked' : ''} ${blocked ? 'disabled' : ''}>
                   <div>
                     <div class="mo-label">${esc(PAYMENT_METHODS[key].label)}</div>
                     <div class="mo-sub">${esc(PAYMENT_METHODS[key].sub)}</div>
+                    ${blocked ? `<div class="mo-sub" style="color:var(--warn-text);margin-top:4px;">You need $${usdEligibility.amountNeeded.toFixed(2)} more in pending requests to select this.</div>` : ''}
                   </div>
-                </label>`).join('')}
+                </label>`;
+        }).join('')}
             </div>
             <div id="methodFieldsSlot"></div>
             <button type="button" class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
@@ -6598,6 +6694,14 @@
         paint();
       }
 
+      async function loadUsdEligibility() {
+        try {
+          usdEligibility = await getUsdEligibility();
+        } catch (err) { }
+        if (myGen !== renderGen) return;
+        paint();
+      }
+
       async function loadEligibility() {
         eligibilityLoading = true; eligibilityError = null; paint();
         try {
@@ -6649,6 +6753,7 @@
       paint();
       loadSummary();
       loadMethod();
+      loadUsdEligibility();
       loadEligibility();
       loadWarnings();
       loadMyBroadcastsData();
@@ -6679,6 +6784,11 @@
       let savingRate = false;
       let rateError = null;
       let rateSuccess = false;
+
+      let usdMinimum = null;
+      let savingUsdMin = false;
+      let usdMinError = null;
+      let usdMinSuccess = false;
       let addingGame = false;
       let gameError = null;
 
@@ -6738,6 +6848,12 @@
       let recruitmentConfigError = null;
       let savingRecruitmentConfig = false;
       let recruitmentConfigSuccess = false;
+
+      let approvalConfig = { signoffRoleId: null, producerRoleId: null };
+      let approvalConfigLoading = canManageOnboarding;
+      let approvalConfigError = null;
+      let savingApprovalConfig = false;
+      let approvalConfigSuccess = false;
 
       let broadcasts = [];
       let broadcastTeams = [];
@@ -6839,6 +6955,19 @@
             <input type="number" id="ratePer10k" min="0" step="0.01" value="${(DEVEX_RATE * 10000).toFixed(2)}">
           </div>
           <button type="button" class="btn btn-primary" id="saveRateBtn" ${savingRate ? 'disabled' : ''}>${savingRate ? 'Saving...' : 'Save rate'}</button>
+        </div>` : ''}
+
+        ${canManageRate ? `
+        <div class="panel">
+          <div class="preview-label">USD minimum pending</div>
+          <p class="sub" style="margin:0 0 18px;">PayPal and Venmo can only be selected once someone has this much pending (in USD equivalent). Leave at 0 to disable the requirement.</p>
+          ${usdMinError ? `<div class="error-box"><span>${esc(usdMinError)}</span></div>` : ''}
+          ${usdMinSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Threshold updated</strong></div></div>` : ''}
+          <div class="field">
+            <label>Minimum pending (USD)</label>
+            <input type="number" id="usdMinInput" min="0" step="0.01" value="${usdMinimum != null ? usdMinimum : 0}">
+          </div>
+          <button type="button" class="btn btn-primary" id="saveUsdMinBtn" ${savingUsdMin ? 'disabled' : ''}>${savingUsdMin ? 'Saving...' : 'Save threshold'}</button>
         </div>` : ''}
 
         ${canManageGames ? `
@@ -7196,6 +7325,35 @@
         </div>
         <button type="button" class="btn btn-primary" id="saveRecruitConfigBtn" ${savingRecruitmentConfig ? 'disabled' : ''}>${savingRecruitmentConfig ? 'Saving...' : 'Save auto-hire settings'}</button>
         `}
+      </div>
+
+      <div class="heading-block" style="margin-top:36px;">
+        <span class="eyebrow">Recruitment</span>
+        <h1>Sign-off &amp; finalise settings</h1>
+        <p class="sub">Once a recruit is placed on a team, the sign-off role confirms it's ready, then a producer on that team finalises it and grants access. Pick which roles do each step.</p>
+      </div>
+      <div class="panel" style="max-width:640px;">
+        ${approvalConfigError ? `<div class="error-box"><span>${esc(approvalConfigError)}</span></div>` : ''}
+        ${approvalConfigSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Sign-off &amp; finalise settings updated</strong></div></div>` : ''}
+        ${approvalConfigLoading ? `<div class="dash-loading">Loading settings...</div>` : `
+        <div class="field">
+          <label>Sign-off role <span class="hint">(recruiter / senior developer)</span></label>
+          <select id="signoffRoleSelect">
+            <option value="">Anyone with recruitment.manage</option>
+            ${roles.map(r => `<option value="${esc(r.id)}" ${approvalConfig.signoffRoleId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+          </select>
+          <p class="sub" style="margin:6px 0 0;">Only this role (or recruitment.manage holders) can sign off a placement as ready.</p>
+        </div>
+        <div class="field">
+          <label>Producer role</label>
+          <select id="producerRoleSelect">
+            <option value="">Anyone with recruitment.manage</option>
+            ${roles.map(r => `<option value="${esc(r.id)}" ${approvalConfig.producerRoleId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+          </select>
+          <p class="sub" style="margin:6px 0 0;">Only members with this role, who are also assigned to the recruit's team, get notified and can finalise. Team membership comes from team assignments.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="saveApprovalConfigBtn" ${savingApprovalConfig ? 'disabled' : ''}>${savingApprovalConfig ? 'Saving...' : 'Save settings'}</button>
+        `}
       </div>` : ''}
 
       ${manageTab === 'broadcasts' && canManageBroadcasts ? `
@@ -7342,6 +7500,22 @@
               paint();
             }
           });
+
+          const saveApprovalConfigBtn = document.getElementById('saveApprovalConfigBtn');
+          if (saveApprovalConfigBtn) saveApprovalConfigBtn.addEventListener('click', async () => {
+            const signoffRoleId = document.getElementById('signoffRoleSelect').value || null;
+            const producerRoleId = document.getElementById('producerRoleSelect').value || null;
+            savingApprovalConfig = true; approvalConfigError = null; approvalConfigSuccess = false; paint();
+            try {
+              await saveRecruitmentApprovalConfig(signoffRoleId, producerRoleId);
+              approvalConfig = { signoffRoleId, producerRoleId };
+              savingApprovalConfig = false; approvalConfigSuccess = true; paint();
+            } catch (err) {
+              savingApprovalConfig = false;
+              approvalConfigError = (err && err.message) ? err.message : 'Could not save these settings. Check your connection and try again.';
+              paint();
+            }
+          });
         }
 
         if (canManageRate) {
@@ -7357,6 +7531,23 @@
             } catch (err) {
               savingRate = false;
               rateError = (err && err.message) ? err.message : 'Could not save the rate. Check your connection and try again.';
+              paint();
+            }
+          });
+
+          const saveUsdMinBtn = document.getElementById('saveUsdMinBtn');
+          if (saveUsdMinBtn) saveUsdMinBtn.addEventListener('click', async () => {
+            const input = document.getElementById('usdMinInput');
+            const threshold = Number(input.value);
+            if (!(threshold >= 0)) { usdMinError = 'Enter a valid, non-negative number.'; usdMinSuccess = false; paint(); return; }
+            savingUsdMin = true; usdMinError = null; usdMinSuccess = false; paint();
+            try {
+              await saveUsdMinimum(threshold);
+              usdMinimum = threshold;
+              savingUsdMin = false; usdMinSuccess = true; paint();
+            } catch (err) {
+              savingUsdMin = false;
+              usdMinError = (err && err.message) ? err.message : 'Could not save the threshold. Check your connection and try again.';
               paint();
             }
           });
@@ -7765,6 +7956,27 @@
         paint();
       }
 
+      async function loadUsdMinimum() {
+        try {
+          const data = await getUsdMinimum();
+          usdMinimum = data ? data.threshold : 0;
+        } catch (err) { }
+        if (myGen !== renderGen) return;
+        paint();
+      }
+
+      async function loadApprovalConfig() {
+        approvalConfigLoading = true; approvalConfigError = null; paint();
+        try {
+          approvalConfig = await getRecruitmentApprovalConfig();
+        } catch (err) {
+          approvalConfigError = (err && err.message) ? err.message : 'Could not load approval settings.';
+        }
+        if (myGen !== renderGen) return;
+        approvalConfigLoading = false;
+        paint();
+      }
+
       async function loadAssignments() {
         try {
           assignments = await listRoleAssignments();
@@ -7822,7 +8034,8 @@
       } else if (canManageOnboarding) {
         loadRoles();
       }
-      if (canManageOnboarding) { loadTeamsData(); loadRecruitmentConfig(); }
+      if (canManageOnboarding) { loadTeamsData(); loadRecruitmentConfig(); loadApprovalConfig(); }
+      if (canManageRate) loadUsdMinimum();
       if (canManageBroadcasts) loadBroadcastsData();
     }
 
@@ -8074,6 +8287,7 @@
       let paymentLoading = false;
       let paymentBusy = false;
       let paymentMsg = null;
+      let adminUsdEligibility = null;
 
       const canAssign = hasPermission('settings.manage_onboarding');
       const canModerate = hasPermission('staff.moderate');
@@ -8269,11 +8483,15 @@
             <div class="field">
               <label>Method</label>
               <div style="display:flex;flex-direction:column;gap:8px;">
-                ${Object.entries(PAYMENT_METHODS).map(([key, m]) => `
-                  <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
-                    <input type="radio" name="adminMethodChoice" value="${esc(key)}" ${paymentMethodSelected === key ? 'checked' : ''}>
-                    <span><strong>${esc(m.label)}</strong><br><span class="hint">${esc(m.sub)}</span></span>
-                  </label>`).join('')}
+                ${Object.entries(PAYMENT_METHODS).map(([key, m]) => {
+            const isUsdMethod = key === 'PAYPAL' || key === 'VENMO';
+            const blocked = isUsdMethod && adminUsdEligibility && !adminUsdEligibility.eligible;
+            return `
+                  <label style="display:flex;align-items:flex-start;gap:8px;cursor:${blocked ? 'not-allowed' : 'pointer'};${blocked ? 'opacity:0.5;' : ''}">
+                    <input type="radio" name="adminMethodChoice" value="${esc(key)}" ${paymentMethodSelected === key ? 'checked' : ''} ${blocked ? 'disabled' : ''}>
+                    <span><strong>${esc(m.label)}</strong><br><span class="hint">${esc(m.sub)}</span>${blocked ? `<br><span class="hint" style="color:var(--warn-text);">Needs $${adminUsdEligibility.amountNeeded.toFixed(2)} more pending</span>` : ''}</span>
+                  </label>`;
+          }).join('')}
               </div>
             </div>
             <div id="adminMethodFieldsSlot"></div>
@@ -8495,13 +8713,18 @@
         paymentLoading = true;
         paymentMethodSelected = 'PAYPAL';
         paymentMethodDetails = {};
+        adminUsdEligibility = null;
         paintModal();
         try {
-          const existing = activeProfile.robloxUsername ? await getPaymentMethodForUser(activeProfile.robloxUsername) : null;
+          const [existing, usdElig] = await Promise.all([
+            activeProfile.robloxUsername ? getPaymentMethodForUser(activeProfile.robloxUsername) : null,
+            getUsdEligibilityForUser(activeProfile.robloxUserId, activeProfile.robloxUsername)
+          ]);
           if (existing) {
             paymentMethodSelected = existing.method;
             paymentMethodDetails = existing.details || {};
           }
+          adminUsdEligibility = usdElig;
         } catch (e) { }
         paymentLoading = false;
         paintModal();

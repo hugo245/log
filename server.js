@@ -355,7 +355,7 @@ function discordChannelUrl(channelId) {
 }
 
 function ticketEmbedPayload(ticket) {
-    const statusColors = { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 };
+    const statusColors = { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, signed_off: 0x9D6BE0, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 };
     return {
         title: `Application: ${ticket.roblox_username}`,
         color: statusColors[ticket.status] || 0x3730D9,
@@ -491,12 +491,13 @@ async function sendDiscordDM(discordUserId, content) {
 // happens - website, auto-accept, etc.) DMs the applicant the same way, instead of only some paths
 // remembering to do it.
 const STATUS_DM_MESSAGES = {
-    in_review: () => `👀 Your PlayVerse application is now **in review** - someone's actively looking at it.`,
-    accepted: () => `🎉 Congrats! Your PlayVerse application was **accepted**. Someone from the team will reach out here shortly.`,
+    in_review: () => `Your PlayVerse application is now in review. Someone is actively looking at it.`,
+    accepted: () => `Your PlayVerse application has been accepted. Someone from the team will reach out here shortly.`,
     rejected: () => `Thanks for applying to PlayVerse. Unfortunately your application wasn't accepted this time. You're welcome to apply again in the future.`,
-    withdrawn: () => `Your PlayVerse application has been marked as **withdrawn**.`,
-    team_selection: () => `You're in! Your application moved to team selection - hang tight while leads finish placing you.`,
-    finalised: () => `✅ You're fully placed and roled onto your team. Welcome aboard!`
+    withdrawn: () => `Your PlayVerse application has been marked as withdrawn.`,
+    team_selection: () => `Your application has moved to team selection. Please wait while leads finish placing you.`,
+    signed_off: () => `Your placement has been reviewed and is now awaiting final approval.`,
+    finalised: () => `You are fully placed and roled onto your team. Welcome aboard.`
 };
 
 async function dmApplicantStatusChange(ticket, newStatus) {
@@ -511,7 +512,7 @@ async function notifyDiscordStatusChange(ticket, newStatus, byUsername) {
         await discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `**${ticket.roblox_username}**'s application was marked **${newStatus}** by ${byUsername} on the website.`
+                content: `${ticket.roblox_username}'s application was marked ${newStatus} by ${byUsername} on the website.`
             })
         });
     } catch (e) {
@@ -551,7 +552,7 @@ async function notifyDiscordNextPhase(ticket, skillset) {
         const message = await discordApi(`/channels/${DISCORD_LEAD_CHANNEL_ID}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `<@&${DISCORD_LEAD_ROLE_ID}> **${ticket.roblox_username}** is ready for team selection.`,
+                content: `<@&${DISCORD_LEAD_ROLE_ID}> ${ticket.roblox_username} is ready for team selection.`,
                 embeds: [{
                     title: `${ticket.roblox_username} - ready for team selection`,
                     color: 0x178A4C,
@@ -582,7 +583,7 @@ async function notifyDiscordPlacement(ticket, team, byUsername) {
         await discordApi(`/channels/${DISCORD_LEAD_CHANNEL_ID}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `✅ **${ticket.roblox_username}** confirmed for **${team.name}**${ticket.skillset_name ? ` as **${ticket.skillset_name}**` : ''} (by ${byUsername} on the website).`
+                content: `${ticket.roblox_username} confirmed for ${team.name}${ticket.skillset_name ? ` as ${ticket.skillset_name}` : ''} (by ${byUsername} on the website).`
             })
         });
     } catch (e) {
@@ -590,15 +591,20 @@ async function notifyDiscordPlacement(ticket, team, byUsername) {
     }
 }
 
-async function notifyDiscordAssignment(ticket, assigneeUsername, byUsername) {
+async function notifyDiscordAssignment(ticket, assigneeUserId, assigneeUsername, byUsername) {
     if (!DISCORD_BOT_TOKEN || !ticket.discord_channel_id) return;
     try {
+        let assigneeText = 'Unassigned';
+        if (assigneeUsername) {
+            const assigneeDiscordId = assigneeUserId != null ? await getLinkedDiscordUserId(assigneeUserId) : null;
+            assigneeText = assigneeDiscordId ? `${assigneeUsername} (<@${assigneeDiscordId}>)` : assigneeUsername;
+        }
         await discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
                 content: assigneeUsername
-                    ? `🔧 **${ticket.roblox_username}**'s application was assigned to **${assigneeUsername}** by ${byUsername} on the website.`
-                    : `🔧 **${ticket.roblox_username}**'s application was unassigned by ${byUsername} on the website.`
+                    ? `${ticket.roblox_username}'s application was assigned to ${assigneeText} by ${byUsername} on the website.`
+                    : `${ticket.roblox_username}'s application was unassigned by ${byUsername} on the website.`
             })
         });
     } catch (e) {
@@ -810,7 +816,7 @@ async function finalizeAfterRoling(ticket, byUsername) {
             await discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
                 method: 'POST',
                 body: JSON.stringify({
-                    content: `✅ **${ticket.roblox_username}** has been fully placed and roled onto their team. This ticket channel will be automatically deleted in 12 hours.`
+                    content: `${ticket.roblox_username} has been fully placed and roled onto their team. This ticket channel will be automatically deleted in 12 hours.`
                 })
             });
         } catch (e) {
@@ -964,6 +970,103 @@ async function getRecruitmentConfig() {
     };
 }
 
+async function getRecruitmentApprovalConfig() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('recruitment_signoff_role_id, recruitment_producer_role_id')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return {
+        signoffRoleId: data && data.recruitment_signoff_role_id ? String(data.recruitment_signoff_role_id) : null,
+        producerRoleId: data && data.recruitment_producer_role_id ? String(data.recruitment_producer_role_id) : null
+    };
+}
+
+async function userHasConfiguredRole(session, roleId) {
+    if (!roleId || !session) return false;
+    const { data: role } = await supabase.from('roles').select('name').eq('id', roleId).maybeSingle();
+    if (!role) return false;
+    return Array.isArray(session.roles) && session.roles.includes(role.name);
+}
+
+async function findProducersForTeam(teamId) {
+    const config = await getRecruitmentApprovalConfig();
+    if (!config.producerRoleId || !teamId) return [];
+    const { data: assigned } = await supabase.from('user_assignments').select('roblox_user_id, roblox_username').eq('team_id', teamId);
+    if (!assigned || !assigned.length) return [];
+    const userIds = assigned.map(a => a.roblox_user_id);
+    const { data: roleHolders } = await supabase.from('user_role_assignments').select('roblox_user_id').eq('role_id', config.producerRoleId).in('roblox_user_id', userIds);
+    const producerIds = new Set((roleHolders || []).map(r => r.roblox_user_id));
+    return assigned.filter(a => producerIds.has(a.roblox_user_id));
+}
+
+async function getUsdMinimumPending() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('usd_minimum_pending')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return data && data.usd_minimum_pending != null ? Number(data.usd_minimum_pending) : 0;
+}
+
+async function getPendingUsdEquivalent(robloxUserId, robloxUsername) {
+    let query = supabase.from('payment_requests').select('payment, currency, status, paid').eq('paid', false);
+    if (robloxUserId != null) {
+        query = query.eq('roblox_user_id', robloxUserId);
+    } else if (robloxUsername) {
+        query = query.is('roblox_user_id', null).ilike('roblox_username', robloxUsername);
+    } else {
+        return 0;
+    }
+    const { data: rows } = await query;
+    const pendingRows = (rows || []).filter(r => (r.status || 'pending') === 'pending');
+    if (!pendingRows.length) return 0;
+    const rate = await getDevexRate();
+    return pendingRows.reduce((sum, r) => {
+        const amount = Number(r.payment) || 0;
+        if ((r.currency || 'ROBUX') === 'USD') return sum + amount;
+        return sum + (rate > 0 ? amount * rate : 0);
+    }, 0);
+}
+
+async function enforceUsdMinimumThreshold(filter) {
+    try {
+        const threshold = await getUsdMinimumPending();
+        if (!(threshold > 0)) return;
+
+        let methodQuery = supabase.from('payment_methods').select('*').in('method', ['PAYPAL', 'VENMO']);
+        if (filter && filter.robloxUserId != null) methodQuery = methodQuery.eq('roblox_user_id', filter.robloxUserId);
+        const { data: methods, error: methodsErr } = await methodQuery;
+        if (methodsErr || !methods || !methods.length) return;
+
+        for (const m of methods) {
+            const pendingUsdEquivalent = await getPendingUsdEquivalent(m.roblox_user_id, m.roblox_username);
+            if (pendingUsdEquivalent >= threshold) continue;
+
+            await supabase.from('payment_methods').update({
+                method: 'DEVEX_ROBUX',
+                details: { robloxUsername: m.roblox_username },
+                updated_at: new Date().toISOString()
+            }).eq('roblox_user_id', m.roblox_user_id);
+
+            const discordUserId = await getLinkedDiscordUserId(m.roblox_user_id);
+            if (discordUserId) {
+                sendDiscordDM(discordUserId, `Your payment method has been changed to DevEx Robux because your pending balance ($${pendingUsdEquivalent.toFixed(2)}) is below the $${threshold} minimum required for USD payouts. Your pending payment requests have been converted to Robux.`);
+            }
+
+            logAudit(null, {
+                category: 'payments', action: 'auto_downgrade_payment_method',
+                targetUserId: m.roblox_user_id, targetUsername: m.roblox_username,
+                details: { actor: 'System', from: m.method, to: 'DEVEX_ROBUX', pendingUsdEquivalent, threshold }
+            });
+        }
+    } catch (e) {
+        console.error('enforceUsdMinimumThreshold failed:', e.message);
+    }
+}
+
 // Converts every pending, unpaid payment request's currency to match what the recipient's saved
 // payment method actually pays out in (PAYPAL/VENMO -> USD, DEVEX_ROBUX -> ROBUX), recomputing the
 // amount with the current DevEx rate. Pass a filter ({ robloxUserId } or { robloxUsername }) to
@@ -1029,6 +1132,7 @@ async function runPaymentMethodConversionSweep(filter) {
 // by username for older rows that only ever had a username stored) - used right after something
 // happens for one specific person, so it converts immediately rather than waiting on the schedule.
 async function convertPendingForUser(robloxUserId, robloxUsername) {
+    if (robloxUserId != null) await enforceUsdMinimumThreshold({ robloxUserId });
     await Promise.all([
         robloxUserId != null ? runPaymentMethodConversionSweep({ robloxUserId }) : Promise.resolve(),
         robloxUsername ? runPaymentMethodConversionSweep({ robloxUsername }) : Promise.resolve()
@@ -1451,10 +1555,10 @@ setInterval(() => {
 }, TICKET_CHANNEL_CLEANUP_INTERVAL_MS);
 
 setTimeout(() => {
-    runPaymentMethodConversionSweep().catch(e => console.error('initial runPaymentMethodConversionSweep failed:', e.message));
+    enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).catch(e => console.error('initial payment conversion pass failed:', e.message));
 }, 30 * 1000);
 setInterval(() => {
-    runPaymentMethodConversionSweep().catch(e => console.error('scheduled runPaymentMethodConversionSweep failed:', e.message));
+    enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).catch(e => console.error('scheduled payment conversion pass failed:', e.message));
 }, PAYMENT_CONVERSION_SWEEP_INTERVAL_MS);
 
 async function getSession(req) {
@@ -1686,12 +1790,35 @@ app.get('/discord-auth-start', async (req, res) => {
     res.redirect(authorizeUrl.toString());
 });
 
+app.get('/discord-auth-start-staff', async (req, res) => {
+    if (!DISCORD_CONFIGURED) { res.status(500).send('Discord sign-in is not configured.'); return; }
+    const token = req.query.token ? String(req.query.token) : '';
+    if (!token) { res.status(400).send('Missing session.'); return; }
+    const { data: hrSession } = await supabase.from('hr_sessions').select('token').eq('token', token).maybeSingle();
+    if (!hrSession) { res.redirect(`${APP_ORIGIN}/#/?error=session_expired`); return; }
+
+    const state = randomToken(16);
+    const { error } = await supabase.from('discord_oauth_states').insert({ state, rt: token, is_staff: true });
+    if (error) { res.status(500).send('Could not start Discord sign-in.'); return; }
+
+    const authorizeUrl = new URL('https://discord.com/oauth2/authorize');
+    authorizeUrl.searchParams.set('client_id', DISCORD_CLIENT_ID);
+    authorizeUrl.searchParams.set('redirect_uri', DISCORD_REDIRECT_URI);
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('scope', 'identify');
+    authorizeUrl.searchParams.set('state', state);
+    res.redirect(authorizeUrl.toString());
+});
+
 app.get('/discord-auth-callback', async (req, res) => {
     const code = req.query.code;
     const state = req.query.state;
 
     function fail(rt, reason) {
         res.redirect(`${APP_ORIGIN}/#/recruit/apply?rt=${encodeURIComponent(rt || '')}&error=${encodeURIComponent(reason)}`);
+    }
+    function failStaff(reason) {
+        res.redirect(`${APP_ORIGIN}/#/dashboard?discordLinkError=${encodeURIComponent(reason)}`);
     }
 
     if (!code || !state) { fail(null, 'missing_code_or_state'); return; }
@@ -1704,6 +1831,49 @@ app.get('/discord-auth-callback', async (req, res) => {
         return;
     }
     console.log(`[discord-auth-callback] matched state ${state} -> rt ${stateRow.rt}`);
+
+    if (stateRow.is_staff) {
+        const { data: hrSession } = await supabase.from('hr_sessions').select('roblox_user_id, roblox_username').eq('token', stateRow.rt).maybeSingle();
+        if (!hrSession) { failStaff('session_expired'); return; }
+
+        const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'authorization_code',
+                code,
+                redirect_uri: DISCORD_REDIRECT_URI,
+                client_id: DISCORD_CLIENT_ID,
+                client_secret: DISCORD_CLIENT_SECRET
+            })
+        });
+        if (!tokenRes.ok) { failStaff('token_exchange_failed'); return; }
+        const tokenJson = await tokenRes.json();
+
+        const userRes = await fetch('https://discord.com/api/v10/users/@me', {
+            headers: { Authorization: `Bearer ${tokenJson.access_token}` }
+        });
+        if (!userRes.ok) { failStaff('userinfo_failed'); return; }
+        const discordUser = await userRes.json();
+        const discordUserId = discordUser.id;
+        const discordUsername = discordUser.username + (discordUser.discriminator && discordUser.discriminator !== '0' ? `#${discordUser.discriminator}` : '');
+        const discordAvatar = discordUser.avatar
+            ? `https://cdn.discordapp.com/avatars/${discordUserId}/${discordUser.avatar}.png`
+            : null;
+
+        const { error: linkErr } = await supabase.from('discord_links').upsert({
+            roblox_user_id: hrSession.roblox_user_id,
+            roblox_username: hrSession.roblox_username,
+            discord_user_id: discordUserId,
+            discord_username: discordUsername,
+            discord_avatar: discordAvatar,
+            linked_at: new Date().toISOString()
+        }, { onConflict: 'roblox_user_id' });
+        if (linkErr) { failStaff('link_save_failed'); return; }
+
+        res.redirect(`${APP_ORIGIN}/#/dashboard?discordLinked=1`);
+        return;
+    }
 
     const recruitSession = await getRecruitSession({ query: { rt: stateRow.rt } });
     if (!recruitSession) { fail(stateRow.rt, 'session_expired'); return; }
@@ -1921,13 +2091,16 @@ app.get('/hr-session', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false }); return; }
 
+    const discordUserId = await getLinkedDiscordUserId(session.roblox_user_id);
+
     res.json({
         ok: true,
         robloxUserId: session.roblox_user_id,
         robloxUsername: session.roblox_username,
         roles: session.roles || [],
         permissions: session.permissions || [],
-        maxHierarchy: session.max_hierarchy || 0
+        maxHierarchy: session.max_hierarchy || 0,
+        discordLinked: !!discordUserId
     });
 });
 
@@ -2002,6 +2175,7 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
+        await enforceUsdMinimumThreshold();
         await runPaymentMethodConversionSweep();
         const { data, error } = await supabase
             .from('payment_requests')
@@ -2241,6 +2415,17 @@ app.post('/hr-data', async (req, res) => {
         const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
         if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
 
+        if (method === 'PAYPAL' || method === 'VENMO') {
+            const threshold = await getUsdMinimumPending();
+            if (threshold > 0) {
+                const pendingUsdEquivalent = await getPendingUsdEquivalent(robloxUserId, null);
+                if (pendingUsdEquivalent < threshold) {
+                    res.status(400).json({ ok: false, error: `This person needs $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before ${method === 'PAYPAL' ? 'PayPal' : 'Venmo'} can be selected.` });
+                    return;
+                }
+            }
+        }
+
         const cleanDetails = {};
         methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim(); });
 
@@ -2272,6 +2457,17 @@ app.post('/hr-data', async (req, res) => {
         const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
         if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
 
+        if (method === 'PAYPAL' || method === 'VENMO') {
+            const threshold = await getUsdMinimumPending();
+            if (threshold > 0) {
+                const pendingUsdEquivalent = await getPendingUsdEquivalent(session.roblox_user_id, session.roblox_username);
+                if (pendingUsdEquivalent < threshold) {
+                    res.status(400).json({ ok: false, error: `You need $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before you can select ${method === 'PAYPAL' ? 'PayPal' : 'Venmo'}.` });
+                    return;
+                }
+            }
+        }
+
         const cleanDetails = {};
         methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim(); });
 
@@ -2284,6 +2480,58 @@ app.post('/hr-data', async (req, res) => {
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         await convertPendingForUser(session.roblox_user_id, session.roblox_username);
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_usd_eligibility') {
+        const threshold = await getUsdMinimumPending();
+        const pendingUsdEquivalent = await getPendingUsdEquivalent(session.roblox_user_id, session.roblox_username);
+        res.json({
+            ok: true,
+            data: {
+                threshold,
+                pendingUsdEquivalent,
+                eligible: threshold <= 0 || pendingUsdEquivalent >= threshold,
+                amountNeeded: threshold > 0 ? Math.max(0, threshold - pendingUsdEquivalent) : 0
+            }
+        });
+        return;
+    }
+
+    if (action === 'get_usd_eligibility_for_user') {
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const robloxUserId = payload.robloxUserId != null ? Number(payload.robloxUserId) : null;
+        const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        const threshold = await getUsdMinimumPending();
+        const pendingUsdEquivalent = await getPendingUsdEquivalent(robloxUserId, robloxUsername);
+        res.json({
+            ok: true,
+            data: {
+                threshold,
+                pendingUsdEquivalent,
+                eligible: threshold <= 0 || pendingUsdEquivalent >= threshold,
+                amountNeeded: threshold > 0 ? Math.max(0, threshold - pendingUsdEquivalent) : 0
+            }
+        });
+        return;
+    }
+
+    if (action === 'get_usd_minimum') {
+        if (!requirePermission(res, session, 'settings.manage_rate')) return;
+        const threshold = await getUsdMinimumPending();
+        res.json({ ok: true, data: { threshold } });
+        return;
+    }
+
+    if (action === 'save_usd_minimum') {
+        if (!requirePermission(res, session, 'settings.manage_rate')) return;
+        const threshold = Number(payload.threshold);
+        if (!(threshold >= 0)) { res.status(400).json({ ok: false, error: 'invalid_threshold' }); return; }
+        const { error } = await supabase
+            .from('app_settings')
+            .upsert({ id: 1, usd_minimum_pending: threshold, updated_at: new Date().toISOString() });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;
     }
@@ -2491,6 +2739,38 @@ app.post('/hr-data', async (req, res) => {
         logAudit(session, {
             category: 'settings', action: 'update_recruitment_config',
             details: { autoRoleId, discordRoleId, gracePeriodHours }
+        });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'recruitment_get_approval_config') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        try {
+            const data = await getRecruitmentApprovalConfig();
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+        return;
+    }
+
+    if (action === 'recruitment_save_approval_config') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const signoffRoleId = payload.signoffRoleId != null && payload.signoffRoleId !== '' ? String(payload.signoffRoleId) : null;
+        const producerRoleId = payload.producerRoleId != null && payload.producerRoleId !== '' ? String(payload.producerRoleId) : null;
+        const { error } = await supabase
+            .from('app_settings')
+            .upsert({
+                id: 1,
+                recruitment_signoff_role_id: signoffRoleId,
+                recruitment_producer_role_id: producerRoleId,
+                updated_at: new Date().toISOString()
+            });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'settings', action: 'update_recruitment_approval_config',
+            details: { signoffRoleId, producerRoleId }
         });
         res.json({ ok: true });
         return;
@@ -3613,7 +3893,7 @@ app.post('/hr-data', async (req, res) => {
         if (reason && ticket.discord_channel_id) {
             discordApi(`/channels/${ticket.discord_channel_id}/messages`, {
                 method: 'POST',
-                body: JSON.stringify({ content: `**Reason (${session.roblox_username}):** ${reason}` })
+                body: JSON.stringify({ content: `Reason (${session.roblox_username}): ${reason}` })
             }).catch(e => console.error('posting status reason to Discord failed:', e.message));
         }
 
@@ -3696,7 +3976,7 @@ app.post('/hr-data', async (req, res) => {
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
         if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
-        if (ticket.status !== 'team_selection') { res.status(400).json({ ok: false, error: 'not_in_team_selection' }); return; }
+        if (ticket.status !== 'team_selection' && ticket.status !== 'signed_off') { res.status(400).json({ ok: false, error: 'not_in_team_selection' }); return; }
 
         const { data: team, error: teamErr } = await supabase.from('teams').select('id, name').eq('id', teamId).maybeSingle();
         if (teamErr) { res.status(500).json({ ok: false, error: teamErr.message }); return; }
@@ -3719,7 +3999,7 @@ app.post('/hr-data', async (req, res) => {
             url: `${APP_ORIGIN}/#/recruit/status`
         });
         if (ticket.discord_user_id) {
-            sendDiscordDM(ticket.discord_user_id, `You've been accepted and placed on the **${team.name}** team!${ticket.skillset_name ? ` Skillset: **${ticket.skillset_name}**.` : ''} Your access will finish setting up automatically, or a lead can speed this up with Manual Roling.`);
+            sendDiscordDM(ticket.discord_user_id, `You have been accepted and placed on the ${team.name} team.${ticket.skillset_name ? ` Skillset: ${ticket.skillset_name}.` : ''} A recruiter will sign off on this placement, and a producer will finalise your access.`);
         }
 
         logAudit(session, {
@@ -3730,6 +4010,51 @@ app.post('/hr-data', async (req, res) => {
         refreshDiscordTicketPanel({ ...ticket, placed_team_id: team.id, placed_team_name: team.name });
 
         res.json({ ok: true, data: { teamId: team.id, teamName: team.name } });
+        return;
+    }
+
+    if (action === 'recruitment_sign_off') {
+        const canManage = hasPermission(session, 'recruitment.manage');
+        const approvalConfig = await getRecruitmentApprovalConfig();
+        const isEligible = canManage || await userHasConfiguredRole(session, approvalConfig.signoffRoleId);
+        if (!isEligible) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
+
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
+        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
+        if (ticket.status !== 'team_selection' || !ticket.placed_team_id) { res.status(400).json({ ok: false, error: 'not_ready_for_signoff' }); return; }
+
+        const nowIso = new Date().toISOString();
+        const { error: updateErr } = await supabase.from('recruitment_tickets').update({
+            status: 'signed_off',
+            signed_off_at: nowIso,
+            signed_off_by_username: session.roblox_username,
+            updated_at: nowIso
+        }).eq('id', id);
+        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+
+        const updatedTicket = { ...ticket, status: 'signed_off', signed_off_at: nowIso, signed_off_by_username: session.roblox_username };
+
+        const producers = await findProducersForTeam(ticket.placed_team_id);
+        for (const producer of producers) {
+            const discordUserId = await getLinkedDiscordUserId(producer.roblox_user_id);
+            if (discordUserId) {
+                sendDiscordDM(discordUserId, `${ticket.roblox_username} was signed off by ${session.roblox_username} and is ready for you to finalise on ${ticket.placed_team_name}. Review and finalise in the Tool.`);
+            }
+        }
+
+        dmApplicantStatusChange(updatedTicket, 'signed_off');
+        refreshDiscordTicketPanel(updatedTicket);
+
+        logAudit(session, {
+            category: 'recruitment', action: 'sign_off',
+            targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
+            details: { ticketId: id, teamId: ticket.placed_team_id, teamName: ticket.placed_team_name, producersNotified: producers.length }
+        });
+
+        res.json({ ok: true, data: { producersNotified: producers.length } });
         return;
     }
 
@@ -3752,8 +4077,14 @@ app.post('/hr-data', async (req, res) => {
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
 
         const updatedTicket = { ...ticket, assigned_to_user_id: assignToUserId, assigned_to_username: assignToUsername };
-        notifyDiscordAssignment(updatedTicket, assignToUsername, session.roblox_username);
+        notifyDiscordAssignment(updatedTicket, assignToUserId, assignToUsername, session.roblox_username);
         refreshDiscordTicketPanel(updatedTicket);
+
+        if (assignToUserId != null) {
+            getLinkedDiscordUserId(assignToUserId).then(discordUserId => {
+                if (discordUserId) sendDiscordDM(discordUserId, `You have been assigned to ${ticket.roblox_username}'s application by ${session.roblox_username}.`);
+            });
+        }
 
         logAudit(session, {
             category: 'recruitment', action: 'assign',
@@ -3766,7 +4097,11 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'recruitment_manual_roling') {
-        if (!requirePermission(res, session, 'recruitment.manage')) return;
+        const canManage = hasPermission(session, 'recruitment.manage');
+        const approvalConfig = await getRecruitmentApprovalConfig();
+        const isProducer = canManage || await userHasConfiguredRole(session, approvalConfig.producerRoleId);
+        if (!isProducer) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
+
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
 
@@ -3774,6 +4109,7 @@ app.post('/hr-data', async (req, res) => {
         if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
         if (!ticket.placed_team_id) { res.status(400).json({ ok: false, error: 'not_placed_on_team_yet' }); return; }
+        if (ticket.status !== 'signed_off') { res.status(400).json({ ok: false, error: 'not_signed_off_yet' }); return; }
 
         const result = await upsertUserAssignmentRecord({
             robloxUserId: ticket.roblox_user_id,

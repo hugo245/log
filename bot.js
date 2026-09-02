@@ -54,7 +54,7 @@ async function registerCommands() {
 }
 
 function statusColor(status) {
-    return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
+    return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, signed_off: 0x9D6BE0, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
 }
 
 async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skillsetId }) {
@@ -114,7 +114,7 @@ async function finalizeAfterRoling(ticket) {
     if (ticket.discord_channel_id) {
         try {
             const channel = await client.channels.fetch(ticket.discord_channel_id);
-            await channel.send(`✅ **${ticket.roblox_username}** has been fully placed and roled onto their team. This ticket channel will be automatically deleted in 12 hours.`);
+            await channel.send(`${ticket.roblox_username} has been fully placed and roled onto their team. This ticket channel will be automatically deleted in 12 hours.`);
         } catch (e) {
             console.error(`finalizeAfterRoling: failed to post message in channel ${ticket.discord_channel_id}:`, e.message);
         }
@@ -127,6 +127,7 @@ async function reconcilePlacements() {
     const { data: tickets, error } = await supabase
         .from('recruitment_tickets')
         .select('id, status, roblox_user_id, roblox_username, skillset_id, skillset_name, placed_team_id, placed_team_name, discord_channel_id')
+        .eq('status', 'signed_off')
         .not('placed_team_id', 'is', null);
     if (error) { console.error('reconcilePlacements: could not load tickets:', error.message); return; }
 
@@ -148,9 +149,9 @@ async function reconcilePlacements() {
             continue;
         }
         if (result.mode === 'inserted') fixed++;
-        if (ticket.status !== 'finalised') await finalizeAfterRoling(ticket);
+        await finalizeAfterRoling(ticket);
     }
-    if (fixed) console.log(`reconcilePlacements: rolled in ${fixed} pending placement(s).`);
+    if (fixed) console.log(`reconcilePlacements: rolled in ${fixed} signed-off placement(s).`);
 }
 
 function nextReconcileUnix() {
@@ -255,10 +256,10 @@ client.on(Events.InteractionCreate, async interaction => {
 
             const nextRunUnix = nextReconcileUnix();
             const nextRunNote = nextRunUnix
-                ? ` They'll be rolled into the system automatically <t:${nextRunUnix}:R>, or use **Manual Roling** on the dashboard to give them access right now.`
-                : ` They'll be rolled into the system on the next scheduled batch, or use **Manual Roling** on the dashboard to give them access right now.`;
+                ? ` Once signed off and finalised, this rolls into the system automatically around <t:${nextRunUnix}:R>, or immediately via Manual Roling on the dashboard.`
+                : ` Once signed off and finalised, this rolls into the system on the next scheduled batch, or immediately via Manual Roling on the dashboard.`;
             await interaction.editReply({
-                content: `✅ **${ticket.roblox_username}** confirmed for **${team.name}**${skillset ? ` as **${skillset.name}**` : ''} (by ${interaction.user}).${nextRunNote}`
+                content: `${ticket.roblox_username} confirmed for ${team.name}${skillset ? ` as ${skillset.name}` : ''} (by ${interaction.user}).${nextRunNote}`
             });
 
             try {
