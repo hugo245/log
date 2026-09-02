@@ -666,6 +666,7 @@ async function logSystemPaymentRequest({ robloxUserId, robloxUsername, taskName,
         created_at: new Date().toISOString()
     });
     if (error) { console.error('logSystemPaymentRequest failed:', error.message); return null; }
+    runPaymentMethodConversionSweep({ robloxUserId });
     return id;
 }
 
@@ -963,53 +964,16 @@ async function getRecruitmentConfig() {
     };
 }
 
-async function convertPendingRobuxOnMethodChange(robloxUserId, robloxUsername, method) {
-    let fromCurrency, toCurrency;
-    if (method === 'PAYPAL' || method === 'VENMO') {
-        fromCurrency = 'ROBUX'; toCurrency = 'USD';
-    } else if (method === 'DEVEX_ROBUX') {
-        fromCurrency = 'USD'; toCurrency = 'ROBUX';
-    } else {
-        return;
-    }
-    try {
-        let query = supabase
-            .from('payment_requests')
-            .select('id, payment, currency, status, paid')
-            .eq('currency', fromCurrency)
-            .eq('paid', false);
-        if (robloxUserId != null) {
-            query = query.eq('roblox_user_id', robloxUserId);
-        } else if (robloxUsername) {
-            query = query.is('roblox_user_id', null).ilike('roblox_username', robloxUsername);
-        } else {
-            return;
-        }
-        const { data: rows, error } = await query;
-        if (error || !rows || !rows.length) return;
-
-        const pendingRows = rows.filter(r => (r.status || 'pending') === 'pending');
-        if (!pendingRows.length) return;
-
-        const rate = await getDevexRate();
-        if (!(rate > 0)) return;
-
-        await Promise.all(pendingRows.map(row => {
-            const amount = toCurrency === 'USD'
-                ? Math.round((Number(row.payment) || 0) * rate * 100) / 100
-                : Math.round((Number(row.payment) || 0) / rate);
-            return supabase.from('payment_requests').update({ payment: amount, currency: toCurrency }).eq('id', row.id);
-        }));
-    } catch (e) {
-    }
-}
-
-async function convertPendingRobuxForCashMethodUsers(filter) {
+// Converts every pending, unpaid payment request's currency to match what the recipient's saved
+// payment method actually pays out in (PAYPAL/VENMO -> USD, DEVEX_ROBUX -> ROBUX), recomputing the
+// amount with the current DevEx rate. Pass a filter ({ robloxUserId } or { robloxUsername }) to
+// limit this to one person (e.g. right after they change their method, or a new request is
+// created for them), or call with no filter to sweep every pending request in the system.
+async function runPaymentMethodConversionSweep(filter) {
     try {
         let query = supabase
             .from('payment_requests')
             .select('id, roblox_user_id, roblox_username, payment, currency, status, paid')
-            .eq('currency', 'ROBUX')
             .eq('paid', false);
         if (filter && filter.robloxUserId != null) {
             query = query.eq('roblox_user_id', filter.robloxUserId);
@@ -1036,23 +1000,42 @@ async function convertPendingRobuxForCashMethodUsers(filter) {
             if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m.method;
         });
 
-        const toConvert = pendingRows.filter(r => {
-            const method = (r.roblox_user_id != null ? methodByUserId[r.roblox_user_id] : null)
-                || (r.roblox_username ? methodByUsername[(r.roblox_username || '').toLowerCase()] : null);
-            return method === 'PAYPAL' || method === 'VENMO';
-        });
+        const methodToCurrency = { PAYPAL: 'USD', VENMO: 'USD', DEVEX_ROBUX: 'ROBUX' };
+
+        const toConvert = pendingRows
+            .map(r => {
+                const method = (r.roblox_user_id != null ? methodByUserId[r.roblox_user_id] : null)
+                    || (r.roblox_username ? methodByUsername[(r.roblox_username || '').toLowerCase()] : null);
+                return { row: r, targetCurrency: methodToCurrency[method] };
+            })
+            .filter(x => x.targetCurrency && x.targetCurrency !== (x.row.currency || 'ROBUX'));
         if (!toConvert.length) return;
 
         const rate = await getDevexRate();
         if (!(rate > 0)) return;
 
-        await Promise.all(toConvert.map(row => {
-            const usdAmount = Math.round((Number(row.payment) || 0) * rate * 100) / 100;
-            return supabase.from('payment_requests').update({ payment: usdAmount, currency: 'USD' }).eq('id', row.id);
+        await Promise.all(toConvert.map(({ row, targetCurrency }) => {
+            const amount = targetCurrency === 'USD'
+                ? Math.round((Number(row.payment) || 0) * rate * 100) / 100
+                : Math.round((Number(row.payment) || 0) / rate);
+            return supabase.from('payment_requests').update({ payment: amount, currency: targetCurrency }).eq('id', row.id);
         }));
     } catch (e) {
+        console.error('runPaymentMethodConversionSweep failed:', e.message);
     }
 }
+
+// Runs the conversion sweep for both possible identities of a user (matched by id, and separately
+// by username for older rows that only ever had a username stored) - used right after something
+// happens for one specific person, so it converts immediately rather than waiting on the schedule.
+async function convertPendingForUser(robloxUserId, robloxUsername) {
+    await Promise.all([
+        robloxUserId != null ? runPaymentMethodConversionSweep({ robloxUserId }) : Promise.resolve(),
+        robloxUsername ? runPaymentMethodConversionSweep({ robloxUsername }) : Promise.resolve()
+    ]);
+}
+
+const PAYMENT_CONVERSION_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
 // Sign-in access is granted if the Roblox account belongs to at least one of the configured
 // Roblox groups (at that group's minimum rank, if set) OR their linked Discord account belongs to
@@ -1466,6 +1449,16 @@ setTimeout(() => {
 setInterval(() => {
     runTicketChannelCleanup().catch(e => console.error('scheduled runTicketChannelCleanup failed:', e.message));
 }, TICKET_CHANNEL_CLEANUP_INTERVAL_MS);
+
+// Runs on boot (redeploy) and every 15 minutes after that, sweeping every pending payment request
+// so its currency always matches whatever the recipient's payment method currently pays out in -
+// catches method changes, DevEx rate changes, and anything the per-action triggers might have missed.
+setTimeout(() => {
+    runPaymentMethodConversionSweep().catch(e => console.error('initial runPaymentMethodConversionSweep failed:', e.message));
+}, 30 * 1000);
+setInterval(() => {
+    runPaymentMethodConversionSweep().catch(e => console.error('scheduled runPaymentMethodConversionSweep failed:', e.message));
+}, PAYMENT_CONVERSION_SWEEP_INTERVAL_MS);
 
 async function getSession(req) {
     const token = getBearerToken(req);
@@ -2005,13 +1998,14 @@ app.post('/hr-data', async (req, res) => {
             details: { id, taskName, game, payment, currency },
             revert: { type: 'delete_payment_request', id }
         });
+        runPaymentMethodConversionSweep({ robloxUserId: recipientUserId });
         res.json({ ok: true, id });
         return;
     }
 
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
-        await convertPendingRobuxForCashMethodUsers();
+        await runPaymentMethodConversionSweep();
         const { data, error } = await supabase
             .from('payment_requests')
             .select('*')
@@ -2185,10 +2179,7 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'get_my_summary') {
-        await Promise.all([
-            convertPendingRobuxForCashMethodUsers({ robloxUserId: session.roblox_user_id }),
-            convertPendingRobuxForCashMethodUsers({ robloxUsername: session.roblox_username })
-        ]);
+        await convertPendingForUser(session.roblox_user_id, session.roblox_username);
 
         const [byId, byUsername] = await Promise.all([
             supabase.from('payment_requests').select('*').eq('roblox_user_id', session.roblox_user_id),
@@ -2271,7 +2262,7 @@ app.post('/hr-data', async (req, res) => {
             set_by: session.roblox_username
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        await convertPendingRobuxOnMethodChange(robloxUserId, username, method);
+        await convertPendingForUser(robloxUserId, username);
         res.json({ ok: true });
         return;
     }
@@ -2295,7 +2286,7 @@ app.post('/hr-data', async (req, res) => {
             updated_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        await convertPendingRobuxOnMethodChange(session.roblox_user_id, session.roblox_username, method);
+        await convertPendingForUser(session.roblox_user_id, session.roblox_username);
         res.json({ ok: true });
         return;
     }
