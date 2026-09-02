@@ -783,6 +783,9 @@ async function runRecruitmentAutoAccept() {
             notifyDiscordStatusChange(merged, 'accepted', 'System (auto-accept)');
             dmApplicantStatusChange(merged, 'accepted');
             refreshDiscordTicketPanel(merged);
+            if (config.notifyRoleId) {
+                notifyRoleHoldersDM(config.notifyRoleId, `${ticket.roblox_username} was auto-accepted after the grace period. Take a look in the Tool.`);
+            }
             logAudit(null, {
                 category: 'recruitment', action: 'auto_accept',
                 targetUserId: ticket.roblox_user_id, targetUsername: ticket.roblox_username,
@@ -959,15 +962,32 @@ async function getDevexRate() {
 async function getRecruitmentConfig() {
     const { data, error } = await supabase
         .from('app_settings')
-        .select('recruitment_auto_role_id, recruitment_discord_role_id, recruitment_grace_period_hours')
+        .select('recruitment_auto_role_id, recruitment_discord_role_id, recruitment_grace_period_hours, recruitment_notify_role_id')
         .eq('id', 1)
         .maybeSingle();
     if (error) throw error;
     return {
         autoRoleId: data && data.recruitment_auto_role_id != null ? String(data.recruitment_auto_role_id) : null,
         discordRoleId: data && data.recruitment_discord_role_id ? String(data.recruitment_discord_role_id) : null,
-        gracePeriodHours: data && data.recruitment_grace_period_hours != null ? Number(data.recruitment_grace_period_hours) : null
+        gracePeriodHours: data && data.recruitment_grace_period_hours != null ? Number(data.recruitment_grace_period_hours) : null,
+        notifyRoleId: data && data.recruitment_notify_role_id != null ? String(data.recruitment_notify_role_id) : null
     };
+}
+
+async function notifyRoleHoldersDM(roleId, message) {
+    if (!roleId) return 0;
+    const { data: holders, error } = await supabase.from('user_role_assignments').select('roblox_user_id').eq('role_id', roleId);
+    if (error || !holders || !holders.length) return 0;
+    const userIds = [...new Set(holders.map(h => h.roblox_user_id))];
+    let notified = 0;
+    for (const userId of userIds) {
+        const discordUserId = await getLinkedDiscordUserId(userId);
+        if (discordUserId) {
+            await sendDiscordDM(discordUserId, message);
+            notified++;
+        }
+    }
+    return notified;
 }
 
 async function getRecruitmentApprovalConfig() {
@@ -2725,6 +2745,7 @@ app.post('/hr-data', async (req, res) => {
         const autoRoleId = payload.autoRoleId != null && payload.autoRoleId !== '' ? String(payload.autoRoleId) : null;
         const discordRoleId = payload.discordRoleId ? String(payload.discordRoleId).trim() : null;
         const gracePeriodHours = payload.gracePeriodHours != null && payload.gracePeriodHours !== '' ? Number(payload.gracePeriodHours) : null;
+        const notifyRoleId = payload.notifyRoleId != null && payload.notifyRoleId !== '' ? String(payload.notifyRoleId) : null;
         if (gracePeriodHours != null && !(gracePeriodHours >= 0)) { res.status(400).json({ ok: false, error: 'invalid_grace_period' }); return; }
         const { error } = await supabase
             .from('app_settings')
@@ -2733,12 +2754,13 @@ app.post('/hr-data', async (req, res) => {
                 recruitment_auto_role_id: autoRoleId,
                 recruitment_discord_role_id: discordRoleId,
                 recruitment_grace_period_hours: gracePeriodHours,
+                recruitment_notify_role_id: notifyRoleId,
                 updated_at: new Date().toISOString()
             });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         logAudit(session, {
             category: 'settings', action: 'update_recruitment_config',
-            details: { autoRoleId, discordRoleId, gracePeriodHours }
+            details: { autoRoleId, discordRoleId, gracePeriodHours, notifyRoleId }
         });
         res.json({ ok: true });
         return;
@@ -3888,6 +3910,10 @@ app.post('/hr-data', async (req, res) => {
                 reviewerUserId: session.roblox_user_id,
                 reviewerUsername: session.roblox_username
             });
+            const notifyConfig = await getRecruitmentConfig();
+            if (notifyConfig.notifyRoleId) {
+                notifyRoleHoldersDM(notifyConfig.notifyRoleId, `${ticket.roblox_username} was accepted by ${session.roblox_username}. Take a look in the Tool.`);
+            }
         }
 
         if (reason && ticket.discord_channel_id) {

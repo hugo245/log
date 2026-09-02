@@ -3406,11 +3406,11 @@
 
     async function getRecruitmentConfig() {
       const json = await callHrData('recruitment_get_config');
-      return json.data || { autoRoleId: null, discordRoleId: null, gracePeriodHours: null };
+      return json.data || { autoRoleId: null, discordRoleId: null, gracePeriodHours: null, notifyRoleId: null };
     }
 
-    async function saveRecruitmentConfig(autoRoleId, discordRoleId, gracePeriodHours) {
-      await callHrData('recruitment_save_config', { autoRoleId, discordRoleId, gracePeriodHours });
+    async function saveRecruitmentConfig(autoRoleId, discordRoleId, gracePeriodHours, notifyRoleId) {
+      await callHrData('recruitment_save_config', { autoRoleId, discordRoleId, gracePeriodHours, notifyRoleId });
     }
 
     async function getRecruitmentApprovalConfig() {
@@ -6843,7 +6843,7 @@
       let addLinkError = null;
       let lastCreatedLink = null;
 
-      let recruitmentConfig = { autoRoleId: null, discordRoleId: null, gracePeriodHours: null };
+      let recruitmentConfig = { autoRoleId: null, discordRoleId: null, gracePeriodHours: null, notifyRoleId: null };
       let recruitmentConfigLoading = canManageOnboarding;
       let recruitmentConfigError = null;
       let savingRecruitmentConfig = false;
@@ -6864,6 +6864,25 @@
       let newBroadcastType = 'global';
 
       function paint() {
+        const subsectionsByTab = {
+          access: [
+            ...(canManageBaseAccess ? [{ id: 'sec-signin', label: 'Who can sign in' }] : []),
+            ...(canManageGroups ? [{ id: 'sec-eligibility', label: 'Eligibility groups' }] : [])
+          ],
+          games: [],
+          roles: [],
+          onboarding: [
+            { id: 'sec-teams', label: 'Teams & skillsets' },
+            { id: 'sec-invites', label: 'Invite links' },
+            { id: 'sec-autohire', label: 'Auto-hire settings' },
+            { id: 'sec-signoff', label: 'Sign-off & finalise' }
+          ],
+          broadcasts: [
+            { id: 'sec-broadcasts', label: 'Broadcasts' },
+            { id: 'sec-broadcast-history', label: 'Sent broadcasts' }
+          ]
+        };
+
         app.innerHTML = `
     ${topbar()}
     <div class="shell">
@@ -6873,14 +6892,23 @@
         <p class="sub">Changes here save automatically and apply for everyone.</p>
       </div>
 
-      ${manageTabDefs.length > 1 ? `
-      <div class="tabs" style="margin-bottom:28px;">
-        ${manageTabDefs.map(t => `<button type="button" class="tab-btn ${manageTab === t.id ? 'active' : ''}" data-manage-tab="${t.id}">${esc(t.label)}</button>`).join('')}
-      </div>` : ''}
+      <div style="display:flex;gap:32px;align-items:flex-start;">
+        ${manageTabDefs.length > 1 ? `
+        <div style="width:200px;flex-shrink:0;position:sticky;top:88px;display:flex;flex-direction:column;gap:2px;">
+          ${manageTabDefs.map(t => `
+            <button type="button" data-manage-tab="${t.id}" style="text-align:left;padding:9px 12px;border-radius:8px;border:none;background:${manageTab === t.id ? 'var(--accent-soft)' : 'transparent'};color:${manageTab === t.id ? 'var(--accent)' : 'var(--ink)'};font-weight:${manageTab === t.id ? '600' : '500'};font-size:13.5px;cursor:pointer;">${esc(t.label)}</button>
+            ${manageTab === t.id && (subsectionsByTab[t.id] || []).length > 1 ? `
+            <div style="display:flex;flex-direction:column;gap:1px;margin:2px 0 10px 12px;border-left:2px solid var(--line);padding-left:10px;">
+              ${subsectionsByTab[t.id].map(s => `<button type="button" data-manage-jump="${s.id}" style="text-align:left;background:none;border:none;padding:6px 8px;border-radius:6px;color:var(--ink-soft);font-size:12.5px;cursor:pointer;">${esc(s.label)}</button>`).join('')}
+            </div>` : ''}
+          `).join('')}
+        </div>` : ''}
+
+        <div style="flex:1;min-width:0;">
 
       ${manageTab === 'access' ? `
       ${canManageBaseAccess ? `
-      <div class="heading-block">
+      <div class="heading-block" id="sec-signin">
         <span class="eyebrow">Sign-in access</span>
         <h1>Who can sign in</h1>
         <p class="sub">Someone can sign in if they're in at least one of the Roblox groups below (at that group's minimum rank, if set), or if their linked Discord account is in at least one of the servers below - handy for keeping a separate tester group/server alongside the main one. Anyone who matches neither gets sent to the application flow instead. Leave both lists empty to let any Roblox account sign in.</p>
@@ -6937,7 +6965,7 @@
       ` : ''}
 
       ${manageTab === 'games' ? `
-      <div class="heading-block">
+      <div class="heading-block" id="sec-payroll">
         <span class="eyebrow">Payroll settings</span>
         <h1>Games &amp; rate</h1>
         <p class="sub">Set the DevEx conversion rate and keep the list of games people can log work against.</p>
@@ -6993,7 +7021,7 @@
 
       ${manageTab === 'access' ? `
       ${canManageGroups ? `
-      <div class="heading-block" style="margin-top:${canManageBaseAccess ? '36px' : '0'};">
+      <div class="heading-block" id="sec-eligibility" style="margin-top:${canManageBaseAccess ? '36px' : '0'};">
         <span class="eyebrow">Payout requirements</span>
         <h1>Eligibility groups</h1>
         <p class="sub">Someone must be in every group listed here to be marked eligible for payout.</p>
@@ -7036,7 +7064,7 @@
       ` : ''}
 
       ${manageTab === 'roles' && canManageRoles ? `
-      <div class="heading-block">
+      <div class="heading-block" id="sec-roles">
         <span class="eyebrow">Access control</span>
         <h1>Roles and permissions</h1>
         <p class="sub">Roles can tie to a Roblox group and rank, or get assigned to a specific account. A user gets every permission from every role they qualify for. Give developers roles for their own payments view, and give "Submit payment requests" to producers or HR logging on behalf of others. This is separate from sign-in access above, someone can sign in but have no roles and see an empty tool until one is granted.</p>
@@ -7148,7 +7176,7 @@
       </div>` : ''}
 
       ${manageTab === 'onboarding' && canManageOnboarding ? `
-      <div class="heading-block">
+      <div class="heading-block" id="sec-teams">
         <span class="eyebrow">Onboarding</span>
         <h1>Teams &amp; skillsets</h1>
         <p class="sub">Create a team for each Discord/Roblox group, tag it with the skillsets that apply to it, then generate an invite link below. Anyone who signs in through that link gets assigned to that team and skillset automatically, and sees the right Discord and Roblox group buttons in their onboarding.</p>
@@ -7243,7 +7271,7 @@
         </div>
       </div>
 
-      <div class="heading-block" style="margin-top:36px;">
+      <div class="heading-block" id="sec-invites" style="margin-top:36px;">
         <span class="eyebrow">Invite links</span>
         <h1>Onboarding links</h1>
         <p class="sub">Pick a team, skillset, and optional role, generate a link, and send it to whoever you're onboarding. When they sign in through it, they'll be assigned automatically.</p>
@@ -7296,7 +7324,7 @@
         </div>
       </div>
 
-      <div class="heading-block" style="margin-top:36px;">
+      <div class="heading-block" id="sec-autohire" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Auto-hire settings</h1>
         <p class="sub">Control what happens automatically when someone is hired: which role(s) they're given, and how long HR has to respond before an application accepts itself.</p>
@@ -7323,11 +7351,19 @@
           <input type="number" id="recruitGraceHours" min="0" step="0.5" placeholder="e.g. 6" value="${recruitmentConfig.gracePeriodHours != null ? esc(recruitmentConfig.gracePeriodHours) : ''}">
           <p class="sub" style="margin:6px 0 0;">If nobody accepts, rejects, or claims an application within this window, it's automatically accepted and gets the role(s) above. Leave blank to always require a human decision.</p>
         </div>
+        <div class="field">
+          <label>Notify role on accept <span class="hint">(optional)</span></label>
+          <select id="recruitNotifyRole">
+            <option value="">No notification</option>
+            ${roles.map(r => `<option value="${esc(r.id)}" ${recruitmentConfig.notifyRoleId === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+          </select>
+          <p class="sub" style="margin:6px 0 0;">Every member of this role is DMed on Discord the moment an application is accepted (manually or automatically). They need a linked Discord account to receive it.</p>
+        </div>
         <button type="button" class="btn btn-primary" id="saveRecruitConfigBtn" ${savingRecruitmentConfig ? 'disabled' : ''}>${savingRecruitmentConfig ? 'Saving...' : 'Save auto-hire settings'}</button>
         `}
       </div>
 
-      <div class="heading-block" style="margin-top:36px;">
+      <div class="heading-block" id="sec-signoff" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Sign-off &amp; finalise settings</h1>
         <p class="sub">Once a recruit is placed on a team, the sign-off role confirms it's ready, then a producer on that team finalises it and grants access. Pick which roles do each step.</p>
@@ -7357,7 +7393,7 @@
       </div>` : ''}
 
       ${manageTab === 'broadcasts' && canManageBroadcasts ? `
-      <div class="heading-block">
+      <div class="heading-block" id="sec-broadcasts">
         <span class="eyebrow">Announcements</span>
         <h1>Broadcasts</h1>
         <p class="sub">Send a message to everyone (global) or to just one team. Broadcasts show up at the top of everyone's "My payments" tab.</p>
@@ -7396,7 +7432,7 @@
         <button type="button" class="btn btn-ok" id="addBroadcastBtn" ${addingBroadcast ? 'disabled' : ''}>${addingBroadcast ? 'Sending...' : 'Send broadcast'}</button>
       </div>
 
-      <div class="heading-block" style="margin-top:36px;">
+      <div class="heading-block" id="sec-broadcast-history" style="margin-top:36px;">
         <span class="eyebrow">History</span>
         <h1>Sent broadcasts</h1>
       </div>
@@ -7414,11 +7450,18 @@
           </div>`).join('')}
       </div>
       ` : ''}
+
+        </div>
+      </div>
     </div>`;
 
         wireTopbarSignOut();
 
         document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', () => { manageTab = b.dataset.manageTab; paint(); }));
+        document.querySelectorAll('[data-manage-jump]').forEach(b => b.addEventListener('click', () => {
+          const target = document.getElementById(b.dataset.manageJump);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }));
 
         if (canManageBaseAccess) {
           const addBaseGroupBtn = document.getElementById('addBaseGroupBtn');
@@ -7486,13 +7529,15 @@
             const autoRoleRaw = document.getElementById('recruitAutoRole').value;
             const discordRoleId = document.getElementById('recruitDiscordRole').value.trim() || null;
             const graceRaw = document.getElementById('recruitGraceHours').value.trim();
+            const notifyRoleRaw = document.getElementById('recruitNotifyRole').value;
             const autoRoleId = autoRoleRaw === '' ? null : autoRoleRaw;
             const gracePeriodHours = graceRaw === '' ? null : Number(graceRaw);
+            const notifyRoleId = notifyRoleRaw === '' ? null : notifyRoleRaw;
             if (gracePeriodHours != null && !(gracePeriodHours >= 0)) { recruitmentConfigError = 'Enter a valid, non-negative number of hours, or leave it blank to disable auto-accept.'; recruitmentConfigSuccess = false; paint(); return; }
             savingRecruitmentConfig = true; recruitmentConfigError = null; recruitmentConfigSuccess = false; paint();
             try {
-              await saveRecruitmentConfig(autoRoleId, discordRoleId, gracePeriodHours);
-              recruitmentConfig = { autoRoleId, discordRoleId, gracePeriodHours };
+              await saveRecruitmentConfig(autoRoleId, discordRoleId, gracePeriodHours, notifyRoleId);
+              recruitmentConfig = { autoRoleId, discordRoleId, gracePeriodHours, notifyRoleId };
               savingRecruitmentConfig = false; recruitmentConfigSuccess = true; paint();
             } catch (err) {
               savingRecruitmentConfig = false;
