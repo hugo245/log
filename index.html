@@ -4453,8 +4453,7 @@
 
     function renderLockedModal(ticket) {
       if (ticket && ticket.placed_team_id) {
-        const placedAtMs = ticket.placed_at ? new Date(ticket.placed_at).getTime() : Date.now();
-        const etaMs = placedAtMs + ROLING_BATCH_INTERVAL_MS;
+        const stageLabel = ticket.status === 'signed_off' ? 'Signed off, awaiting a producer' : 'Awaiting sign-off';
         return `
     <div class="modal-scrim" id="lockedModalScrim">
       <div class="modal-card" style="max-width:440px;text-align:center;">
@@ -4482,8 +4481,7 @@
             </div>
           </div>
           <h3 style="margin:14px 0 6px;">Placed on ${esc(ticket.placed_team_name)}${ticket.skillset_name ? ` as ${esc(ticket.skillset_name)}` : ''}</h3>
-          <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">Leads have confirmed your placement. Your dashboard access is applied automatically in the next roling batch.</p>
-          <p style="font-size:13px;margin:0;"><strong id="rolingCountdown" data-eta="${etaMs}">${esc(formatCountdown(etaMs - Date.now()))}</strong> until the next batch runs</p>
+          <p style="color:var(--ink-soft);font-size:13px;margin-bottom:10px;">${stageLabel}. A producer on your team has to finalise this before your access is granted - there's no fixed timer for it.</p>
           <p style="color:var(--muted);font-size:12px;margin-top:14px;">Need it sooner? Contact your Recruiter or Lead for priority access.</p>
         </div>
       </div>
@@ -4613,7 +4611,7 @@
           <div style="margin-top:10px;color:var(--muted);font-size:12px;">Submitted ${new Date(data.ticket.created_at).toLocaleString()}</div>
         </div>`}
     </div>
-    ${data && data.ticket.status === 'team_selection' ? renderLockedModal(data.ticket) : notifyModalShown ? `
+    ${data && (data.ticket.status === 'team_selection' || data.ticket.status === 'signed_off') ? renderLockedModal(data.ticket) : notifyModalShown ? `
     <div class="modal-scrim" id="notifyModalScrim">
       <div class="modal-card" style="max-width:420px;text-align:center;">
         <div class="modal-body" style="padding-top:8px;">
@@ -4629,21 +4627,6 @@
     </div>` : ''}`;
 
         wireTopbarSignOut();
-
-        const rolingCountdownEl = document.getElementById('rolingCountdown');
-        if (rolingCountdownTimer) { clearInterval(rolingCountdownTimer); rolingCountdownTimer = null; }
-        if (rolingCountdownEl) {
-          const etaMs = Number(rolingCountdownEl.dataset.eta);
-          const tick = () => {
-            const el = document.getElementById('rolingCountdown');
-            if (!el || renderGen !== myGen) return;
-            el.textContent = formatCountdown(etaMs - Date.now());
-          };
-          rolingCountdownTimer = setInterval(() => {
-            if (renderGen !== myGen) { clearInterval(rolingCountdownTimer); return; }
-            tick();
-          }, 1000);
-        }
 
         const notifyEnableBtn = document.getElementById('notifyEnableBtn');
         if (notifyEnableBtn) notifyEnableBtn.addEventListener('click', async () => {
