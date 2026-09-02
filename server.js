@@ -1450,9 +1450,6 @@ setInterval(() => {
     runTicketChannelCleanup().catch(e => console.error('scheduled runTicketChannelCleanup failed:', e.message));
 }, TICKET_CHANNEL_CLEANUP_INTERVAL_MS);
 
-// Runs on boot (redeploy) and every 15 minutes after that, sweeping every pending payment request
-// so its currency always matches whatever the recipient's payment method currently pays out in -
-// catches method changes, DevEx rate changes, and anything the per-action triggers might have missed.
 setTimeout(() => {
     runPaymentMethodConversionSweep().catch(e => console.error('initial runPaymentMethodConversionSweep failed:', e.message));
 }, 30 * 1000);
