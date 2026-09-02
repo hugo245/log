@@ -1019,7 +1019,6 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
-      min-width: 1080px;
     }
 
     table.req-table thead th {
@@ -1095,7 +1094,7 @@
     }
 
     table.req-table td.task-cell {
-      max-width: 240px;
+      max-width: 280px;
     }
 
     table.req-table td.task-cell .task-name {
@@ -1123,11 +1122,18 @@
     }
 
     table.req-table td.actions-cell {
-      white-space: nowrap;
+      white-space: normal;
+      max-width: 180px;
+    }
+
+    table.req-table td.actions-cell .actions-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
     }
 
     table.req-table td.actions-cell .btn {
-      margin-right: 6px;
+      margin: 0;
     }
 
     .status-chip {
@@ -5329,26 +5335,26 @@
         const rowHtml = `
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="id-cell mono">${esc(r.id)}</td>
               <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${userLink(r.robloxUserId, r.robloxUsername)}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
-              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}</div></td>
-              <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
-              <td>${esc(r.timeWorked || '-')}</td>
+              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}${r.game ? ` &middot; <span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : ''}${r.timeWorked ? ` &middot; ${esc(r.timeWorked)}` : ''}</div></td>
               <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
               <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
               <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
               <td class="actions-cell">
-                ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
-                ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
-                ${r.status !== 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
-                ${canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-delete-request="${esc(r.id)}">Delete Request</button>` : ''}
+                <div class="actions-group">
+                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-sm" data-paid="${esc(r.id)}">Mark paid</button>` : ''}
+                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reject="${esc(r.id)}">Reject</button>` : ''}
+                  ${r.status !== 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
+                  ${canMarkPaid ? `<button type="button" class="btn btn-ghost btn-sm" data-delete-request="${esc(r.id)}">Delete</button>` : ''}
+                </div>
               </td>
             </tr>`;
         const cacheEntry = eligibilityCache[r.robloxUsername];
         const isElLoading = eligibilityLoading.has(r.robloxUsername);
         const detailHtml = isOpen ? `
             <tr class="detail-row">
-              <td colspan="10">
+              <td colspan="7">
+                <div class="role-meta" style="margin-bottom:10px;">ID: <span class="mono">${esc(r.id)}</span></div>
                 ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
                 <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
                   <div style="font-size:10.5px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.6px;margin-bottom:8px;">Payout eligibility</div>
@@ -5389,16 +5395,13 @@
           <table class="req-table">
             <thead>
               <tr>
-                <th></th>
-                <th>ID</th>
+                <th style="width:32px;"></th>
                 <th>Requested by</th>
                 <th>Task</th>
-                <th>Game</th>
-                <th>Time worked</th>
                 <th>Payment</th>
                 <th>Status</th>
-                <th>Date</th>
-                <th>Actions</th>
+                <th style="width:90px;">Date</th>
+                <th style="width:1%;white-space:nowrap;">Actions</th>
               </tr>
             </thead>
             <tbody>

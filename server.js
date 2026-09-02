@@ -929,6 +929,7 @@ async function syncRobloxUsername(robloxUserId, newUsername) {
         await Promise.all([
             supabase.from('payment_methods').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
             supabase.from('payment_requests').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('payment_requests').update({ requested_by: newUsername }).eq('requested_by_user_id', robloxUserId),
             supabase.from('user_role_assignments').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
             supabase.from('user_assignments').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
             supabase.from('discord_links').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
@@ -1112,11 +1113,72 @@ async function enforceUsdMinimumThreshold(filter) {
     }
 }
 
-// Converts every pending, unpaid payment request's currency to match what the recipient's saved
-// payment method actually pays out in (PAYPAL/VENMO -> USD, DEVEX_ROBUX -> ROBUX), recomputing the
-// amount with the current DevEx rate. Pass a filter ({ robloxUserId } or { robloxUsername }) to
-// limit this to one person (e.g. right after they change their method, or a new request is
-// created for them), or call with no filter to sweep every pending request in the system.
+// Bulk-resolves current Roblox usernames for a list of user ids via Roblox's users-by-id endpoint,
+// batching in groups of 200 (its limit). Returns a { userId: currentUsername } map.
+async function resolveCurrentRobloxUsernames(userIds) {
+    const ids = [...new Set((userIds || []).filter(id => id != null))];
+    const result = {};
+    if (!ids.length) return result;
+    for (let i = 0; i < ids.length; i += 200) {
+        const batch = ids.slice(i, i + 200);
+        try {
+            const res = await fetch('https://users.roblox.com/v1/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userIds: batch, excludeBannedUsers: false })
+            });
+            if (!res.ok) continue;
+            const json = await res.json().catch(() => null);
+            (json && json.data || []).forEach(u => { result[u.id] = u.name; });
+        } catch (e) {
+            console.error('resolveCurrentRobloxUsernames: batch failed:', e.message);
+        }
+    }
+    return result;
+}
+
+// Someone can rename their Roblox account at any time. syncRobloxUsername() catches this for
+// whoever's actually signing in, but a payment request just sits there referencing whatever name
+// was current when it was created - the issuer, the recipient, or both might have renamed since,
+// and neither necessarily needs to log in again before that request gets paid. This sweeps every
+// pending request and corrects both the issuer and recipient names to whatever's current on
+// Roblox right now, independent of anyone logging in.
+async function refreshPaymentRequestUsernames() {
+    try {
+        const { data: rows, error } = await supabase
+            .from('payment_requests')
+            .select('id, roblox_user_id, roblox_username, requested_by, requested_by_user_id')
+            .eq('paid', false)
+            .eq('status', 'pending');
+        if (error || !rows || !rows.length) return;
+
+        const userIds = [];
+        rows.forEach(r => {
+            if (r.roblox_user_id != null) userIds.push(r.roblox_user_id);
+            if (r.requested_by_user_id != null) userIds.push(r.requested_by_user_id);
+        });
+        const currentNames = await resolveCurrentRobloxUsernames(userIds);
+        if (!Object.keys(currentNames).length) return;
+
+        await Promise.all(rows.map(row => {
+            const updates = {};
+            const currentRecipientName = row.roblox_user_id != null ? currentNames[row.roblox_user_id] : null;
+            if (currentRecipientName && currentRecipientName !== row.roblox_username) {
+                updates.roblox_username = currentRecipientName;
+            }
+            const currentIssuerName = row.requested_by_user_id != null ? currentNames[row.requested_by_user_id] : null;
+            if (currentIssuerName && currentIssuerName !== row.requested_by) {
+                updates.requested_by = currentIssuerName;
+            }
+            if (!Object.keys(updates).length) return Promise.resolve();
+            return supabase.from('payment_requests').update(updates).eq('id', row.id);
+        }));
+    } catch (e) {
+        console.error('refreshPaymentRequestUsernames failed:', e.message);
+    }
+}
+
+
 async function runPaymentMethodConversionSweep(filter) {
     try {
         let query = supabase
@@ -1600,10 +1662,10 @@ setInterval(() => {
 }, TICKET_CHANNEL_CLEANUP_INTERVAL_MS);
 
 setTimeout(() => {
-    enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).catch(e => console.error('initial payment conversion pass failed:', e.message));
+    enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).then(() => refreshPaymentRequestUsernames()).catch(e => console.error('initial payment conversion pass failed:', e.message));
 }, 30 * 1000);
 setInterval(() => {
-    enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).catch(e => console.error('scheduled payment conversion pass failed:', e.message));
+    enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).then(() => refreshPaymentRequestUsernames()).catch(e => console.error('scheduled payment conversion pass failed:', e.message));
 }, PAYMENT_CONVERSION_SWEEP_INTERVAL_MS);
 
 async function getSession(req) {
@@ -2207,6 +2269,7 @@ app.post('/hr-data', async (req, res) => {
         const { error } = await supabase.from('payment_requests').insert({
             id,
             requested_by: session.roblox_username,
+            requested_by_user_id: session.roblox_user_id,
             roblox_username: robloxUsername,
             roblox_user_id: recipientUserId,
             task_name: taskName,
@@ -2236,6 +2299,7 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'dashboard.view')) return;
         await enforceUsdMinimumThreshold();
         await runPaymentMethodConversionSweep();
+        await refreshPaymentRequestUsernames();
         const { data, error } = await supabase
             .from('payment_requests')
             .select('*')
