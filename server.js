@@ -919,6 +919,31 @@ async function resolveRobloxUserId(username) {
     return match ? match.id : null;
 }
 
+// Roblox usernames can change at any time - identity is always tracked by roblox_user_id, so
+// renaming never breaks anyone's access, but every table that also caches a display username
+// needs to catch up or it'll keep showing the stale name. Runs on every sign-in; each update is a
+// no-op if the name already matches, so this is cheap to call unconditionally.
+async function syncRobloxUsername(robloxUserId, newUsername) {
+    if (!robloxUserId || !newUsername) return;
+    try {
+        await Promise.all([
+            supabase.from('payment_methods').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('payment_requests').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('user_role_assignments').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('user_assignments').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('discord_links').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('staff_warnings').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('banned_users').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('recruitment_tickets').update({ roblox_username: newUsername }).eq('roblox_user_id', robloxUserId),
+            supabase.from('recruitment_tickets').update({ referred_by_username: newUsername }).eq('referred_by_user_id', robloxUserId),
+            supabase.from('recruitment_tickets').update({ assigned_to_username: newUsername }).eq('assigned_to_user_id', robloxUserId),
+            supabase.from('recruitment_tickets').update({ closed_by_roblox_username: newUsername }).eq('closed_by_roblox_user_id', robloxUserId)
+        ]);
+    } catch (e) {
+        console.error(`syncRobloxUsername failed for ${robloxUserId}:`, e.message);
+    }
+}
+
 async function getBaseAccessGroups() {
     const { data, error } = await supabase.from('base_access_groups').select('*').order('created_at', { ascending: true });
     if (error) throw error;
@@ -1710,6 +1735,8 @@ app.get('/roblox-auth-callback', async (req, res) => {
     const robloxUsername = userInfo.preferred_username || userInfo.nickname || String(robloxUserId);
 
     if (!robloxUserId) { fail('userinfo_failed'); return; }
+
+    syncRobloxUsername(robloxUserId, robloxUsername);
 
     try {
         if (await isUserBanned(robloxUserId)) { fail('account_banned'); return; }
@@ -3444,6 +3471,29 @@ app.post('/hr-data', async (req, res) => {
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not load your team assignments.' });
         }
+        return;
+    }
+
+    if (action === 'get_my_discord_link') {
+        const { data, error } = await supabase
+            .from('discord_links')
+            .select('discord_username, discord_avatar, linked_at')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: data || null });
+        return;
+    }
+
+    if (action === 'unlink_my_discord') {
+        const { error } = await supabase.from('discord_links').delete().eq('roblox_user_id', session.roblox_user_id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'account', action: 'unlink_discord',
+            targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
+            details: {}
+        });
+        res.json({ ok: true });
         return;
     }
 

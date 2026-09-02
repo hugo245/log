@@ -3341,6 +3341,15 @@
       return json.data || null;
     }
 
+    async function getMyDiscordLink() {
+      const json = await callHrData('get_my_discord_link');
+      return json.data || null;
+    }
+
+    async function unlinkMyDiscord() {
+      await callHrData('unlink_my_discord');
+    }
+
     async function getUsdEligibilityForUser(robloxUserId, robloxUsername) {
       const json = await callHrData('get_usd_eligibility_for_user', { robloxUserId, robloxUsername });
       return json.data || null;
@@ -6483,6 +6492,11 @@
 
       let usdEligibility = null;
 
+      let discordLink = null;
+      let discordLinkLoading = true;
+      let unlinkingDiscord = false;
+      let discordLinkMsg = null;
+
       let warnings = [];
       let warningsLoading = true;
       let warningsError = null;
@@ -6554,6 +6568,16 @@
                 ${!g.isMember && g.robloxGroupId != null ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(g.robloxGroupId)}" target="_blank" rel="noopener">Join group</a>` : (!g.isMember && g.id === 'payment_method' ? `<a class="btn btn-ghost btn-sm" href="#/my">Add payment method</a>` : '')}
               </div>`).join('')}
           `}
+        </div>
+
+        <div class="panel">
+          <div class="preview-label">Discord account</div>
+          ${discordLinkMsg ? `<div class="error-box" style="${discordLinkMsg.ok ? 'background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-text);' : ''}"><span>${esc(discordLinkMsg.text)}</span></div>` : ''}
+          ${discordLinkLoading ? `<div class="dash-loading">Loading...</div>` : discordLink ? `
+            <p style="color:var(--ink-soft);font-size:13px;margin-bottom:14px;">Linked to <strong>${esc(discordLink.discord_username)}</strong>.</p>
+            <button type="button" class="btn btn-ghost btn-sm" id="unlinkDiscordBtn" ${unlinkingDiscord ? 'disabled' : ''}>${unlinkingDiscord ? 'Unlinking...' : 'Unlink Discord account'}</button>
+            <p class="sub" style="margin:10px 0 0;">Unlinking will ask you to link a Discord account again next time you use the tool.</p>
+          ` : `<p style="color:var(--ink-soft);font-size:13px;">No Discord account linked.</p>`}
         </div>
 
         <div class="panel">
@@ -6653,6 +6677,23 @@
 
         const saveMethodBtn = document.getElementById('saveMethodBtn');
         if (saveMethodBtn) saveMethodBtn.addEventListener('click', handleSaveMethod);
+
+        const unlinkDiscordBtn = document.getElementById('unlinkDiscordBtn');
+        if (unlinkDiscordBtn) unlinkDiscordBtn.addEventListener('click', async () => {
+          if (!confirm('Unlink your Discord account? You will be asked to link one again next time you use the tool.')) return;
+          unlinkingDiscord = true; discordLinkMsg = null; paint();
+          try {
+            await unlinkMyDiscord();
+            discordLink = null;
+            unlinkingDiscord = false;
+            discordLinkMsg = { ok: true, text: 'Discord account unlinked.' };
+            paint();
+          } catch (err) {
+            unlinkingDiscord = false;
+            discordLinkMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not unlink your Discord account.' };
+            paint();
+          }
+        });
       }
 
       function paintMethodFields() {
@@ -6715,6 +6756,16 @@
         paint();
       }
 
+      async function loadDiscordLink() {
+        discordLinkLoading = true; paint();
+        try {
+          discordLink = await getMyDiscordLink();
+        } catch (err) { }
+        if (myGen !== renderGen) return;
+        discordLinkLoading = false;
+        paint();
+      }
+
       async function loadEligibility() {
         eligibilityLoading = true; eligibilityError = null; paint();
         try {
@@ -6767,6 +6818,7 @@
       loadSummary();
       loadMethod();
       loadUsdEligibility();
+      loadDiscordLink();
       loadEligibility();
       loadWarnings();
       loadMyBroadcastsData();
