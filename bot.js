@@ -121,13 +121,19 @@ async function finalizeAfterRoling(ticket) {
     }
 }
 
+// This used to also auto-promote "signed_off" tickets straight into finalised/roled-in on a timer,
+// which defeated the entire point of requiring a producer to click Finalise - after 6 hours it
+// would happen automatically no matter what. Now this only re-applies the team/skillset assignment
+// for tickets that are ALREADY finalised (a producer really did click Finalise) but somehow ended
+// up missing from user_assignments - a pure drift/safety-net check, never a substitute for the
+// producer's approval.
 async function reconcilePlacements() {
     nextReconcileAt = Date.now() + RECONCILE_INTERVAL_MS;
 
     const { data: tickets, error } = await supabase
         .from('recruitment_tickets')
         .select('id, status, roblox_user_id, roblox_username, skillset_id, skillset_name, placed_team_id, placed_team_name, discord_channel_id')
-        .eq('status', 'signed_off')
+        .eq('status', 'finalised')
         .not('placed_team_id', 'is', null);
     if (error) { console.error('reconcilePlacements: could not load tickets:', error.message); return; }
 
@@ -149,9 +155,8 @@ async function reconcilePlacements() {
             continue;
         }
         if (result.mode === 'inserted') fixed++;
-        await finalizeAfterRoling(ticket);
     }
-    if (fixed) console.log(`reconcilePlacements: rolled in ${fixed} signed-off placement(s).`);
+    if (fixed) console.log(`reconcilePlacements: fixed ${fixed} finalised placement(s) missing from user_assignments.`);
 }
 
 function nextReconcileUnix() {
@@ -254,10 +259,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 return;
             }
 
-            const nextRunUnix = nextReconcileUnix();
-            const nextRunNote = nextRunUnix
-                ? ` Once signed off and finalised, this rolls into the system automatically around <t:${nextRunUnix}:R>, or immediately via Manual Roling on the dashboard.`
-                : ` Once signed off and finalised, this rolls into the system on the next scheduled batch, or immediately via Manual Roling on the dashboard.`;
+            const nextRunNote = ' They need to be signed off, then finalised by a producer on the dashboard before their access is granted.';
             await interaction.editReply({
                 content: `${ticket.roblox_username} confirmed for ${team.name}${skillset ? ` as ${skillset.name}` : ''} (by ${interaction.user}).${nextRunNote}`
             });

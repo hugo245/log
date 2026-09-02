@@ -3480,6 +3480,11 @@
       await callHrData('recruitment_save_approval_config', { signoffRoleId, producerRoleId });
     }
 
+    async function getRecruitmentApprovalRoleNames() {
+      const json = await callHrData('recruitment_get_approval_role_names');
+      return json.data || { signoffRoleName: null, producerRoleName: null };
+    }
+
     async function getUsdMinimum() {
       const json = await callHrData('get_usd_minimum');
       return json.data || { threshold: 0 };
@@ -4698,11 +4703,23 @@
       let placeTeamBusy = false;
       let placeTeamError = null;
 
+      let approvalRoleNames = { signoffRoleName: null, producerRoleName: null };
+
       const canManage = hasPermission('recruitment.manage');
       const canSeeAnalytics = hasPermission('recruitment.analytics');
+      const hasSignoffPermission = hasPermission('recruitment.signoff');
+      const hasFinalisePermission = hasPermission('recruitment.finalise');
+
+      function canSignOffTicket() {
+        return hasSignoffPermission || (approvalRoleNames.signoffRoleName && hrRoles.includes(approvalRoleNames.signoffRoleName));
+      }
+      function canFinaliseTicket() {
+        return hasFinalisePermission || (approvalRoleNames.producerRoleName && hrRoles.includes(approvalRoleNames.producerRoleName));
+      }
 
       load();
       if (canManage) loadRecruiters().then(r => { recruiters = r; if (openTicketId) paintModal(); }).catch(() => { });
+      getRecruitmentApprovalRoleNames().then(names => { approvalRoleNames = names; if (openTicketId) paintModal(); }).catch(() => { });
       if (canManage) loadTeamsForPlacement().then(r => { placeTeamOptions = r; if (openTicketId) paintModal(); }).catch(() => { });
 
       async function load() {
@@ -4925,13 +4942,23 @@
             ${t.placed_team_id && t.status === 'team_selection' ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
               <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Sign off once this is ready for a producer to finalise.</div>
+              ${canSignOffTicket() ? `
               <button type="button" class="btn btn-primary btn-sm" id="signOffBtn" ${signOffBusy ? 'disabled' : ''}>${signOffBusy ? 'Signing off...' : 'Sign off'}</button>
+              ` : `
+              <button type="button" class="btn btn-primary btn-sm" disabled title="Only ${esc(approvalRoleNames.signoffRoleName || 'a recruiter/senior developer')} can sign this off">Sign off</button>
+              <div style="margin-top:6px;color:var(--muted);font-size:12px;">${esc(approvalRoleNames.signoffRoleName || 'A recruiter/senior developer')} has to sign this off.</div>
+              `}
               ${signOffMsg ? `<div style="margin-top:8px;font-weight:600;color:${signOffMsg.ok ? 'var(--ok-text)' : 'var(--err-text)'};">${esc(signOffMsg.text)}</div>` : ''}
             </div>` : ''}
             ${t.placed_team_id && t.status === 'signed_off' ? `
             <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--ok-bg);border:1px solid var(--ok-line);font-size:13px;">
               <div style="margin-bottom:8px;">Placed on <strong>${esc(t.placed_team_name)}</strong>${t.skillset_name ? ` as <strong>${esc(t.skillset_name)}</strong>` : ''}. Signed off by ${esc(t.signed_off_by_username || 'a recruiter')}. A producer for this team can finalise and grant access below.</div>
+              ${canFinaliseTicket() ? `
               <button type="button" class="btn btn-primary btn-sm" id="manualRolingBtn" ${manualRolingBusy ? 'disabled' : ''}>${manualRolingBusy ? 'Finalising...' : 'Finalise'}</button>
+              ` : `
+              <button type="button" class="btn btn-primary btn-sm" disabled title="Only ${esc(approvalRoleNames.producerRoleName || 'a producer')} can finalise this">Finalise</button>
+              <div style="margin-top:6px;color:var(--muted);font-size:12px;">${esc(approvalRoleNames.producerRoleName || 'A producer')} has to finalise this.</div>
+              `}
               ${manualRolingMsg ? `<div style="margin-top:8px;font-weight:600;color:${manualRolingMsg.ok ? 'var(--ok-text)' : 'var(--err-text)'};">${esc(manualRolingMsg.text)}</div>` : ''}
             </div>` : ''}
             ${t.status === 'finalised' ? `

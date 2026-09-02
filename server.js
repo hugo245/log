@@ -2930,6 +2930,30 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    // Lightweight version of the above for anyone who can see recruitment tickets, not just
+    // settings.manage_onboarding holders - just the role names (not the full role records), so the
+    // dashboard can grey out Sign off / Finalise for people who aren't eligible and say why.
+    if (action === 'recruitment_get_approval_role_names') {
+        if (!requirePermission(res, session, 'recruitment.view')) return;
+        try {
+            const config = await getRecruitmentApprovalConfig();
+            const [signoffRole, producerRole] = await Promise.all([
+                config.signoffRoleId ? supabase.from('roles').select('name').eq('id', config.signoffRoleId).maybeSingle() : Promise.resolve({ data: null }),
+                config.producerRoleId ? supabase.from('roles').select('name').eq('id', config.producerRoleId).maybeSingle() : Promise.resolve({ data: null })
+            ]);
+            res.json({
+                ok: true,
+                data: {
+                    signoffRoleName: signoffRole.data ? signoffRole.data.name : null,
+                    producerRoleName: producerRole.data ? producerRole.data.name : null
+                }
+            });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+        return;
+    }
+
     if (action === 'recruitment_save_approval_config') {
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         const signoffRoleId = payload.signoffRoleId != null && payload.signoffRoleId !== '' ? String(payload.signoffRoleId) : null;
