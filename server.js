@@ -3925,32 +3925,32 @@ app.post('/hr-data', async (req, res) => {
         }
         if (!resolvedUserId) { res.json({ ok: true, data: [] }); return; }
 
-        // Deliberately two plain queries joined in JS instead of a PostgREST embed
-        // (user_skillsets.select('id, skillset_id, skillsets(id, name, color)')) - the embed
-        // depends on PostgREST having detected the skillset_id foreign key, which can silently
-        // return nothing (not even an error) if the schema cache hasn't picked it up yet.
-        const { data: links, error: linksErr } = await supabase
-            .from('user_skillsets')
-            .select('id, skillset_id')
-            .eq('roblox_user_id', resolvedUserId);
-        if (linksErr) { res.status(500).json({ ok: false, error: linksErr.message }); return; }
-        if (!links || !links.length) { res.json({ ok: true, data: [] }); return; }
+        // A person's "skillsets" are the union of two sources: skillsets deliberately assigned
+        // here (user_skillsets - the "General skillsets" list in Staff Database), and whatever
+        // skillset(s) they picked up through team assignment (user_assignments.skillset_id - set
+        // e.g. when they join through an onboarding invite link that has a skillset attached).
+        // Deliberately plain queries joined in JS instead of a PostgREST embed - the embed depends
+        // on PostgREST having detected the foreign key, which can silently return nothing (not
+        // even an error) if the schema cache hasn't picked it up yet.
+        const [linksRes, assignmentsRes] = await Promise.all([
+            supabase.from('user_skillsets').select('id, skillset_id').eq('roblox_user_id', resolvedUserId),
+            supabase.from('user_assignments').select('skillset_id').eq('roblox_user_id', resolvedUserId).not('skillset_id', 'is', null)
+        ]);
+        if (linksRes.error) { res.status(500).json({ ok: false, error: linksRes.error.message }); return; }
+        if (assignmentsRes.error) { res.status(500).json({ ok: false, error: assignmentsRes.error.message }); return; }
 
-        const skillsetIds = [...new Set(links.map(l => l.skillset_id).filter(id => id != null))];
+        const idsFromGeneral = (linksRes.data || []).map(l => l.skillset_id);
+        const idsFromTeams = (assignmentsRes.data || []).map(a => a.skillset_id);
+        const skillsetIds = [...new Set([...idsFromGeneral, ...idsFromTeams].filter(id => id != null))];
+        if (!skillsetIds.length) { res.json({ ok: true, data: [] }); return; }
+
         const { data: skillsetRows, error: skillsetsErr } = await supabase
             .from('skillsets')
             .select('id, name, color')
             .in('id', skillsetIds);
         if (skillsetsErr) { res.status(500).json({ ok: false, error: skillsetsErr.message }); return; }
 
-        const skillsetById = {};
-        (skillsetRows || []).forEach(s => { skillsetById[s.id] = s; });
-        const out = links
-            .map(l => {
-                const s = skillsetById[l.skillset_id];
-                return s ? { userSkillsetId: l.id, id: s.id, name: s.name, color: s.color } : null;
-            })
-            .filter(Boolean);
+        const out = (skillsetRows || []).map(s => ({ id: s.id, name: s.name, color: s.color }));
         res.json({ ok: true, data: out });
         return;
     }
