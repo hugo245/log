@@ -1247,6 +1247,20 @@
       white-space: nowrap;
     }
 
+    .skill-badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid var(--accent-soft-strong);
+      letter-spacing: .2px;
+      white-space: nowrap;
+    }
+
     .manage-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -2940,6 +2954,7 @@
         <div class="task-label">Task</div>
         <div class="task-title">${esc(data.taskName || 'Untitled task')}</div>
         ${data.game ? `<div style="margin-top:9px;"><span class="game-badge" style="background:${gameColor(data.game)};">${esc(data.game)}</span></div>` : ''}
+        ${data.skillsetNames && data.skillsetNames.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;">${data.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-label">Time worked</div><div class="stat-value">${esc(data.timeWorked || '-')}</div></div>
@@ -2982,7 +2997,9 @@
         requesterRoles: row.requester_roles || [],
         requesterTeam: row.requester_team || null,
         requesterSkillset: row.requester_skillset || null,
-        skillsetName: row.skillset_name || null
+        skillsetNames: Array.isArray(row.skillset_names) && row.skillset_names.length
+          ? row.skillset_names
+          : (row.skillset_name ? [row.skillset_name] : [])
       };
     }
 
@@ -3157,7 +3174,7 @@
         timeWorked: data.timeWorked,
         payment: data.payment,
         currency: data.currency,
-        skillsetId: data.skillsetId || null
+        skillsetIds: data.skillsetIds || []
       });
       return json;
     }
@@ -5423,7 +5440,11 @@
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
               <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${userLink(r.robloxUserId, r.robloxUsername)}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
-              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}${r.game ? ` &middot; <span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : ''}${r.skillsetName ? ` &middot; ${esc(r.skillsetName)}` : ''}${r.timeWorked ? ` &middot; ${esc(r.timeWorked)}` : ''}</div></td>
+              <td class="task-cell">
+                <div class="task-name">${esc(r.taskName || 'Untitled task')}</div>
+                ${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
+                <div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}${r.game ? ` &middot; <span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : ''}${r.timeWorked ? ` &middot; ${esc(r.timeWorked)}` : ''}</div>
+              </td>
               <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
               <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
               <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
@@ -6744,7 +6765,7 @@
               ${summary.requests.map(r => `
                 <tr>
                   <td class="id-cell mono">${esc(r.id)}</td>
-                  <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div></td>
+                  <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div>${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}</td>
                   <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
                   <td class="pay-cell">${fmtAmount(r)}</td>
                   <td><span class="status-chip ${r.status}">${r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending'}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
@@ -7594,7 +7615,7 @@
       <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Post-finalise Discord onboarding</h1>
-        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. Without a API key set, the DM flow still runs but ranking will fail and ask them to see a lead instead.</p>
+        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. If there's no api key set or it's invalid, it wil ltell the person that they have to contact lead</p>
       </div>
       <div class="panel" style="max-width:640px;margin-bottom:20px;">
         <div class="preview-label">Roblox group API key</div>
@@ -9729,9 +9750,9 @@
       let ignoreEligibility = false;
       let currencyTouched = false;
 
-      let userSkillsets = [];
-      let userSkillsetsLoading = false;
-      let selectedSkillsetId = '';
+      let allSkillsets = [];
+      let allSkillsetsLoading = true;
+      let selectedSkillsetIds = new Set();
 
       function currentData() {
         const username = document.getElementById('f_username')?.value.trim() || '';
@@ -9741,10 +9762,11 @@
         const timeWorked = document.getElementById('f_time')?.value.trim() || '';
         const paymentRaw = document.getElementById('f_payment')?.value || '0';
         const currency = document.getElementById('f_currency')?.value || 'ROBUX';
-        const skillsetId = document.getElementById('f_skillset')?.value || '';
+        const skillsetIds = Array.from(selectedSkillsetIds);
+        const skillsetNames = allSkillsets.filter(s => selectedSkillsetIds.has(String(s.id))).map(s => s.name);
         return {
           id: '', robloxUsername: username, taskName: task, game, workRaw, timeWorked,
-          payment: Number(paymentRaw) || 0, currency, skillsetId, requestedBy: hrUsername, createdAt: Date.now(), paid: false, paidAt: null
+          payment: Number(paymentRaw) || 0, currency, skillsetIds, skillsetNames, requestedBy: hrUsername, createdAt: Date.now(), paid: false, paidAt: null
         };
       }
 
@@ -9802,12 +9824,13 @@
             ${fieldErrors.f_task ? `<div class="err-hint">${esc(fieldErrors.f_task)}</div>` : ''}
           </div>
           <div class="field">
-            <label>Skill used <span class="hint">(optional)</span></label>
-            <select id="f_skillset" ${userSkillsetsLoading ? 'disabled' : ''}>
-              <option value="">General</option>
-              ${userSkillsets.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}
-            </select>
-            ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;margin-top:6px;">Checking their skillsets...</div>` : userSkillsets.length ? `<div class="hint" style="margin-left:0;display:block;margin-top:6px;">They hold ${userSkillsets.length} skillset${userSkillsets.length === 1 ? '' : 's'} - pick the one this task used, or leave it as General.</div>` : ''}
+            <label>Skill(s) used <span class="hint">(optional - pick any that apply)</span></label>
+            ${allSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Loading skillsets...</div>` : allSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">No skillsets configured yet - ask an admin to add some under Manage.</div>` : `
+            <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
+              ${allSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
+            </div>
+            <p class="hint" style="margin-left:0;display:block;margin-top:6px;">Leave all unchecked for General.</p>
+            `}
           </div>
           <div class="field">
             <label>Work Completed <span class="hint">(one line per item)</span></label>
@@ -9843,13 +9866,19 @@
 
         wireTopbarSignOut();
 
-        const ids = ['f_username', 'f_task', 'f_game', 'f_work', 'f_time', 'f_payment', 'f_currency', 'f_skillset'];
+        const ids = ['f_username', 'f_task', 'f_game', 'f_work', 'f_time', 'f_payment', 'f_currency'];
         ids.forEach(id => {
           const el = document.getElementById(id);
           if (!el) return;
           el.addEventListener('input', updatePreview);
           el.addEventListener('change', updatePreview);
         });
+
+        document.querySelectorAll('.f_skillset_check').forEach(el => el.addEventListener('change', () => {
+          if (el.checked) selectedSkillsetIds.add(el.value);
+          else selectedSkillsetIds.delete(el.value);
+          updatePreview();
+        }));
 
         const currencySelect = document.getElementById('f_currency');
         if (currencySelect) currencySelect.addEventListener('change', () => { currencyTouched = true; });
@@ -9952,10 +9981,7 @@
         lastLookedUpUsername = username;
         targetMethodLoading = true;
         targetMethodLoaded = false;
-        userSkillsetsLoading = true;
-        userSkillsets = [];
         renderMethodWarning();
-        paintSkillsetSlot();
         try {
           targetMethod = await getPaymentMethodForUser(username);
         } catch (err) {
@@ -9972,38 +9998,17 @@
           }
         }
         renderMethodWarning();
-
-        try {
-          userSkillsets = await getUserSkillsets(username, null);
-        } catch (err) {
-          console.error('Could not load skillsets for', username, err);
-          userSkillsets = [];
-        }
-        userSkillsetsLoading = false;
-        paintSkillsetSlot();
       }
 
-      function paintSkillsetSlot() {
-        const select = document.getElementById('f_skillset');
-        if (!select) return;
-        const current = select.value;
-        select.disabled = userSkillsetsLoading;
-        select.innerHTML = `<option value="">General</option>${userSkillsets.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}`;
-        if (userSkillsets.some(s => String(s.id) === current)) select.value = current;
-        const hintId = 'f_skillset_hint';
-        let hintEl = document.getElementById(hintId);
-        if (hintEl) hintEl.remove();
-        const field = select.closest('.field');
-        if (field) {
-          const hint = document.createElement('div');
-          hint.id = hintId;
-          hint.className = 'hint';
-          hint.style.cssText = 'margin-left:0;display:block;margin-top:6px;';
-          if (userSkillsetsLoading) hint.textContent = 'Checking their skillsets...';
-          else if (userSkillsets.length) hint.textContent = `They hold ${userSkillsets.length} skillset${userSkillsets.length === 1 ? '' : 's'} - pick the one this task used, or leave it as General.`;
-          else hint.textContent = '';
-          field.appendChild(hint);
+      async function loadAllSkillsets() {
+        allSkillsetsLoading = true; paint();
+        try {
+          allSkillsets = await listSkillsets();
+        } catch (err) {
+          allSkillsets = [];
         }
+        allSkillsetsLoading = false;
+        paint();
       }
 
       function renderMethodWarning() {
@@ -10072,6 +10077,7 @@
       }
 
       paint();
+      loadAllSkillsets();
       (async () => {
         try { ignoreEligibility = await getIgnoreEligibility(); } catch (e) { }
       })();

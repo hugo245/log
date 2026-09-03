@@ -2411,7 +2411,9 @@ app.post('/hr-data', async (req, res) => {
         const timeWorked = payload.timeWorked != null ? String(payload.timeWorked).trim() : '';
         const payment = Number(payload.payment);
         const currency = payload.currency === 'USD' ? 'USD' : 'ROBUX';
-        const skillsetId = payload.skillsetId != null && payload.skillsetId !== '' ? Number(payload.skillsetId) : null;
+        const skillsetIds = Array.isArray(payload.skillsetIds)
+            ? [...new Set(payload.skillsetIds.map(Number).filter(n => n > 0))]
+            : [];
 
         if (!robloxUsername || !taskName || !game || !(payment > 0)) {
             res.status(400).json({ ok: false, error: 'invalid_fields' });
@@ -2428,10 +2430,12 @@ app.post('/hr-data', async (req, res) => {
             return;
         }
 
-        let skillsetName = null;
-        if (skillsetId) {
-            const { data: skillsetRow } = await supabase.from('skillsets').select('name').eq('id', skillsetId).maybeSingle();
-            skillsetName = skillsetRow ? skillsetRow.name : null;
+        let skillsetNames = [];
+        if (skillsetIds.length) {
+            const { data: skillsetRows } = await supabase.from('skillsets').select('id, name').in('id', skillsetIds);
+            const nameById = {};
+            (skillsetRows || []).forEach(s => { nameById[s.id] = s.name; });
+            skillsetNames = skillsetIds.map(id => nameById[id]).filter(Boolean);
         }
 
         const id = generateRequestId();
@@ -2448,8 +2452,10 @@ app.post('/hr-data', async (req, res) => {
             time_worked: timeWorked,
             payment,
             currency,
-            skillset_id: skillsetId,
-            skillset_name: skillsetName,
+            skillset_ids: skillsetIds.length ? skillsetIds : null,
+            skillset_names: skillsetNames.length ? skillsetNames : null,
+            skillset_id: skillsetIds[0] || null,
+            skillset_name: skillsetNames[0] || null,
             paid: false,
             paid_at: null,
             created_at: new Date().toISOString()
@@ -2459,7 +2465,7 @@ app.post('/hr-data', async (req, res) => {
         logAudit(session, {
             category: 'payments', action: 'submit_request',
             targetUserId: recipientUserId, targetUsername: robloxUsername,
-            details: { id, taskName, game, payment, currency, skillsetName },
+            details: { id, taskName, game, payment, currency, skillsetNames },
             revert: { type: 'delete_payment_request', id }
         });
         runPaymentMethodConversionSweep({ robloxUserId: recipientUserId });
