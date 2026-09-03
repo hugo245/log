@@ -10,12 +10,17 @@ const {
     DISCORD_CLIENT_ID,
     DISCORD_GUILD_ID,
     DISCORD_LEAD_ROLE_ID,
+    ROBLOX_GROUP_API_KEY,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
     APP_ORIGIN
 } = process.env;
 
 const LEAD_ROLE_ID = DISCORD_LEAD_ROLE_ID || '1539922527013572668';
+
+if (!ROBLOX_GROUP_API_KEY) {
+    console.warn('ROBLOX_GROUP_API_KEY not set - the post-recruitment "Get Ranked" button will not be able to actually rank anyone in the Roblox group. Create a user-owned Open Cloud API key in the Roblox Creator Dashboard (under your account, not the group - group-owned keys are deprecated), add the target group as an authorized resource with group read/write access, and set the key as this env var.');
+}
 
 for (const [name, val] of Object.entries({ DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY })) {
     if (!val) { console.error(`Missing required env var: ${name}`); process.exit(1); }
@@ -55,6 +60,51 @@ async function registerCommands() {
 
 function statusColor(status) {
     return { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, signed_off: 0x9D6BE0, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 }[status] || 0x8A93A3;
+}
+
+async function getOnboardingGroupConfig() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('onboarding_group_id, onboarding_group_role_id, recruitment_auto_role_id')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return {
+        groupId: data && data.onboarding_group_id != null ? Number(data.onboarding_group_id) : null,
+        groupRoleId: data && data.onboarding_group_role_id != null ? Number(data.onboarding_group_role_id) : null,
+        autoRoleId: data && data.recruitment_auto_role_id ? String(data.recruitment_auto_role_id) : null
+    };
+}
+
+// Ranks someone in the Roblox group via the official Open Cloud v2 API, authenticated with a
+// static, user-owned API key (group-owned keys are deprecated - create this under your own
+// account in the Creator Dashboard and authorize it for the target group with group read/write
+// access) instead of a session cookie or an OAuth token that needs refreshing.
+async function setRobloxGroupRank(groupId, targetUserId, roleId) {
+    if (!ROBLOX_GROUP_API_KEY) throw new Error('roblox_group_api_key_not_configured');
+
+    const res = await fetch(`https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships/${targetUserId}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ROBLOX_GROUP_API_KEY
+        },
+        body: JSON.stringify({ role: `groups/${groupId}/roles/${roleId}` })
+    });
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`roblox_rank_failed_${res.status}: ${body}`);
+    }
+}
+
+async function grantAutoHireRole(robloxUserId, robloxUsername, roleId) {
+    if (!roleId || !robloxUserId) return;
+    const { error } = await supabase.from('user_role_assignments').insert({
+        roblox_user_id: robloxUserId,
+        role_id: roleId,
+        roblox_username: robloxUsername
+    });
+    if (error && error.code !== '23505') console.error('grantAutoHireRole failed:', error.message);
 }
 
 async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skillsetId }) {
@@ -224,6 +274,65 @@ client.on(Events.InteractionCreate, async interaction => {
                 const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
                 if (error || !ticket) { await interaction.editReply('No ticket found with that id.'); return; }
                 await interaction.editReply({ embeds: [ticketEmbed(ticket)] });
+                return;
+            }
+        }
+
+        if (interaction.isButton()) {
+            const continueMatch = interaction.customId.match(/^onboarding_continue_(.+)$/);
+            const rankMatch = interaction.customId.match(/^onboarding_getranked_(.+)$/);
+
+            if (continueMatch) {
+                const flowId = continueMatch[1];
+                const { data: flow, error } = await supabase.from('recruit_onboarding_flows').select('*').eq('id', flowId).maybeSingle();
+                if (error || !flow) { await interaction.reply({ content: 'This flow could not be found.', ephemeral: true }); return; }
+                if (flow.discord_user_id !== interaction.user.id) { await interaction.reply({ content: "This isn't your onboarding flow.", ephemeral: true }); return; }
+                if (flow.step === 'awaiting_group_join') { await interaction.reply({ content: "You haven't joined the group yet - this'll unlock automatically once you have.", ephemeral: true }); return; }
+
+                await supabase.from('recruit_onboarding_flows').update({ step: 'awaiting_rank', updated_at: new Date().toISOString() }).eq('id', flowId);
+                await interaction.update({
+                    content: `You're in the group. Click Get Ranked to finish setting up your access.`,
+                    components: [{
+                        type: 1,
+                        components: [{ type: 2, style: 3, label: 'Get Ranked', custom_id: `onboarding_getranked_${flowId}` }]
+                    }]
+                });
+                return;
+            }
+
+            if (rankMatch) {
+                const flowId = rankMatch[1];
+                const { data: flow, error } = await supabase.from('recruit_onboarding_flows').select('*').eq('id', flowId).maybeSingle();
+                if (error || !flow) { await interaction.reply({ content: 'This flow could not be found.', ephemeral: true }); return; }
+                if (flow.discord_user_id !== interaction.user.id) { await interaction.reply({ content: "This isn't your onboarding flow.", ephemeral: true }); return; }
+                if (flow.step === 'done') { await interaction.reply({ content: "You're already fully set up.", ephemeral: true }); return; }
+
+                await interaction.update({ content: 'Ranking you in the group, one second...', components: [] });
+
+                try {
+                    const config = await getOnboardingGroupConfig();
+                    if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
+
+                    await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
+                    await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
+
+                    await supabase.from('recruit_onboarding_flows').update({ step: 'done', updated_at: new Date().toISOString() }).eq('id', flowId);
+
+                    await interaction.editReply({
+                        content: `You're all set, ${flow.roblox_username}. Welcome to the team.`,
+                        components: []
+                    });
+                } catch (e) {
+                    console.error(`onboarding_getranked: failed for flow ${flowId}:`, e.message);
+                    await supabase.from('recruit_onboarding_flows').update({ step: 'awaiting_rank', updated_at: new Date().toISOString() }).eq('id', flowId);
+                    await interaction.editReply({
+                        content: `Something went wrong ranking you automatically. Please ping a lead or admin to finish this manually.`,
+                        components: [{
+                            type: 1,
+                            components: [{ type: 2, style: 3, label: 'Try again', custom_id: `onboarding_getranked_${flowId}` }]
+                        }]
+                    });
+                }
                 return;
             }
         }

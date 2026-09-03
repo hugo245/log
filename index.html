@@ -2981,7 +2981,8 @@
         paymentMethod: row.payment_method || null,
         requesterRoles: row.requester_roles || [],
         requesterTeam: row.requester_team || null,
-        requesterSkillset: row.requester_skillset || null
+        requesterSkillset: row.requester_skillset || null,
+        skillsetName: row.skillset_name || null
       };
     }
 
@@ -3155,7 +3156,8 @@
         workRaw: data.workRaw,
         timeWorked: data.timeWorked,
         payment: data.payment,
-        currency: data.currency
+        currency: data.currency,
+        skillsetId: data.skillsetId || null
       });
       return json;
     }
@@ -3396,6 +3398,19 @@
       return json.data || null;
     }
 
+    async function getUserSkillsets(robloxUsername, robloxUserId) {
+      const json = await callHrData('list_user_skillsets', { robloxUsername, robloxUserId });
+      return json.data || [];
+    }
+
+    async function addUserSkillsets(robloxUserId, robloxUsername, skillsetIds) {
+      await callHrData('add_user_skillsets', { robloxUserId, robloxUsername, skillsetIds });
+    }
+
+    async function removeUserSkillset(robloxUserId, skillsetId) {
+      await callHrData('remove_user_skillset', { robloxUserId, skillsetId });
+    }
+
     async function savePaymentMethod(method, details) {
       await callHrData('save_payment_method', { method, details });
     }
@@ -3483,6 +3498,20 @@
     async function getRecruitmentApprovalRoleNames() {
       const json = await callHrData('recruitment_get_approval_role_names');
       return json.data || { signoffRoleName: null, producerRoleName: null };
+    }
+
+    async function getOnboardingGroupConfig() {
+      const json = await callHrData('get_onboarding_group_config');
+      return json.data || { groupId: null, groupRoleId: null };
+    }
+
+    async function saveOnboardingGroupConfig(groupId, groupRoleId) {
+      await callHrData('save_onboarding_group_config', { groupId, groupRoleId });
+    }
+
+    async function getRobloxGroupApiKeyStatus() {
+      const json = await callHrData('get_roblox_group_api_key_status');
+      return json.data || { configured: false };
     }
 
     async function getUsdMinimum() {
@@ -5394,7 +5423,7 @@
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
               <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${userLink(r.robloxUserId, r.robloxUsername)}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
-              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}${r.game ? ` &middot; <span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : ''}${r.timeWorked ? ` &middot; ${esc(r.timeWorked)}` : ''}</div></td>
+              <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div><div class="task-count">${items.length} item${items.length === 1 ? '' : 's'}${r.game ? ` &middot; <span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : ''}${r.skillsetName ? ` &middot; ${esc(r.skillsetName)}` : ''}${r.timeWorked ? ` &middot; ${esc(r.timeWorked)}` : ''}</div></td>
               <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
               <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
               <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
@@ -6987,6 +7016,15 @@
       let savingApprovalConfig = false;
       let approvalConfigSuccess = false;
 
+      let onboardingGroupConfig = { groupId: null, groupRoleId: null };
+      let onboardingGroupConfigLoading = canManageOnboarding;
+      let onboardingGroupConfigError = null;
+      let savingOnboardingGroupConfig = false;
+      let onboardingGroupConfigSuccess = false;
+
+      let robloxGroupApiKeyStatus = { configured: false };
+      let robloxGroupApiKeyStatusLoading = canManageOnboarding;
+
       let broadcasts = [];
       let broadcastTeams = [];
       let broadcastsLoading = canManageBroadcasts;
@@ -7008,7 +7046,8 @@
             { id: 'sec-invites', label: 'Invite links' },
             { id: 'sec-positions', label: 'Positions' },
             { id: 'sec-autohire', label: 'Auto-hire settings' },
-            { id: 'sec-signoff', label: 'Sign-off & finalise' }
+            { id: 'sec-signoff', label: 'Sign-off & finalise' },
+            { id: 'sec-onboarding-flow', label: 'Discord onboarding' }
           ],
           broadcasts: [
             { id: 'sec-broadcasts', label: 'Broadcasts' },
@@ -7550,6 +7589,36 @@
         </div>
         <button type="button" class="btn btn-primary" id="saveApprovalConfigBtn" ${savingApprovalConfig ? 'disabled' : ''}>${savingApprovalConfig ? 'Saving...' : 'Save settings'}</button>
         `}
+      </div>
+
+      <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
+        <span class="eyebrow">Recruitment</span>
+        <h1>Post-finalise Discord onboarding</h1>
+        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. The actual ranking step needs a Roblox Open Cloud API key set as the ROBLOX_GROUP_API_KEY environment variable on the bot - create it under your own account in the Roblox Creator Dashboard (group-owned keys are deprecated), then authorize it for the target group with group read/write access. Without it, the DM flow still runs but ranking will fail and ask them to see a lead instead.</p>
+      </div>
+      <div class="panel" style="max-width:640px;margin-bottom:20px;">
+        <div class="preview-label">Roblox group API key</div>
+        ${robloxGroupApiKeyStatusLoading ? `<div class="dash-loading">Checking...</div>` : robloxGroupApiKeyStatus.configured ? `
+          <p style="color:var(--ok-text);font-size:13px;">ROBLOX_GROUP_API_KEY is set - auto-ranking is ready to go.</p>
+        ` : `
+          <p style="color:var(--warn-text);font-size:13px;">ROBLOX_GROUP_API_KEY is not set on the bot yet - the "Get Ranked" step will fail until it is.</p>
+        `}
+      </div>
+      <div class="panel" style="max-width:640px;">
+        ${onboardingGroupConfigError ? `<div class="error-box"><span>${esc(onboardingGroupConfigError)}</span></div>` : ''}
+        ${onboardingGroupConfigSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Onboarding group settings updated</strong></div></div>` : ''}
+        ${onboardingGroupConfigLoading ? `<div class="dash-loading">Loading settings...</div>` : `
+        <div class="field">
+          <label>Roblox group ID</label>
+          <input type="number" id="onboardingGroupId" placeholder="e.g. 123456" value="${onboardingGroupConfig.groupId != null ? esc(onboardingGroupConfig.groupId) : ''}">
+        </div>
+        <div class="field">
+          <label>Group role ID to assign <span class="hint">(the numeric role/rank id, not its name)</span></label>
+          <input type="number" id="onboardingGroupRoleId" placeholder="e.g. 5" value="${onboardingGroupConfig.groupRoleId != null ? esc(onboardingGroupConfig.groupRoleId) : ''}">
+          <p class="sub" style="margin:6px 0 0;">Find this in the group's role management page - it's not the same as the rank number shown to members.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="saveOnboardingGroupConfigBtn" ${savingOnboardingGroupConfig ? 'disabled' : ''}>${savingOnboardingGroupConfig ? 'Saving...' : 'Save settings'}</button>
+        `}
       </div>` : ''}
 
       ${manageTab === 'broadcasts' && canManageBroadcasts ? `
@@ -7746,6 +7815,24 @@
             } catch (err) {
               savingApprovalConfig = false;
               approvalConfigError = (err && err.message) ? err.message : 'Could not save these settings. Check your connection and try again.';
+              paint();
+            }
+          });
+
+          const saveOnboardingGroupConfigBtn = document.getElementById('saveOnboardingGroupConfigBtn');
+          if (saveOnboardingGroupConfigBtn) saveOnboardingGroupConfigBtn.addEventListener('click', async () => {
+            const groupIdRaw = document.getElementById('onboardingGroupId').value;
+            const groupRoleIdRaw = document.getElementById('onboardingGroupRoleId').value;
+            const groupId = groupIdRaw === '' ? null : Number(groupIdRaw);
+            const groupRoleId = groupRoleIdRaw === '' ? null : Number(groupRoleIdRaw);
+            savingOnboardingGroupConfig = true; onboardingGroupConfigError = null; onboardingGroupConfigSuccess = false; paint();
+            try {
+              await saveOnboardingGroupConfig(groupId, groupRoleId);
+              onboardingGroupConfig = { groupId, groupRoleId };
+              savingOnboardingGroupConfig = false; onboardingGroupConfigSuccess = true; paint();
+            } catch (err) {
+              savingOnboardingGroupConfig = false;
+              onboardingGroupConfigError = (err && err.message) ? err.message : 'Could not save these settings. Check your connection and try again.';
               paint();
             }
           });
@@ -8222,6 +8309,28 @@
         paint();
       }
 
+      async function loadOnboardingGroupConfig() {
+        onboardingGroupConfigLoading = true; onboardingGroupConfigError = null; paint();
+        try {
+          onboardingGroupConfig = await getOnboardingGroupConfig();
+        } catch (err) {
+          onboardingGroupConfigError = (err && err.message) ? err.message : 'Could not load onboarding settings.';
+        }
+        if (myGen !== renderGen) return;
+        onboardingGroupConfigLoading = false;
+        paint();
+      }
+
+      async function loadRobloxGroupApiKeyStatus() {
+        robloxGroupApiKeyStatusLoading = true; paint();
+        try {
+          robloxGroupApiKeyStatus = await getRobloxGroupApiKeyStatus();
+        } catch (err) { }
+        if (myGen !== renderGen) return;
+        robloxGroupApiKeyStatusLoading = false;
+        paint();
+      }
+
       async function loadAssignments() {
         try {
           assignments = await listRoleAssignments();
@@ -8279,7 +8388,7 @@
       } else if (canManageOnboarding) {
         loadRoles();
       }
-      if (canManageOnboarding) { loadTeamsData(); loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); }
+      if (canManageOnboarding) { loadTeamsData(); loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); loadOnboardingGroupConfig(); loadRobloxGroupApiKeyStatus(); }
       if (canManageRate) loadUsdMinimum();
       if (canManageBroadcasts) loadBroadcastsData();
     }
@@ -8521,6 +8630,14 @@
       let configBusy = false;
       let configMsg = null;
       let removeBusyTeamId = null;
+
+      let currentSkillsets = [];
+      let currentSkillsetsLoading = false;
+      let skillsetsCheckedIds = new Set();
+      let addSkillsetsBusy = false;
+      let addSkillsetsMsg = null;
+      let removeSkillsetBusyId = null;
+
       let warnings = [];
       let bannedInfo = null;
       let warnBusy = false;
@@ -8703,6 +8820,30 @@
               <button type="button" class="btn btn-primary btn-sm btn-equal" id="cfgSaveBtn" ${configBusy || !s.robloxUserId || !availableTeams.length ? 'disabled' : ''}>${configBusy ? 'Adding...' : 'Add team'}</button>
               <button type="button" class="btn btn-ghost btn-sm btn-equal" id="cfgBackBtn">Back</button>
             </div>
+          </div>
+
+          <div class="modal-section">
+            <div class="modal-section-title">General skillsets</div>
+            <p class="sub" style="margin:0 0 12px;">Independent of any specific team - lets whoever's submitting a payment request pick which skill a task used, if this person has more than one.</p>
+            ${addSkillsetsMsg ? `<div class="${addSkillsetsMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(addSkillsetsMsg.text)}</span></div>` : ''}
+            ${currentSkillsetsLoading ? `<div class="dash-loading">Loading skillsets...</div>` : currentSkillsets.length === 0 ? `<div class="empty-note" style="margin-bottom:12px;">No skillsets assigned yet.</div>` : `
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+                ${currentSkillsets.map(sk => `
+                  <span class="game-badge" style="background:${sk.color || 'var(--accent)'};display:inline-flex;align-items:center;gap:6px;">
+                    ${esc(sk.name)}
+                    <button type="button" data-remove-skillset="${esc(sk.id)}" ${removeSkillsetBusyId === sk.id ? 'disabled' : ''} style="background:none;border:none;color:inherit;cursor:pointer;font-weight:700;padding:0;">&times;</button>
+                  </span>`).join('')}
+              </div>
+            `}
+            <div class="field">
+              <label>Add skillsets <span class="hint">(select one or more)</span></label>
+              <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
+                ${skillsetsList.filter(sk => !currentSkillsets.some(c => String(c.id) === String(sk.id))).map(sk => `
+                  <label class="perm-check-item"><input type="checkbox" class="addSkillsetCheck" value="${esc(sk.id)}" ${skillsetsCheckedIds.has(String(sk.id)) ? 'checked' : ''}> ${esc(sk.name)}</label>
+                `).join('') || `<div class="empty-note">${skillsetsList.length ? 'They already have every configured skillset.' : 'No skillsets configured yet - add some under Manage.'}</div>`}
+              </div>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="addSkillsetsBtn" ${addSkillsetsBusy || !s.robloxUserId ? 'disabled' : ''}>${addSkillsetsBusy ? 'Adding...' : 'Add selected skillsets'}</button>
           </div>
         </div>
       </div>
@@ -8913,6 +9054,10 @@
         configSkillsetId = '';
         currentAssignments = [];
         currentAssignmentsLoading = true;
+        currentSkillsets = [];
+        currentSkillsetsLoading = true;
+        skillsetsCheckedIds = new Set();
+        addSkillsetsMsg = null;
         paintModal();
         try {
           const [t, sk] = await Promise.all([listTeams(), listSkillsets()]);
@@ -8928,6 +9073,12 @@
           currentAssignments = [];
         }
         currentAssignmentsLoading = false;
+        try {
+          currentSkillsets = activeProfile.robloxUserId ? await getUserSkillsets(activeProfile.robloxUsername, activeProfile.robloxUserId) : [];
+        } catch (e) {
+          currentSkillsets = [];
+        }
+        currentSkillsetsLoading = false;
         paintModal();
       }
 
@@ -9099,6 +9250,45 @@
           } catch (err) {
             removeBusyTeamId = null;
             configMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not remove that team.' };
+            paintModal();
+          }
+        }));
+
+        document.querySelectorAll('.addSkillsetCheck').forEach(el => el.addEventListener('change', () => {
+          if (el.checked) skillsetsCheckedIds.add(el.value);
+          else skillsetsCheckedIds.delete(el.value);
+        }));
+
+        const addSkillsetsBtn = document.getElementById('addSkillsetsBtn');
+        if (addSkillsetsBtn) addSkillsetsBtn.addEventListener('click', async () => {
+          const ids = Array.from(skillsetsCheckedIds);
+          if (!ids.length) { addSkillsetsMsg = { ok: false, text: 'Select at least one skillset to add.' }; paintModal(); return; }
+          addSkillsetsBusy = true; addSkillsetsMsg = null; paintModal();
+          try {
+            await addUserSkillsets(activeProfile.robloxUserId, activeProfile.robloxUsername, ids);
+            currentSkillsets = await getUserSkillsets(activeProfile.robloxUsername, activeProfile.robloxUserId);
+            skillsetsCheckedIds = new Set();
+            addSkillsetsBusy = false;
+            addSkillsetsMsg = { ok: true, text: 'Skillsets added.' };
+            paintModal();
+          } catch (err) {
+            addSkillsetsBusy = false;
+            addSkillsetsMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not add those skillsets.' };
+            paintModal();
+          }
+        });
+
+        document.querySelectorAll('[data-remove-skillset]').forEach(el => el.addEventListener('click', async () => {
+          const skillsetId = el.dataset.removeSkillset;
+          removeSkillsetBusyId = skillsetId; addSkillsetsMsg = null; paintModal();
+          try {
+            await removeUserSkillset(activeProfile.robloxUserId, skillsetId);
+            currentSkillsets = await getUserSkillsets(activeProfile.robloxUsername, activeProfile.robloxUserId);
+            removeSkillsetBusyId = null;
+            paintModal();
+          } catch (err) {
+            removeSkillsetBusyId = null;
+            addSkillsetsMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not remove that skillset.' };
             paintModal();
           }
         }));
@@ -9539,6 +9729,10 @@
       let ignoreEligibility = false;
       let currencyTouched = false;
 
+      let userSkillsets = [];
+      let userSkillsetsLoading = false;
+      let selectedSkillsetId = '';
+
       function currentData() {
         const username = document.getElementById('f_username')?.value.trim() || '';
         const task = document.getElementById('f_task')?.value.trim() || '';
@@ -9547,9 +9741,10 @@
         const timeWorked = document.getElementById('f_time')?.value.trim() || '';
         const paymentRaw = document.getElementById('f_payment')?.value || '0';
         const currency = document.getElementById('f_currency')?.value || 'ROBUX';
+        const skillsetId = document.getElementById('f_skillset')?.value || '';
         return {
           id: '', robloxUsername: username, taskName: task, game, workRaw, timeWorked,
-          payment: Number(paymentRaw) || 0, currency, requestedBy: hrUsername, createdAt: Date.now(), paid: false, paidAt: null
+          payment: Number(paymentRaw) || 0, currency, skillsetId, requestedBy: hrUsername, createdAt: Date.now(), paid: false, paidAt: null
         };
       }
 
@@ -9607,6 +9802,14 @@
             ${fieldErrors.f_task ? `<div class="err-hint">${esc(fieldErrors.f_task)}</div>` : ''}
           </div>
           <div class="field">
+            <label>Skill used <span class="hint">(optional)</span></label>
+            <select id="f_skillset" ${userSkillsetsLoading ? 'disabled' : ''}>
+              <option value="">General</option>
+              ${userSkillsets.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}
+            </select>
+            ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;margin-top:6px;">Checking their skillsets...</div>` : userSkillsets.length ? `<div class="hint" style="margin-left:0;display:block;margin-top:6px;">They hold ${userSkillsets.length} skillset${userSkillsets.length === 1 ? '' : 's'} - pick the one this task used, or leave it as General.</div>` : ''}
+          </div>
+          <div class="field">
             <label>Work Completed <span class="hint">(one line per item)</span></label>
             <textarea id="f_work" placeholder="Added stuff to the rebirth system"></textarea>
           </div>
@@ -9640,7 +9843,7 @@
 
         wireTopbarSignOut();
 
-        const ids = ['f_username', 'f_task', 'f_game', 'f_work', 'f_time', 'f_payment', 'f_currency'];
+        const ids = ['f_username', 'f_task', 'f_game', 'f_work', 'f_time', 'f_payment', 'f_currency', 'f_skillset'];
         ids.forEach(id => {
           const el = document.getElementById(id);
           if (!el) return;
@@ -9749,7 +9952,10 @@
         lastLookedUpUsername = username;
         targetMethodLoading = true;
         targetMethodLoaded = false;
+        userSkillsetsLoading = true;
+        userSkillsets = [];
         renderMethodWarning();
+        paintSkillsetSlot();
         try {
           targetMethod = await getPaymentMethodForUser(username);
         } catch (err) {
@@ -9766,6 +9972,37 @@
           }
         }
         renderMethodWarning();
+
+        try {
+          userSkillsets = await getUserSkillsets(username, null);
+        } catch (err) {
+          userSkillsets = [];
+        }
+        userSkillsetsLoading = false;
+        paintSkillsetSlot();
+      }
+
+      function paintSkillsetSlot() {
+        const select = document.getElementById('f_skillset');
+        if (!select) return;
+        const current = select.value;
+        select.disabled = userSkillsetsLoading;
+        select.innerHTML = `<option value="">General</option>${userSkillsets.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}`;
+        if (userSkillsets.some(s => String(s.id) === current)) select.value = current;
+        const hintId = 'f_skillset_hint';
+        let hintEl = document.getElementById(hintId);
+        if (hintEl) hintEl.remove();
+        const field = select.closest('.field');
+        if (field) {
+          const hint = document.createElement('div');
+          hint.id = hintId;
+          hint.className = 'hint';
+          hint.style.cssText = 'margin-left:0;display:block;margin-top:6px;';
+          if (userSkillsetsLoading) hint.textContent = 'Checking their skillsets...';
+          else if (userSkillsets.length) hint.textContent = `They hold ${userSkillsets.length} skillset${userSkillsets.length === 1 ? '' : 's'} - pick the one this task used, or leave it as General.`;
+          else hint.textContent = '';
+          field.appendChild(hint);
+        }
       }
 
       function renderMethodWarning() {

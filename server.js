@@ -14,6 +14,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ROBLOX_CLIENT_ID = process.env.ROBLOX_CLIENT_ID;
 const ROBLOX_CLIENT_SECRET = process.env.ROBLOX_CLIENT_SECRET;
 const ROBLOX_REDIRECT_URI = process.env.ROBLOX_REDIRECT_URI;
+const ROBLOX_GROUP_API_KEY = process.env.ROBLOX_GROUP_API_KEY;
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 const STATE_LIFETIME_MS = 10 * 60 * 1000;
 const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
@@ -854,6 +855,7 @@ async function finalizeAfterRoling(ticket, byUsername) {
     const finalisedTicket = { ...ticket, status: 'finalised', finalised_at: nowIso, channel_delete_at: deleteAt };
     dmApplicantStatusChange(finalisedTicket, 'finalised');
     refreshDiscordTicketPanel(finalisedTicket);
+    startOnboardingFlow(finalisedTicket);
 
     logAudit(null, {
         category: 'recruitment', action: 'finalised',
@@ -1051,6 +1053,113 @@ async function getRecruitmentApprovalConfig() {
         signoffRoleId: data && data.recruitment_signoff_role_id ? String(data.recruitment_signoff_role_id) : null,
         producerRoleId: data && data.recruitment_producer_role_id ? String(data.recruitment_producer_role_id) : null
     };
+}
+
+async function getOnboardingGroupConfig() {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('onboarding_group_id, onboarding_group_role_id')
+        .eq('id', 1)
+        .maybeSingle();
+    if (error) throw error;
+    return {
+        groupId: data && data.onboarding_group_id != null ? Number(data.onboarding_group_id) : null,
+        groupRoleId: data && data.onboarding_group_role_id != null ? Number(data.onboarding_group_role_id) : null
+    };
+}
+
+// Kicks off the post-finalise Discord onboarding flow: DMs the new hire a "join the Roblox group"
+// message with a Continue button that starts out disabled. The scheduled sweep below enables it
+// once they've actually joined; bot.js handles the button clicks themselves (Continue, then Get
+// Ranked) since those need a live gateway connection to respond to.
+async function startOnboardingFlow(ticket) {
+    try {
+        const config = await getOnboardingGroupConfig();
+        if (!config.groupId || !DISCORD_BOT_TOKEN || !ticket.discord_user_id) return;
+
+        const dmChannel = await discordApi('/users/@me/channels', {
+            method: 'POST',
+            body: JSON.stringify({ recipient_id: ticket.discord_user_id })
+        });
+        if (!dmChannel || !dmChannel.id) return;
+
+        const { data: flow, error: flowErr } = await supabase.from('recruit_onboarding_flows').insert({
+            roblox_user_id: ticket.roblox_user_id,
+            roblox_username: ticket.roblox_username,
+            discord_user_id: ticket.discord_user_id,
+            dm_channel_id: dmChannel.id,
+            step: 'awaiting_group_join'
+        }).select('id').maybeSingle();
+        if (flowErr || !flow) { console.error('startOnboardingFlow: could not create flow row:', flowErr && flowErr.message); return; }
+
+        const message = await discordApi(`/channels/${dmChannel.id}/messages`, {
+            method: 'POST',
+            body: JSON.stringify({
+                content: `Welcome to the team, ${ticket.roblox_username}. To finish setting up your access, you need to join the PlayVerse Roblox group first.`,
+                components: [{
+                    type: 1,
+                    components: [{
+                        type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
+                    }, {
+                        type: 2, style: 1, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: true
+                    }]
+                }]
+            })
+        });
+        if (message && message.id) {
+            await supabase.from('recruit_onboarding_flows').update({ message_id: message.id }).eq('id', flow.id);
+        }
+    } catch (e) {
+        console.error(`startOnboardingFlow failed for ticket ${ticket.id}:`, e.message);
+    }
+}
+
+const ONBOARDING_JOIN_CHECK_INTERVAL_MS = 3 * 1000;
+
+// Every 3 seconds, checks anyone still on "awaiting_group_join" against the Roblox group and
+// enables their Continue button the moment they've actually joined.
+async function runOnboardingJoinCheck() {
+    try {
+        const config = await getOnboardingGroupConfig();
+        if (!config.groupId) return;
+
+        const { data: flows, error } = await supabase
+            .from('recruit_onboarding_flows')
+            .select('*')
+            .eq('step', 'awaiting_group_join');
+        if (error || !flows || !flows.length) return;
+
+        for (const flow of flows) {
+            const groupRoles = await fetchRobloxGroupRoles(flow.roblox_user_id);
+            const isMember = groupRoles.some(gr => gr.group && gr.group.id === config.groupId);
+            if (!isMember) continue;
+
+            await supabase.from('recruit_onboarding_flows').update({ step: 'group_joined', updated_at: new Date().toISOString() }).eq('id', flow.id);
+
+            if (flow.dm_channel_id && flow.message_id) {
+                try {
+                    await discordApi(`/channels/${flow.dm_channel_id}/messages/${flow.message_id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({
+                            content: `You're in the group. Click Continue to finish setting up your access.`,
+                            components: [{
+                                type: 1,
+                                components: [{
+                                    type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
+                                }, {
+                                    type: 2, style: 3, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: false
+                                }]
+                            }]
+                        })
+                    });
+                } catch (e) {
+                    console.error(`runOnboardingJoinCheck: failed to update message for flow ${flow.id}:`, e.message);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('runOnboardingJoinCheck failed:', e.message);
+    }
 }
 
 async function userHasConfiguredRole(session, roleId) {
@@ -1685,6 +1794,10 @@ setInterval(() => {
     runTicketChannelCleanup().catch(e => console.error('scheduled runTicketChannelCleanup failed:', e.message));
 }, TICKET_CHANNEL_CLEANUP_INTERVAL_MS);
 
+setInterval(() => {
+    runOnboardingJoinCheck().catch(e => console.error('scheduled runOnboardingJoinCheck failed:', e.message));
+}, ONBOARDING_JOIN_CHECK_INTERVAL_MS);
+
 setTimeout(() => {
     enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).then(() => refreshPaymentRequestUsernames()).catch(e => console.error('initial payment conversion pass failed:', e.message));
 }, 30 * 1000);
@@ -2298,6 +2411,7 @@ app.post('/hr-data', async (req, res) => {
         const timeWorked = payload.timeWorked != null ? String(payload.timeWorked).trim() : '';
         const payment = Number(payload.payment);
         const currency = payload.currency === 'USD' ? 'USD' : 'ROBUX';
+        const skillsetId = payload.skillsetId != null && payload.skillsetId !== '' ? Number(payload.skillsetId) : null;
 
         if (!robloxUsername || !taskName || !game || !(payment > 0)) {
             res.status(400).json({ ok: false, error: 'invalid_fields' });
@@ -2314,6 +2428,12 @@ app.post('/hr-data', async (req, res) => {
             return;
         }
 
+        let skillsetName = null;
+        if (skillsetId) {
+            const { data: skillsetRow } = await supabase.from('skillsets').select('name').eq('id', skillsetId).maybeSingle();
+            skillsetName = skillsetRow ? skillsetRow.name : null;
+        }
+
         const id = generateRequestId();
 
         const { error } = await supabase.from('payment_requests').insert({
@@ -2328,6 +2448,8 @@ app.post('/hr-data', async (req, res) => {
             time_worked: timeWorked,
             payment,
             currency,
+            skillset_id: skillsetId,
+            skillset_name: skillsetName,
             paid: false,
             paid_at: null,
             created_at: new Date().toISOString()
@@ -2337,7 +2459,7 @@ app.post('/hr-data', async (req, res) => {
         logAudit(session, {
             category: 'payments', action: 'submit_request',
             targetUserId: recipientUserId, targetUsername: robloxUsername,
-            details: { id, taskName, game, payment, currency },
+            details: { id, taskName, game, payment, currency, skillsetName },
             revert: { type: 'delete_payment_request', id }
         });
         runPaymentMethodConversionSweep({ robloxUserId: recipientUserId });
@@ -2951,6 +3073,42 @@ app.post('/hr-data', async (req, res) => {
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
         }
+        return;
+    }
+
+    if (action === 'get_onboarding_group_config') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        try {
+            const data = await getOnboardingGroupConfig();
+            res.json({ ok: true, data });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+        return;
+    }
+
+    if (action === 'save_onboarding_group_config') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const groupId = payload.groupId != null && payload.groupId !== '' ? Number(payload.groupId) : null;
+        const groupRoleId = payload.groupRoleId != null && payload.groupRoleId !== '' ? Number(payload.groupRoleId) : null;
+        const { error } = await supabase
+            .from('app_settings')
+            .upsert({ id: 1, onboarding_group_id: groupId, onboarding_group_role_id: groupRoleId, updated_at: new Date().toISOString() });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'settings', action: 'update_onboarding_group_config',
+            details: { groupId, groupRoleId }
+        });
+        res.json({ ok: true });
+        return;
+    }
+
+    // Deliberately read-only: only exposes whether ROBLOX_GROUP_API_KEY is set, never its value,
+    // and there is no corresponding "save" action anywhere - the key can only ever be set as a
+    // server environment variable, never typed into or stored via the web UI.
+    if (action === 'get_roblox_group_api_key_status') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        res.json({ ok: true, data: { configured: !!ROBLOX_GROUP_API_KEY } });
         return;
     }
 
@@ -3743,6 +3901,64 @@ app.post('/hr-data', async (req, res) => {
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not load that user\'s team assignments.' });
         }
+        return;
+    }
+
+    if (action === 'list_user_skillsets') {
+        if (!hasPermission(session, 'dashboard.submit_request') && !hasPermission(session, 'staff.view_database') && !hasPermission(session, 'settings.manage_onboarding')) {
+            res.status(403).json({ ok: false, error: 'missing_permission' });
+            return;
+        }
+        const robloxUserId = payload.robloxUserId != null && payload.robloxUserId !== '' ? Number(payload.robloxUserId) : null;
+        const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        if (!robloxUserId && !robloxUsername) { res.status(400).json({ ok: false, error: 'missing_user' }); return; }
+
+        let resolvedUserId = robloxUserId;
+        if (!resolvedUserId && robloxUsername) {
+            try { resolvedUserId = await resolveRobloxUserId(robloxUsername); } catch (e) { }
+        }
+        if (!resolvedUserId) { res.json({ ok: true, data: [] }); return; }
+
+        const { data, error } = await supabase
+            .from('user_skillsets')
+            .select('id, skillset_id, skillsets(id, name, color)')
+            .eq('roblox_user_id', resolvedUserId);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const out = (data || []).filter(r => r.skillsets).map(r => ({ userSkillsetId: r.id, id: r.skillsets.id, name: r.skillsets.name, color: r.skillsets.color }));
+        res.json({ ok: true, data: out });
+        return;
+    }
+
+    if (action === 'add_user_skillsets') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        const skillsetIds = Array.isArray(payload.skillsetIds) ? payload.skillsetIds.map(Number).filter(Boolean) : [];
+        if (!skillsetIds.length) { res.status(400).json({ ok: false, error: 'missing_skillset_ids' }); return; }
+        let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        if (!username) {
+            const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
+            if (lookupRes.ok) username = (await lookupRes.json()).name;
+        }
+        const rows = skillsetIds.map(skillsetId => ({
+            roblox_user_id: robloxUserId,
+            roblox_username: username,
+            skillset_id: skillsetId
+        }));
+        const { error } = await supabase.from('user_skillsets').upsert(rows, { onConflict: 'roblox_user_id,skillset_id', ignoreDuplicates: true });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'remove_user_skillset') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const robloxUserId = Number(payload.robloxUserId);
+        const skillsetId = Number(payload.skillsetId);
+        if (!robloxUserId || !skillsetId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { error } = await supabase.from('user_skillsets').delete().eq('roblox_user_id', robloxUserId).eq('skillset_id', skillsetId);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true });
         return;
     }
 
