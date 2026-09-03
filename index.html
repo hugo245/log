@@ -6608,6 +6608,9 @@
       let unlinkingDiscord = false;
       let discordLinkMsg = null;
 
+      let mySkillsets = [];
+      let mySkillsetsLoading = true;
+
       let warnings = [];
       let warningsLoading = true;
       let warningsError = null;
@@ -6689,6 +6692,16 @@
             <button type="button" class="btn btn-ghost btn-sm" id="unlinkDiscordBtn" ${unlinkingDiscord ? 'disabled' : ''}>${unlinkingDiscord ? 'Unlinking...' : 'Unlink Discord account'}</button>
             <p class="sub" style="margin:10px 0 0;">Unlinking will ask you to link a Discord account again next time you use the tool.</p>
           ` : `<p style="color:var(--ink-soft);font-size:13px;">No Discord account linked.</p>`}
+        </div>
+
+        <div class="panel">
+          <div class="preview-label">My skillsets</div>
+          ${mySkillsetsLoading ? `<div class="dash-loading">Loading...</div>` : mySkillsets.length ? `
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              ${mySkillsets.map(s => `<span class="skill-badge">${esc(s.name)}</span>`).join('')}
+            </div>
+            <p class="sub" style="margin:10px 0 0;">These are what show up when someone logs a payment request for you. Ask an admin to add more under Manage.</p>
+          ` : `<p style="color:var(--ink-soft);font-size:13px;">No skillsets assigned yet - ask an admin to add some under Manage.</p>`}
         </div>
 
         <div class="panel">
@@ -6877,6 +6890,18 @@
         paint();
       }
 
+      async function loadMySkillsets() {
+        mySkillsetsLoading = true; paint();
+        try {
+          mySkillsets = await getUserSkillsets(hrUsername, null);
+        } catch (err) {
+          mySkillsets = [];
+        }
+        if (myGen !== renderGen) return;
+        mySkillsetsLoading = false;
+        paint();
+      }
+
       async function loadEligibility() {
         eligibilityLoading = true; eligibilityError = null; paint();
         try {
@@ -6930,6 +6955,7 @@
       loadMethod();
       loadUsdEligibility();
       loadDiscordLink();
+      loadMySkillsets();
       loadEligibility();
       loadWarnings();
       loadMyBroadcastsData();
@@ -7615,7 +7641,7 @@
       <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Post-finalise Discord onboarding</h1>
-        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. If there's no api key set or it's invalid, it wil ltell the person that they have to contact lead</p>
+        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. If it fails the user gets a DM saying they have to contact leads.</p>
       </div>
       <div class="panel" style="max-width:640px;margin-bottom:20px;">
         <div class="preview-label">Roblox group API key</div>
@@ -9750,8 +9776,8 @@
       let ignoreEligibility = false;
       let currencyTouched = false;
 
-      let allSkillsets = [];
-      let allSkillsetsLoading = true;
+      let userSkillsets = [];
+      let userSkillsetsLoading = false;
       let selectedSkillsetIds = new Set();
 
       function currentData() {
@@ -9763,7 +9789,7 @@
         const paymentRaw = document.getElementById('f_payment')?.value || '0';
         const currency = document.getElementById('f_currency')?.value || 'ROBUX';
         const skillsetIds = Array.from(selectedSkillsetIds);
-        const skillsetNames = allSkillsets.filter(s => selectedSkillsetIds.has(String(s.id))).map(s => s.name);
+        const skillsetNames = userSkillsets.filter(s => selectedSkillsetIds.has(String(s.id))).map(s => s.name);
         return {
           id: '', robloxUsername: username, taskName: task, game, workRaw, timeWorked,
           payment: Number(paymentRaw) || 0, currency, skillsetIds, skillsetNames, requestedBy: hrUsername, createdAt: Date.now(), paid: false, paidAt: null
@@ -9823,13 +9849,13 @@
             <input type="text" id="f_task" placeholder="Rebirth System" class="${fieldErrors.f_task ? 'field-invalid' : ''}">
             ${fieldErrors.f_task ? `<div class="err-hint">${esc(fieldErrors.f_task)}</div>` : ''}
           </div>
-          <div class="field">
+          <div class="field" id="f_skillset_field">
             <label>Skill(s) used <span class="hint">(optional - pick any that apply)</span></label>
-            ${allSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Loading skillsets...</div>` : allSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">No skillsets configured yet - ask an admin to add some under Manage.</div>` : `
+            ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">Enter a Roblox username above to see this person's skillsets.</div>` : `
             <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
-              ${allSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
+              ${userSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
             </div>
-            <p class="hint" style="margin-left:0;display:block;margin-top:6px;">Leave all unchecked for General.</p>
+            <p class="hint" style="margin-left:0;display:block;margin-top:6px;">They hold ${userSkillsets.length} skillset${userSkillsets.length === 1 ? '' : 's'} - pick the one(s) this task used, or leave unchecked for General.</p>
             `}
           </div>
           <div class="field">
@@ -9879,6 +9905,11 @@
           else selectedSkillsetIds.delete(el.value);
           updatePreview();
         }));
+
+        {
+          const el = document.getElementById('f_username');
+          if (el && el.value.trim()) lookupTargetMethod(el.value.trim());
+        }
 
         const currencySelect = document.getElementById('f_currency');
         if (currencySelect) currencySelect.addEventListener('change', () => { currencyTouched = true; });
@@ -9981,7 +10012,11 @@
         lastLookedUpUsername = username;
         targetMethodLoading = true;
         targetMethodLoaded = false;
+        userSkillsetsLoading = true;
+        userSkillsets = [];
+        selectedSkillsetIds = new Set();
         renderMethodWarning();
+        paintSkillsetField();
         try {
           targetMethod = await getPaymentMethodForUser(username);
         } catch (err) {
@@ -9998,17 +10033,33 @@
           }
         }
         renderMethodWarning();
+
+        try {
+          userSkillsets = await getUserSkillsets(username, null);
+        } catch (err) {
+          console.error('Could not load skillsets for', username, err);
+          userSkillsets = [];
+        }
+        userSkillsetsLoading = false;
+        paintSkillsetField();
       }
 
-      async function loadAllSkillsets() {
-        allSkillsetsLoading = true; paint();
-        try {
-          allSkillsets = await listSkillsets();
-        } catch (err) {
-          allSkillsets = [];
-        }
-        allSkillsetsLoading = false;
-        paint();
+      function paintSkillsetField() {
+        const field = document.getElementById('f_skillset_field');
+        if (!field) return;
+        field.innerHTML = `
+          <label>Skill(s) used <span class="hint">(optional - pick any that apply)</span></label>
+          ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">Enter a Roblox username above to see this person's skillsets.</div>` : `
+          <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
+            ${userSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
+          </div>
+          <p class="hint" style="margin-left:0;display:block;margin-top:6px;">They hold ${userSkillsets.length} skillset${userSkillsets.length === 1 ? '' : 's'} - pick the one(s) this task used, or leave unchecked for General.</p>
+          `}`;
+        field.querySelectorAll('.f_skillset_check').forEach(el => el.addEventListener('change', () => {
+          if (el.checked) selectedSkillsetIds.add(el.value);
+          else selectedSkillsetIds.delete(el.value);
+          updatePreview();
+        }));
       }
 
       function renderMethodWarning() {
@@ -10077,7 +10128,6 @@
       }
 
       paint();
-      loadAllSkillsets();
       (async () => {
         try { ignoreEligibility = await getIgnoreEligibility(); } catch (e) { }
       })();
