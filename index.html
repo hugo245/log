@@ -5439,7 +5439,7 @@
         const rowHtml = `
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="name-cell"><strong>${esc(r.requestedBy || '-')}</strong><span>${userLink(r.robloxUserId, r.robloxUsername)}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${esc(r.requestedBy || '-')}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell">
                 <div class="task-name">${esc(r.taskName || 'Untitled task')}</div>
                 ${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
@@ -6608,9 +6608,6 @@
       let unlinkingDiscord = false;
       let discordLinkMsg = null;
 
-      let mySkillsets = [];
-      let mySkillsetsLoading = true;
-
       let warnings = [];
       let warningsLoading = true;
       let warningsError = null;
@@ -6692,16 +6689,6 @@
             <button type="button" class="btn btn-ghost btn-sm" id="unlinkDiscordBtn" ${unlinkingDiscord ? 'disabled' : ''}>${unlinkingDiscord ? 'Unlinking...' : 'Unlink Discord account'}</button>
             <p class="sub" style="margin:10px 0 0;">Unlinking will ask you to link a Discord account again next time you use the tool.</p>
           ` : `<p style="color:var(--ink-soft);font-size:13px;">No Discord account linked.</p>`}
-        </div>
-
-        <div class="panel">
-          <div class="preview-label">My skillsets</div>
-          ${mySkillsetsLoading ? `<div class="dash-loading">Loading...</div>` : mySkillsets.length ? `
-            <div style="display:flex;flex-wrap:wrap;gap:6px;">
-              ${mySkillsets.map(s => `<span class="skill-badge">${esc(s.name)}</span>`).join('')}
-            </div>
-            <p class="sub" style="margin:10px 0 0;">These are what show up when someone logs a payment request for you. Ask an admin to add more under Manage.</p>
-          ` : `<p style="color:var(--ink-soft);font-size:13px;">No skillsets assigned yet - ask an admin to add some under Manage.</p>`}
         </div>
 
         <div class="panel">
@@ -6890,18 +6877,6 @@
         paint();
       }
 
-      async function loadMySkillsets() {
-        mySkillsetsLoading = true; paint();
-        try {
-          mySkillsets = await getUserSkillsets(hrUsername, null);
-        } catch (err) {
-          mySkillsets = [];
-        }
-        if (myGen !== renderGen) return;
-        mySkillsetsLoading = false;
-        paint();
-      }
-
       async function loadEligibility() {
         eligibilityLoading = true; eligibilityError = null; paint();
         try {
@@ -6955,7 +6930,6 @@
       loadMethod();
       loadUsdEligibility();
       loadDiscordLink();
-      loadMySkillsets();
       loadEligibility();
       loadWarnings();
       loadMyBroadcastsData();
@@ -7641,7 +7615,7 @@
       <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Post-finalise Discord onboarding</h1>
-        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. If it fails the user gets a DM saying they have to contact leads.</p>
+        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically.</p>
       </div>
       <div class="panel" style="max-width:640px;margin-bottom:20px;">
         <div class="preview-label">Roblox group API key</div>
@@ -9778,6 +9752,7 @@
 
       let userSkillsets = [];
       let userSkillsetsLoading = false;
+      let userSkillsetsLoaded = false;
       let selectedSkillsetIds = new Set();
 
       function currentData() {
@@ -9851,7 +9826,7 @@
           </div>
           <div class="field" id="f_skillset_field">
             <label>Skill(s) used <span class="hint">(optional - pick any that apply)</span></label>
-            ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">Enter a Roblox username above to see this person's skillsets.</div>` : `
+            ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">${userSkillsetsLoaded ? 'This person has no skillsets assigned yet - ask an admin to add some under Manage.' : 'Enter a Roblox username above to see this person\'s skillsets.'}</div>` : `
             <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
               ${userSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
             </div>
@@ -10013,6 +9988,7 @@
         targetMethodLoading = true;
         targetMethodLoaded = false;
         userSkillsetsLoading = true;
+        userSkillsetsLoaded = false;
         userSkillsets = [];
         selectedSkillsetIds = new Set();
         renderMethodWarning();
@@ -10041,6 +10017,7 @@
           userSkillsets = [];
         }
         userSkillsetsLoading = false;
+        userSkillsetsLoaded = true;
         paintSkillsetField();
       }
 
@@ -10049,7 +10026,7 @@
         if (!field) return;
         field.innerHTML = `
           <label>Skill(s) used <span class="hint">(optional - pick any that apply)</span></label>
-          ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">Enter a Roblox username above to see this person's skillsets.</div>` : `
+          ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">${userSkillsetsLoaded ? 'This person has no skillsets assigned yet - ask an admin to add some under Manage.' : 'Enter a Roblox username above to see this person\'s skillsets.'}</div>` : `
           <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
             ${userSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
           </div>
