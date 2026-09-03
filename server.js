@@ -3919,12 +3919,32 @@ app.post('/hr-data', async (req, res) => {
         }
         if (!resolvedUserId) { res.json({ ok: true, data: [] }); return; }
 
-        const { data, error } = await supabase
+        // Deliberately two plain queries joined in JS instead of a PostgREST embed
+        // (user_skillsets.select('id, skillset_id, skillsets(id, name, color)')) - the embed
+        // depends on PostgREST having detected the skillset_id foreign key, which can silently
+        // return nothing (not even an error) if the schema cache hasn't picked it up yet.
+        const { data: links, error: linksErr } = await supabase
             .from('user_skillsets')
-            .select('id, skillset_id, skillsets(id, name, color)')
+            .select('id, skillset_id')
             .eq('roblox_user_id', resolvedUserId);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        const out = (data || []).filter(r => r.skillsets).map(r => ({ userSkillsetId: r.id, id: r.skillsets.id, name: r.skillsets.name, color: r.skillsets.color }));
+        if (linksErr) { res.status(500).json({ ok: false, error: linksErr.message }); return; }
+        if (!links || !links.length) { res.json({ ok: true, data: [] }); return; }
+
+        const skillsetIds = [...new Set(links.map(l => l.skillset_id).filter(id => id != null))];
+        const { data: skillsetRows, error: skillsetsErr } = await supabase
+            .from('skillsets')
+            .select('id, name, color')
+            .in('id', skillsetIds);
+        if (skillsetsErr) { res.status(500).json({ ok: false, error: skillsetsErr.message }); return; }
+
+        const skillsetById = {};
+        (skillsetRows || []).forEach(s => { skillsetById[s.id] = s; });
+        const out = links
+            .map(l => {
+                const s = skillsetById[l.skillset_id];
+                return s ? { userSkillsetId: l.id, id: s.id, name: s.name, color: s.color } : null;
+            })
+            .filter(Boolean);
         res.json({ ok: true, data: out });
         return;
     }
