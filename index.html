@@ -7594,12 +7594,12 @@
       <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Post-finalise Discord onboarding</h1>
-        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. The actual ranking step needs a Roblox Open Cloud API key set as the ROBLOX_GROUP_API_KEY environment variable on the bot - create it under your own account in the Roblox Creator Dashboard (group-owned keys are deprecated), then authorize it for the target group with group read/write access. Without it, the DM flow still runs but ranking will fail and ask them to see a lead instead.</p>
+        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. If it fails, they will be notified and will be told to DM lead instead.s</p>
       </div>
       <div class="panel" style="max-width:640px;margin-bottom:20px;">
         <div class="preview-label">Roblox group API key</div>
         ${robloxGroupApiKeyStatusLoading ? `<div class="dash-loading">Checking...</div>` : robloxGroupApiKeyStatus.configured ? `
-          <p style="color:var(--ok-text);font-size:13px;">ROBLOX_GROUP_API_KEY is set - auto-ranking is ready to go.</p>
+          <p style="color:var(--ok-text);font-size:13px;">ROBLOX_GROUP_API_KEY is set.</p>
         ` : `
           <p style="color:var(--warn-text);font-size:13px;">ROBLOX_GROUP_API_KEY is not set on the bot yet - the "Get Ranked" step will fail until it is.</p>
         `}
