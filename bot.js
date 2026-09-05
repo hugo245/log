@@ -384,7 +384,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     // membership in each team's separate community. Team groups are invite-only,
                     // so joining just files a request - accept it here, then rank them, retrying
                     // the accept step is safe (a no-op) if it was already accepted.
-                    let teamGroupNote = '';
+                    let teamGroupNote = null;
                     if (flow.ticket_id) {
                         const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
                         if (ticket && ticket.placed_team_id) {
@@ -393,13 +393,13 @@ client.on(Events.InteractionCreate, async interaction => {
                                 try {
                                     const accepted = await acceptGroupJoinRequest(team.roblox_group_id, flow.roblox_user_id);
                                     if (!accepted) {
-                                        teamGroupNote = ` You still need to request to join ${team.name}'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Get Ranked again to finish that part.`;
+                                        teamGroupNote = `You're ranked in the main group. Now request to join **${team.name}**'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Continue to finish setting up your team access.`;
                                     } else {
                                         await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
                                     }
                                 } catch (teamErr) {
                                     console.error(`onboarding_getranked: failed to process ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
-                                    teamGroupNote = ` Could not get you into ${team.name}'s group automatically, ping a lead to sort that out.`;
+                                    teamGroupNote = `You're ranked in the main group, but something went wrong getting you into **${team.name}**'s group automatically. Click Continue to try again, or ping a lead if it keeps failing.`;
                                 }
                             }
                         }
@@ -409,10 +409,10 @@ client.on(Events.InteractionCreate, async interaction => {
                     await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
 
                     await interaction.editReply({
-                        content: `You're all set, ${flow.roblox_username}. Welcome to the team.${teamGroupNote}`,
+                        content: teamGroupNote || `You're all set, ${flow.roblox_username}. Welcome to the team.`,
                         components: teamGroupNote ? [{
                             type: 1,
-                            components: [{ type: 2, style: 3, label: 'Get Ranked', custom_id: `onboarding_getranked_${flowId}` }]
+                            components: [{ type: 2, style: 3, label: 'Continue', custom_id: `onboarding_getranked_${flowId}` }]
                         }] : []
                     });
                 } catch (e) {
