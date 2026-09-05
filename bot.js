@@ -110,6 +110,10 @@ async function acceptGroupJoinRequest(groupId, targetUserId) {
     const listRes = await fetch(listUrl, { headers: { 'x-api-key': ROBLOX_GROUP_API_KEY } });
     const listBody = await listRes.text().catch(() => '');
     console.log(`acceptGroupJoinRequest: list lookup for group ${groupId}, user ${targetUserId} -> status ${listRes.status}, body: ${listBody.slice(0, 500)}`);
+    // Roblox returns a plain 404 here (not a 200 with an empty list) when there's simply no join
+    // request from this user yet - that's the normal "they haven't asked to join" case, not a
+    // real failure.
+    if (listRes.status === 404) return false;
     if (!listRes.ok) {
         throw new Error(`roblox_join_request_list_failed_${listRes.status}: ${listBody}`);
     }
