@@ -381,7 +381,8 @@ client.on(Events.InteractionCreate, async interaction => {
                         }
                     }
 
-                    await supabase.from('recruit_onboarding_flows').update({ step: 'done', updated_at: new Date().toISOString() }).eq('id', flowId);
+                    const stepAfter = teamGroupNote ? 'awaiting_rank' : 'done';
+                    await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
 
                     await interaction.editReply({
                         content: `You're all set, ${flow.roblox_username}. Welcome to the team.${teamGroupNote}`,
