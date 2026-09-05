@@ -338,7 +338,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (interaction.isButton()) {
             const continueMatch = interaction.customId.match(/^onboarding_continue_(.+)$/);
-            const rankMatch = interaction.customId.match(/^onboarding_getranked_(.+)$/);
 
             if (continueMatch) {
                 const flowId = continueMatch[1];
@@ -346,31 +345,14 @@ client.on(Events.InteractionCreate, async interaction => {
                 if (error || !flow) { await interaction.reply({ content: 'This flow could not be found.', ephemeral: true }); return; }
                 if (flow.discord_user_id !== interaction.user.id) { await interaction.reply({ content: "This isn't your onboarding flow.", ephemeral: true }); return; }
                 if (flow.step === 'awaiting_group_join') { await interaction.reply({ content: "You haven't joined the group yet - this'll unlock automatically once you have.", ephemeral: true }); return; }
-
-                await supabase.from('recruit_onboarding_flows').update({ step: 'awaiting_rank', updated_at: new Date().toISOString() }).eq('id', flowId);
-                await interaction.update({
-                    content: `You're in the group. Click Get Ranked to finish setting up your access.`,
-                    components: [{
-                        type: 1,
-                        components: [{ type: 2, style: 3, label: 'Get Ranked', custom_id: `onboarding_getranked_${flowId}` }]
-                    }]
-                });
-                return;
-            }
-
-            if (rankMatch) {
-                const flowId = rankMatch[1];
-                const { data: flow, error } = await supabase.from('recruit_onboarding_flows').select('*').eq('id', flowId).maybeSingle();
-                if (error || !flow) { await interaction.reply({ content: 'This flow could not be found.', ephemeral: true }); return; }
-                if (flow.discord_user_id !== interaction.user.id) { await interaction.reply({ content: "This isn't your onboarding flow.", ephemeral: true }); return; }
                 if (flow.step === 'done') { await interaction.reply({ content: "You're already fully set up.", ephemeral: true }); return; }
 
-                await interaction.update({ content: 'Ranking you in the group, one second...', components: [] });
+                await interaction.update({ content: 'One second...', components: [] });
 
                 try {
                     // The main group step only ever needs to run once - retrying a rank change to
                     // the same role Roblox already has them at gets rejected as invalid, so once
-                    // this succeeds we skip straight to the team-group step on any later retry.
+                    // this succeeds we skip straight to the team-group step on any later click.
                     if (flow.step !== 'main_ranked_awaiting_team') {
                         const config = await getOnboardingGroupConfig();
                         if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
@@ -398,7 +380,7 @@ client.on(Events.InteractionCreate, async interaction => {
                                         await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
                                     }
                                 } catch (teamErr) {
-                                    console.error(`onboarding_getranked: failed to process ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
+                                    console.error(`onboarding_continue: failed to process ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
                                     teamGroupNote = `You're ranked in the main group, but something went wrong getting you into **${team.name}**'s group automatically. Click Continue to try again, or ping a lead if it keeps failing.`;
                                 }
                             }
@@ -412,18 +394,18 @@ client.on(Events.InteractionCreate, async interaction => {
                         content: teamGroupNote || `You're all set, ${flow.roblox_username}. Welcome to the team.`,
                         components: teamGroupNote ? [{
                             type: 1,
-                            components: [{ type: 2, style: 3, label: 'Continue', custom_id: `onboarding_getranked_${flowId}` }]
+                            components: [{ type: 2, style: 3, label: 'Continue', custom_id: `onboarding_continue_${flowId}` }]
                         }] : []
                     });
                 } catch (e) {
-                    console.error(`onboarding_getranked: failed for flow ${flowId}:`, e.message);
+                    console.error(`onboarding_continue: failed for flow ${flowId}:`, e.message);
                     const resetStep = flow.step === 'main_ranked_awaiting_team' ? 'main_ranked_awaiting_team' : 'awaiting_rank';
                     await supabase.from('recruit_onboarding_flows').update({ step: resetStep, updated_at: new Date().toISOString() }).eq('id', flowId);
                     await interaction.editReply({
                         content: `Something went wrong ranking you automatically. Please ping a lead or admin to finish this manually.`,
                         components: [{
                             type: 1,
-                            components: [{ type: 2, style: 3, label: 'Try again', custom_id: `onboarding_getranked_${flowId}` }]
+                            components: [{ type: 2, style: 3, label: 'Try again', custom_id: `onboarding_continue_${flowId}` }]
                         }]
                     });
                 }
