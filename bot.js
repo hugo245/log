@@ -349,11 +349,16 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({ content: 'Ranking you in the group, one second...', components: [] });
 
                 try {
-                    const config = await getOnboardingGroupConfig();
-                    if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
+                    // The main group step only ever needs to run once - retrying a rank change to
+                    // the same role Roblox already has them at gets rejected as invalid, so once
+                    // this succeeds we skip straight to the team-group step on any later retry.
+                    if (flow.step !== 'main_ranked_awaiting_team') {
+                        const config = await getOnboardingGroupConfig();
+                        if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
 
-                    await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
-                    await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
+                        await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
+                        await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
+                    }
 
                     // Also get them into their specific team's own Roblox group, if that team has
                     // one configured with a default role - being in the main group doesn't imply
@@ -381,7 +386,7 @@ client.on(Events.InteractionCreate, async interaction => {
                         }
                     }
 
-                    const stepAfter = teamGroupNote ? 'awaiting_rank' : 'done';
+                    const stepAfter = teamGroupNote ? 'main_ranked_awaiting_team' : 'done';
                     await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
 
                     await interaction.editReply({
@@ -393,7 +398,8 @@ client.on(Events.InteractionCreate, async interaction => {
                     });
                 } catch (e) {
                     console.error(`onboarding_getranked: failed for flow ${flowId}:`, e.message);
-                    await supabase.from('recruit_onboarding_flows').update({ step: 'awaiting_rank', updated_at: new Date().toISOString() }).eq('id', flowId);
+                    const resetStep = flow.step === 'main_ranked_awaiting_team' ? 'main_ranked_awaiting_team' : 'awaiting_rank';
+                    await supabase.from('recruit_onboarding_flows').update({ step: resetStep, updated_at: new Date().toISOString() }).eq('id', flowId);
                     await interaction.editReply({
                         content: `Something went wrong ranking you automatically. Please ping a lead or admin to finish this manually.`,
                         components: [{
