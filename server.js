@@ -1104,7 +1104,8 @@ async function startOnboardingFlow(ticket) {
             discord_user_id: ticket.discord_user_id,
             dm_channel_id: dmChannel.id,
             ticket_id: ticket.id,
-            step: 'awaiting_group_join'
+            step: 'awaiting_group_join',
+            last_prompt_state: 'neither'
         }).select('id').maybeSingle();
         if (flowErr || !flow) { console.error('startOnboardingFlow: could not create flow row:', flowErr && flowErr.message); return; }
 
@@ -1113,7 +1114,7 @@ async function startOnboardingFlow(ticket) {
         if (ticket.placed_team_id) {
             const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
             if (team && team.roblox_group_id) {
-                teamGroupLine = ` Your team's group (${team.name}) is invite-only - also request to join it below, and the bot will accept and rank you automatically once you do.`;
+                teamGroupLine = ` You also need to request to join your team's group (${team.name}) below - it's invite-only, so the bot will accept your request and rank you automatically once you've asked to join.`;
                 teamJoinRow = {
                     type: 1,
                     components: [{
@@ -1148,10 +1149,34 @@ async function startOnboardingFlow(ticket) {
     }
 }
 
+// Checks whether someone has either already joined a group, or at least filed a join request for
+// it (invite-only groups) - either counts as "they've done their part" for the purposes of the
+// onboarding checklist. Read-only, never accepts anything.
+async function hasJoinedOrRequestedGroup(groupId, robloxUserId) {
+    try {
+        const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
+        if (groupRoles.some(gr => gr.group && gr.group.id === Number(groupId))) return true;
+    } catch (e) { }
+
+    if (!ROBLOX_GROUP_API_KEY) return false;
+    try {
+        const listUrl = `https://apis.roblox.com/cloud/v2/groups/${groupId}/join-requests?maxPageSize=10&filter=${encodeURIComponent(`user == 'users/${robloxUserId}'`)}`;
+        const res = await fetch(listUrl, { headers: { 'x-api-key': ROBLOX_GROUP_API_KEY } });
+        if (!res.ok) return false;
+        const json = await res.json().catch(() => null);
+        const requests = (json && (json.groupJoinRequests || json.data)) || [];
+        return requests.some(r => String(r.user || '').endsWith(`/${robloxUserId}`));
+    } catch (e) {
+        return false;
+    }
+}
+
 const ONBOARDING_JOIN_CHECK_INTERVAL_MS = 3 * 1000;
 
-// Every 3 seconds, checks anyone still on "awaiting_group_join" against the Roblox group and
-// enables their Continue button the moment they've actually joined.
+// Every 3 seconds, checks anyone still on "awaiting_group_join" against both the main group and
+// (if their team has one) the team group, and only enables Continue once both are satisfied.
+// Edits the message to reflect whichever one is still outstanding, but only when that actually
+// changes - not on every tick - so it doesn't spam Discord's edit rate limit for no reason.
 async function runOnboardingJoinCheck() {
     try {
         const config = await getOnboardingGroupConfig();
@@ -1165,41 +1190,60 @@ async function runOnboardingJoinCheck() {
 
         for (const flow of flows) {
             const groupRoles = await fetchRobloxGroupRoles(flow.roblox_user_id);
-            const isMember = groupRoles.some(gr => gr.group && gr.group.id === config.groupId);
-            if (!isMember) continue;
+            const mainJoined = groupRoles.some(gr => gr.group && gr.group.id === config.groupId);
 
-            await supabase.from('recruit_onboarding_flows').update({ step: 'group_joined', updated_at: new Date().toISOString() }).eq('id', flow.id);
+            let team = null;
+            if (flow.ticket_id) {
+                const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
+                if (ticket && ticket.placed_team_id) {
+                    const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', ticket.placed_team_id).maybeSingle();
+                    if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id) team = teamRow;
+                }
+            }
+            const teamRequested = team ? await hasJoinedOrRequestedGroup(team.roblox_group_id, flow.roblox_user_id) : true;
+
+            const currentState = mainJoined && teamRequested ? 'both' : mainJoined ? 'main_only' : teamRequested ? 'team_only' : 'neither';
+            if (currentState === (flow.last_prompt_state || 'neither')) continue;
+
+            const updates = { last_prompt_state: currentState, updated_at: new Date().toISOString() };
+            let content;
+            const components = [{
+                type: 1,
+                components: [{
+                    type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
+                }, {
+                    type: 2, style: mainJoined && teamRequested ? 3 : 1, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: !(mainJoined && teamRequested)
+                }]
+            }];
+            if (team) {
+                components.push({
+                    type: 1,
+                    components: [{
+                        type: 2, style: 5, label: `Request to join ${team.name}`, url: `https://www.roblox.com/groups/${team.roblox_group_id}`
+                    }]
+                });
+            }
+
+            if (mainJoined && teamRequested) {
+                updates.step = 'group_joined';
+                content = `You've joined both groups. Click Continue to finish setting up your access.`;
+            } else if (mainJoined) {
+                content = `You've joined the main group. You still need to request to join ${team.name}'s group to continue.`;
+            } else if (teamRequested) {
+                content = `You've requested to join ${team.name}'s group. You still need to join the main PlayVerse group to continue.`;
+            } else {
+                content = team
+                    ? `Still waiting for you to join the main group and request to join ${team.name}'s group.`
+                    : `Still waiting for you to join the main group.`;
+            }
+
+            await supabase.from('recruit_onboarding_flows').update(updates).eq('id', flow.id);
 
             if (flow.dm_channel_id && flow.message_id) {
                 try {
-                    const components = [{
-                        type: 1,
-                        components: [{
-                            type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
-                        }, {
-                            type: 2, style: 3, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: false
-                        }]
-                    }];
-                    if (flow.ticket_id) {
-                        const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
-                        if (ticket && ticket.placed_team_id) {
-                            const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
-                            if (team && team.roblox_group_id) {
-                                components.push({
-                                    type: 1,
-                                    components: [{
-                                        type: 2, style: 5, label: `Request to join ${team.name}`, url: `https://www.roblox.com/groups/${team.roblox_group_id}`
-                                    }]
-                                });
-                            }
-                        }
-                    }
                     await discordApi(`/channels/${flow.dm_channel_id}/messages/${flow.message_id}`, {
                         method: 'PATCH',
-                        body: JSON.stringify({
-                            content: `You're in the group. Click Continue to finish setting up your access.`,
-                            components
-                        })
+                        body: JSON.stringify({ content, components })
                     });
                 } catch (e) {
                     console.error(`runOnboardingJoinCheck: failed to update message for flow ${flow.id}:`, e.message);
