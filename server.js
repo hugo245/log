@@ -1108,18 +1108,36 @@ async function startOnboardingFlow(ticket) {
         }).select('id').maybeSingle();
         if (flowErr || !flow) { console.error('startOnboardingFlow: could not create flow row:', flowErr && flowErr.message); return; }
 
+        let teamGroupLine = '';
+        let teamJoinRow = null;
+        if (ticket.placed_team_id) {
+            const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
+            if (team && team.roblox_group_id) {
+                teamGroupLine = ` Your team's group (${team.name}) is invite-only - also request to join it below, and the bot will accept and rank you automatically once you do.`;
+                teamJoinRow = {
+                    type: 1,
+                    components: [{
+                        type: 2, style: 5, label: `Request to join ${team.name}`, url: `https://www.roblox.com/groups/${team.roblox_group_id}`
+                    }]
+                };
+            }
+        }
+
+        const components = [{
+            type: 1,
+            components: [{
+                type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
+            }, {
+                type: 2, style: 1, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: true
+            }]
+        }];
+        if (teamJoinRow) components.push(teamJoinRow);
+
         const message = await discordApi(`/channels/${dmChannel.id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `Welcome to the team, ${ticket.roblox_username}. To finish setting up your access, you need to join the PlayVerse Roblox group first.`,
-                components: [{
-                    type: 1,
-                    components: [{
-                        type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
-                    }, {
-                        type: 2, style: 1, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: true
-                    }]
-                }]
+                content: `Welcome to the team, ${ticket.roblox_username}. To finish setting up your access, you need to join the PlayVerse Roblox group first.${teamGroupLine}`,
+                components
             })
         });
         if (message && message.id) {
@@ -1154,18 +1172,33 @@ async function runOnboardingJoinCheck() {
 
             if (flow.dm_channel_id && flow.message_id) {
                 try {
+                    const components = [{
+                        type: 1,
+                        components: [{
+                            type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
+                        }, {
+                            type: 2, style: 3, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: false
+                        }]
+                    }];
+                    if (flow.ticket_id) {
+                        const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
+                        if (ticket && ticket.placed_team_id) {
+                            const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
+                            if (team && team.roblox_group_id) {
+                                components.push({
+                                    type: 1,
+                                    components: [{
+                                        type: 2, style: 5, label: `Request to join ${team.name}`, url: `https://www.roblox.com/groups/${team.roblox_group_id}`
+                                    }]
+                                });
+                            }
+                        }
+                    }
                     await discordApi(`/channels/${flow.dm_channel_id}/messages/${flow.message_id}`, {
                         method: 'PATCH',
                         body: JSON.stringify({
                             content: `You're in the group. Click Continue to finish setting up your access.`,
-                            components: [{
-                                type: 1,
-                                components: [{
-                                    type: 2, style: 5, label: 'Join the Roblox group', url: `https://www.roblox.com/groups/${config.groupId}`
-                                }, {
-                                    type: 2, style: 3, label: 'Continue', custom_id: `onboarding_continue_${flow.id}`, disabled: false
-                                }]
-                            }]
+                            components
                         })
                     });
                 } catch (e) {

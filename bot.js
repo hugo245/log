@@ -97,6 +97,33 @@ async function setRobloxGroupRank(groupId, targetUserId, roleId) {
     }
 }
 
+// Team groups are invite-only, so joining doesn't grant membership right away - it just files a
+// join request that someone with permission has to approve. This looks for a pending request from
+// that user and accepts it via Open Cloud v2, so the bot can do that step instead of a human.
+// Returns false (not an error) if there's no pending request yet - they haven't asked to join.
+async function acceptGroupJoinRequest(groupId, targetUserId) {
+    if (!ROBLOX_GROUP_API_KEY) throw new Error('roblox_group_api_key_not_configured');
+
+    const lookupRes = await fetch(`https://apis.roblox.com/cloud/v2/groups/${groupId}/join-requests/${targetUserId}`, {
+        headers: { 'x-api-key': ROBLOX_GROUP_API_KEY }
+    });
+    if (lookupRes.status === 404) return false;
+    if (!lookupRes.ok) {
+        const body = await lookupRes.text().catch(() => '');
+        throw new Error(`roblox_join_request_lookup_failed_${lookupRes.status}: ${body}`);
+    }
+
+    const acceptRes = await fetch(`https://apis.roblox.com/cloud/v2/groups/${groupId}/join-requests/${targetUserId}:accept`, {
+        method: 'POST',
+        headers: { 'x-api-key': ROBLOX_GROUP_API_KEY }
+    });
+    if (!acceptRes.ok) {
+        const body = await acceptRes.text().catch(() => '');
+        throw new Error(`roblox_join_request_accept_failed_${acceptRes.status}: ${body}`);
+    }
+    return true;
+}
+
 async function grantAutoHireRole(robloxUserId, robloxUsername, roleId) {
     if (!roleId || !robloxUserId) return;
     const { error } = await supabase.from('user_role_assignments').insert({
@@ -328,9 +355,11 @@ client.on(Events.InteractionCreate, async interaction => {
                     await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
                     await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
 
-                    // Also rank them in their specific team's own Roblox group, if that team has
+                    // Also get them into their specific team's own Roblox group, if that team has
                     // one configured with a default role - being in the main group doesn't imply
-                    // membership in each team's separate community.
+                    // membership in each team's separate community. Team groups are invite-only,
+                    // so joining just files a request - accept it here, then rank them, retrying
+                    // the accept step is safe (a no-op) if it was already accepted.
                     let teamGroupNote = '';
                     if (flow.ticket_id) {
                         const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
@@ -338,10 +367,15 @@ client.on(Events.InteractionCreate, async interaction => {
                             const { data: team } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', ticket.placed_team_id).maybeSingle();
                             if (team && team.roblox_group_id && team.default_group_role_id) {
                                 try {
-                                    await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
+                                    const accepted = await acceptGroupJoinRequest(team.roblox_group_id, flow.roblox_user_id);
+                                    if (!accepted) {
+                                        teamGroupNote = ` You still need to request to join ${team.name}'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Get Ranked again to finish that part.`;
+                                    } else {
+                                        await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
+                                    }
                                 } catch (teamErr) {
-                                    console.error(`onboarding_getranked: failed to rank ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
-                                    teamGroupNote = ` Could not rank you in ${team.name}'s group automatically, ping a lead to sort that out.`;
+                                    console.error(`onboarding_getranked: failed to process ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
+                                    teamGroupNote = ` Could not get you into ${team.name}'s group automatically, ping a lead to sort that out.`;
                                 }
                             }
                         }
@@ -351,7 +385,10 @@ client.on(Events.InteractionCreate, async interaction => {
 
                     await interaction.editReply({
                         content: `You're all set, ${flow.roblox_username}. Welcome to the team.${teamGroupNote}`,
-                        components: []
+                        components: teamGroupNote ? [{
+                            type: 1,
+                            components: [{ type: 2, style: 3, label: 'Get Ranked', custom_id: `onboarding_getranked_${flowId}` }]
+                        }] : []
                     });
                 } catch (e) {
                     console.error(`onboarding_getranked: failed for flow ${flowId}:`, e.message);
