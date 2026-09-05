@@ -223,19 +223,31 @@ async function requireLeadRole(interaction) {
     return true;
 }
 
-function ticketEmbed(ticket) {
+async function ticketEmbed(ticket) {
+    const fields = [
+        { name: 'Status', value: ticket.status, inline: true },
+        { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
+        { name: 'Position', value: ticket.position || 'Not specified', inline: true },
+        { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
+        { name: 'Assigned to', value: ticket.assigned_to_username || 'Unassigned', inline: true }
+    ];
+
+    if (ticket.placed_team_id) {
+        const { data: team } = await supabase.from('teams').select('name, roblox_group_url, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
+        const groupUrl = team ? (team.roblox_group_url || (team.roblox_group_id ? `https://www.roblox.com/groups/${team.roblox_group_id}` : null)) : null;
+        const teamName = (team && team.name) || ticket.placed_team_name || 'Not set';
+        fields.push({ name: 'Team group', value: groupUrl ? `[${teamName}](${groupUrl})` : teamName, inline: true });
+    }
+
+    fields.push(
+        { name: 'Experience', value: (ticket.experience || 'N/A').slice(0, 500) },
+        { name: 'Why they want to join', value: (ticket.why_join || 'N/A').slice(0, 500) }
+    );
+
     return new EmbedBuilder()
         .setTitle(`Application: ${ticket.roblox_username}`)
         .setColor(statusColor(ticket.status))
-        .addFields(
-            { name: 'Status', value: ticket.status, inline: true },
-            { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
-            { name: 'Position', value: ticket.position || 'Not specified', inline: true },
-            { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
-            { name: 'Assigned to', value: ticket.assigned_to_username || 'Unassigned', inline: true },
-            { name: 'Experience', value: (ticket.experience || 'N/A').slice(0, 500) },
-            { name: 'Why they want to join', value: (ticket.why_join || 'N/A').slice(0, 500) }
-        )
+        .addFields(fields)
         .setFooter({ text: `Ticket ${ticket.id}` })
         .setTimestamp(new Date(ticket.created_at));
 }
@@ -273,7 +285,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const id = interaction.options.getString('id');
                 const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
                 if (error || !ticket) { await interaction.editReply('No ticket found with that id.'); return; }
-                await interaction.editReply({ embeds: [ticketEmbed(ticket)] });
+                await interaction.editReply({ embeds: [await ticketEmbed(ticket)] });
                 return;
             }
         }
@@ -316,10 +328,29 @@ client.on(Events.InteractionCreate, async interaction => {
                     await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
                     await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
 
+                    // Also rank them in their specific team's own Roblox group, if that team has
+                    // one configured with a default role - being in the main group doesn't imply
+                    // membership in each team's separate community.
+                    let teamGroupNote = '';
+                    if (flow.ticket_id) {
+                        const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
+                        if (ticket && ticket.placed_team_id) {
+                            const { data: team } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', ticket.placed_team_id).maybeSingle();
+                            if (team && team.roblox_group_id && team.default_group_role_id) {
+                                try {
+                                    await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
+                                } catch (teamErr) {
+                                    console.error(`onboarding_getranked: failed to rank ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
+                                    teamGroupNote = ` Could not rank you in ${team.name}'s group automatically, ping a lead to sort that out.`;
+                                }
+                            }
+                        }
+                    }
+
                     await supabase.from('recruit_onboarding_flows').update({ step: 'done', updated_at: new Date().toISOString() }).eq('id', flowId);
 
                     await interaction.editReply({
-                        content: `You're all set, ${flow.roblox_username}. Welcome to the team.`,
+                        content: `You're all set, ${flow.roblox_username}. Welcome to the team.${teamGroupNote}`,
                         components: []
                     });
                 } catch (e) {

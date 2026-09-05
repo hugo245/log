@@ -373,20 +373,33 @@ function discordChannelUrl(channelId) {
     return `https://discord.com/channels/${DISCORD_GUILD_ID}/${channelId}`;
 }
 
-function ticketEmbedPayload(ticket) {
+async function ticketEmbedPayload(ticket) {
     const statusColors = { pending: 0xD8AC50, in_review: 0x7C76E8, accepted: 0x178A4C, team_selection: 0x3730D9, signed_off: 0x9D6BE0, finalised: 0x2B6CB0, rejected: 0xB3311C, withdrawn: 0x8A93A3 };
+
+    const fields = [
+        { name: 'Status', value: ticket.status, inline: true },
+        { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
+        { name: 'Position', value: ticket.position || 'Not specified', inline: true },
+        { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
+        { name: 'Assigned to', value: ticket.assigned_to_username || 'Unassigned', inline: true }
+    ];
+
+    if (ticket.placed_team_id) {
+        const { data: team } = await supabase.from('teams').select('name, roblox_group_url, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
+        const groupUrl = team ? (team.roblox_group_url || (team.roblox_group_id ? `https://www.roblox.com/groups/${team.roblox_group_id}` : null)) : null;
+        const teamName = (team && team.name) || ticket.placed_team_name || 'Not set';
+        fields.push({ name: 'Team group', value: groupUrl ? `[${teamName}](${groupUrl})` : teamName, inline: true });
+    }
+
+    fields.push(
+        { name: 'Why they want to join', value: (ticket.why_join || '').slice(0, 500) || 'N/A' },
+        { name: 'Experience', value: (ticket.experience || '').slice(0, 500) || 'N/A' }
+    );
+
     return {
         title: `Application: ${ticket.roblox_username}`,
         color: statusColors[ticket.status] || 0x3730D9,
-        fields: [
-            { name: 'Status', value: ticket.status, inline: true },
-            { name: 'Discord', value: `<@${ticket.discord_user_id}>`, inline: true },
-            { name: 'Position', value: ticket.position || 'Not specified', inline: true },
-            { name: 'Referred by', value: ticket.referred_by_username || 'None', inline: true },
-            { name: 'Assigned to', value: ticket.assigned_to_username || 'Unassigned', inline: true },
-            { name: 'Why they want to join', value: (ticket.why_join || '').slice(0, 500) || 'N/A' },
-            { name: 'Experience', value: (ticket.experience || '').slice(0, 500) || 'N/A' }
-        ],
+        fields,
         footer: { text: `Ticket ${ticket.id}` },
         timestamp: new Date().toISOString()
     };
@@ -468,11 +481,12 @@ async function createDiscordTicketChannel(ticket, positionRoleId) {
         // general HR role(s) - keeps the noise down to whichever team actually owns that position.
         // Falls back to the general HR role(s) when the position has no role configured.
         const pingRoleIds = positionRoleId ? [positionRoleId] : DISCORD_HR_ROLE_IDS;
+        const embed = await ticketEmbedPayload(ticket);
         const message = await discordApi(`/channels/${channel.id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
                 content: `${pingRoleIds.map(id => `<@&${id}>`).join(' ')} <@${ticket.discord_user_id}> - a new application ticket was opened here. Chat here about the application. Manage this application (accept, reject, assign, etc.) from the dashboard on the website.`,
-                embeds: [ticketEmbedPayload(ticket)]
+                embeds: [embed]
             })
         });
 
@@ -642,9 +656,10 @@ async function notifyDiscordAssignment(ticket, assigneeUserId, assigneeUsername,
 async function refreshDiscordTicketPanel(ticket) {
     if (!DISCORD_BOT_TOKEN || !ticket.discord_channel_id || !ticket.ticket_message_id) return;
     try {
+        const embed = await ticketEmbedPayload(ticket);
         await discordApi(`/channels/${ticket.discord_channel_id}/messages/${ticket.ticket_message_id}`, {
             method: 'PATCH',
-            body: JSON.stringify({ embeds: [ticketEmbedPayload(ticket)] })
+            body: JSON.stringify({ embeds: [embed] })
         });
     } catch (e) {
         console.error(`refreshDiscordTicketPanel: failed to update panel for ticket ${ticket.id}:`, e.message);
@@ -1088,6 +1103,7 @@ async function startOnboardingFlow(ticket) {
             roblox_username: ticket.roblox_username,
             discord_user_id: ticket.discord_user_id,
             dm_channel_id: dmChannel.id,
+            ticket_id: ticket.id,
             step: 'awaiting_group_join'
         }).select('id').maybeSingle();
         if (flowErr || !flow) { console.error('startOnboardingFlow: could not create flow row:', flowErr && flowErr.message); return; }
@@ -3523,6 +3539,7 @@ app.post('/hr-data', async (req, res) => {
             discord_url: payload.discordUrl ? String(payload.discordUrl).trim() : null,
             roblox_group_url: payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null,
             roblox_group_id: payload.robloxGroupId ? Number(payload.robloxGroupId) : null,
+            default_group_role_id: payload.defaultGroupRoleId ? Number(payload.defaultGroupRoleId) : null,
             info: payload.info ? String(payload.info) : null
         }).select().maybeSingle();
         if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A team with that name already exists.' }); return; }
@@ -3545,6 +3562,7 @@ app.post('/hr-data', async (req, res) => {
         if (payload.discordUrl !== undefined) update.discord_url = payload.discordUrl ? String(payload.discordUrl).trim() : null;
         if (payload.robloxGroupUrl !== undefined) update.roblox_group_url = payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null;
         if (payload.robloxGroupId !== undefined) update.roblox_group_id = payload.robloxGroupId ? Number(payload.robloxGroupId) : null;
+        if (payload.defaultGroupRoleId !== undefined) update.default_group_role_id = payload.defaultGroupRoleId ? Number(payload.defaultGroupRoleId) : null;
         if (payload.info !== undefined) update.info = payload.info ? String(payload.info) : null;
         const { error } = await supabase.from('teams').update(update).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }

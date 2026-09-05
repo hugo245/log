@@ -7406,6 +7406,10 @@
               </div>
               <div class="field"><label>Discord invite URL</label><input type="text" class="editTeamDiscord" data-team-id="${esc(t.id)}" value="${esc(t.discord_url || '')}"></div>
               <div class="field"><label>Roblox group URL</label><input type="text" class="editTeamGroupUrl" data-team-id="${esc(t.id)}" value="${esc(t.roblox_group_url || '')}"></div>
+              <div class="row2">
+                <div class="field"><label>Roblox group ID</label><input type="number" class="editTeamGroupId" data-team-id="${esc(t.id)}" placeholder="e.g. 1090702452" value="${t.roblox_group_id != null ? esc(t.roblox_group_id) : ''}"></div>
+                <div class="field"><label>Default group role ID <span class="hint">(assigned when someone joins this team)</span></label><input type="number" class="editTeamGroupRoleId" data-team-id="${esc(t.id)}" placeholder="e.g. 5" value="${t.default_group_role_id != null ? esc(t.default_group_role_id) : ''}"></div>
+              </div>
               <div class="field"><label>Custom info <span class="hint">(shown to them during onboarding)</span></label><textarea class="editTeamInfo" data-team-id="${esc(t.id)}">${esc(t.info || '')}</textarea></div>
               <div class="field">
                 <label>Skillsets on this team</label>
@@ -7427,6 +7431,10 @@
             </div>
             <div class="field"><label>Discord invite URL</label><input type="text" id="newTeamDiscord" placeholder="https://discord.gg/..."></div>
             <div class="field"><label>Roblox group URL</label><input type="text" id="newTeamGroupUrl" placeholder="https://www.roblox.com/groups/..."></div>
+            <div class="row2">
+              <div class="field"><label>Roblox group ID</label><input type="number" id="newTeamGroupId" placeholder="e.g. 1090702452"></div>
+              <div class="field"><label>Default group role ID <span class="hint">(assigned when someone joins this team)</span></label><input type="number" id="newTeamGroupRoleId" placeholder="e.g. 5"></div>
+            </div>
             <div class="field"><label>Custom info <span class="hint">(shown to them during onboarding)</span></label><textarea id="newTeamInfo" placeholder="Anything this team should know when they join"></textarea></div>
             <div class="field">
               <label>Skillsets on this team <span class="hint">(optional)</span></label>
@@ -7615,14 +7623,14 @@
       <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
         <span class="eyebrow">Recruitment</span>
         <h1>Post-finalise Discord onboarding</h1>
-        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically.</p>
+        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. The actual ranking step needs a Roblox Open Cloud API key set as the ROBLOX_GROUP_API_KEY environment variable on the bot - create it under your own account in the Roblox Creator Dashboard (group-owned keys are deprecated), then authorize it for the target group with group read/write access. Without it, the DM flow still runs but ranking will fail and ask them to see a lead instead.</p>
       </div>
       <div class="panel" style="max-width:640px;margin-bottom:20px;">
         <div class="preview-label">Roblox group API key</div>
         ${robloxGroupApiKeyStatusLoading ? `<div class="dash-loading">Checking...</div>` : robloxGroupApiKeyStatus.configured ? `
-          <p style="color:var(--ok-text);font-size:13px;">ROBLOX_GROUP_API_KEY is set.</p>
+          <p style="color:var(--ok-text);font-size:13px;">ROBLOX_GROUP_API_KEY is set - auto-ranking is ready to go.</p>
         ` : `
-          <p style="color:var(--warn-text);font-size:13px;">ROBLOX_GROUP_API_KEY is not set on the bot yet.</p>
+          <p style="color:var(--warn-text);font-size:13px;">ROBLOX_GROUP_API_KEY is not set on the bot yet - the "Get Ranked" step will fail until it is.</p>
         `}
       </div>
       <div class="panel" style="max-width:640px;">
@@ -8068,12 +8076,14 @@
             const color = document.getElementById('newTeamColor').value.trim();
             const discordUrl = document.getElementById('newTeamDiscord').value.trim();
             const robloxGroupUrl = document.getElementById('newTeamGroupUrl').value.trim();
+            const robloxGroupId = document.getElementById('newTeamGroupId').value.trim() || null;
+            const defaultGroupRoleId = document.getElementById('newTeamGroupRoleId').value.trim() || null;
             const info = document.getElementById('newTeamInfo').value.trim();
             const skillsetIds = Array.from(document.querySelectorAll('.newTeamSkillset:checked')).map(el => Number(el.value));
             if (!name) { addTeamError = 'Enter a team name.'; paint(); return; }
             addingTeam = true; addTeamError = null; paint();
             try {
-              await addTeam({ name, color, discordUrl, robloxGroupUrl, info, skillsetIds });
+              await addTeam({ name, color, discordUrl, robloxGroupUrl, robloxGroupId, defaultGroupRoleId, info, skillsetIds });
               addingTeam = false;
               await loadTeamsData();
             } catch (err) {
@@ -8096,12 +8106,14 @@
             const color = document.querySelector(`.editTeamColor[data-team-id="${id}"]`).value.trim();
             const discordUrl = document.querySelector(`.editTeamDiscord[data-team-id="${id}"]`).value.trim();
             const robloxGroupUrl = document.querySelector(`.editTeamGroupUrl[data-team-id="${id}"]`).value.trim();
+            const robloxGroupId = document.querySelector(`.editTeamGroupId[data-team-id="${id}"]`).value.trim() || null;
+            const defaultGroupRoleId = document.querySelector(`.editTeamGroupRoleId[data-team-id="${id}"]`).value.trim() || null;
             const info = document.querySelector(`.editTeamInfo[data-team-id="${id}"]`).value;
             const skillsetIds = Array.from(document.querySelectorAll(`.editTeamSkillset[data-team-id="${id}"]:checked`)).map(x => Number(x.value));
             if (!name) { editTeamError = 'Enter a team name.'; paint(); return; }
             savingTeamEdit = true; editTeamError = null; paint();
             try {
-              await updateTeam(id, { name, color, discordUrl, robloxGroupUrl, info, skillsetIds });
+              await updateTeam(id, { name, color, discordUrl, robloxGroupUrl, robloxGroupId, defaultGroupRoleId, info, skillsetIds });
               savingTeamEdit = false;
               editingTeamId = null;
               await loadTeamsData();
