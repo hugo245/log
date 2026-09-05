@@ -129,7 +129,11 @@ async function acceptGroupJoinRequest(groupId, targetUserId) {
     const requestPath = match.path || `groups/${groupId}/join-requests/${targetUserId}`;
     const acceptRes = await fetch(`https://apis.roblox.com/cloud/v2/${requestPath}:accept`, {
         method: 'POST',
-        headers: { 'x-api-key': ROBLOX_GROUP_API_KEY }
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ROBLOX_GROUP_API_KEY
+        },
+        body: '{}'
     });
     if (!acceptRes.ok) {
         const body = await acceptRes.text().catch(() => '');
