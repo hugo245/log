@@ -80,8 +80,26 @@ async function getOnboardingGroupConfig() {
 // static, user-owned API key (group-owned keys are deprecated - create this under your own
 // account in the Creator Dashboard and authorize it for the target group with group read/write
 // access) instead of a session cookie or an OAuth token that needs refreshing.
+// Checks someone's current role in a group via Roblox's public (unauthenticated) groups API - used
+// to skip re-sending a rank change that's already in effect, since Roblox rejects a redundant
+// "set to the role you're already at" PATCH as an invalid request rather than a no-op.
+async function getCurrentGroupRoleId(groupId, targetUserId) {
+    try {
+        const res = await fetch(`https://groups.roblox.com/v1/users/${targetUserId}/groups/roles`);
+        if (!res.ok) return null;
+        const json = await res.json().catch(() => null);
+        const membership = (json && json.data || []).find(g => g.group && g.group.id === Number(groupId));
+        return membership ? membership.role.id : null;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function setRobloxGroupRank(groupId, targetUserId, roleId) {
     if (!ROBLOX_GROUP_API_KEY) throw new Error('roblox_group_api_key_not_configured');
+
+    const currentRoleId = await getCurrentGroupRoleId(groupId, targetUserId);
+    if (currentRoleId != null && Number(currentRoleId) === Number(roleId)) return;
 
     const res = await fetch(`https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships/${targetUserId}`, {
         method: 'PATCH',
