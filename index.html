@@ -3427,8 +3427,8 @@
       await callHrData('delete_role', { id });
     }
 
-    async function listRoleAssignments() {
-      const json = await callHrData('list_role_assignments');
+    async function listRoleAssignments(robloxUserId) {
+      const json = await callHrData('list_role_assignments', robloxUserId != null ? { robloxUserId } : {});
       return json.data || [];
     }
 
@@ -8800,6 +8800,13 @@
       let addSkillsetsMsg = null;
       let removeSkillsetBusyId = null;
 
+      let allRoles = [];
+      let userRoleAssignments = [];
+      let userRoleAssignmentsLoading = false;
+      let addRoleAssignmentBusy = false;
+      let addRoleAssignmentMsg = null;
+      let removeRoleAssignmentBusyId = null;
+
       let warnings = [];
       let bannedInfo = null;
       let warnBusy = false;
@@ -8986,17 +8993,21 @@
 
           <div class="modal-section">
             <div class="modal-section-title">General skillsets</div>
-            <p class="sub" style="margin:0 0 12px;">Independent of any specific team - lets whoever's submitting a payment request pick which skill a task used, if this person has more than one.</p>
+            <p class="sub" style="margin:0 0 12px;">Independent of any specific team - lets whoever's submitting a payment request pick which skill a task used, if this person has more than one. Skillsets already shown above from a team assignment aren't repeated here.</p>
             ${addSkillsetsMsg ? `<div class="${addSkillsetsMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(addSkillsetsMsg.text)}</span></div>` : ''}
-            ${currentSkillsetsLoading ? `<div class="dash-loading">Loading skillsets...</div>` : currentSkillsets.length === 0 ? `<div class="empty-note" style="margin-bottom:12px;">No skillsets assigned yet.</div>` : `
+            ${(() => {
+              const teamDerivedIds = new Set(currentAssignments.map(a => a.skillset && String(a.skillset.id)).filter(Boolean));
+              const generalOnlySkillsets = currentSkillsets.filter(sk => !teamDerivedIds.has(String(sk.id)));
+              return currentSkillsetsLoading ? `<div class="dash-loading">Loading skillsets...</div>` : generalOnlySkillsets.length === 0 ? `<div class="empty-note" style="margin-bottom:12px;">No general skillsets assigned yet.</div>` : `
               <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
-                ${currentSkillsets.map(sk => `
+                ${generalOnlySkillsets.map(sk => `
                   <span class="game-badge" style="background:${sk.color || 'var(--accent)'};display:inline-flex;align-items:center;gap:6px;">
                     ${esc(sk.name)}
                     <button type="button" data-remove-skillset="${esc(sk.id)}" ${removeSkillsetBusyId === sk.id ? 'disabled' : ''} style="background:none;border:none;color:inherit;cursor:pointer;font-weight:700;padding:0;">&times;</button>
                   </span>`).join('')}
               </div>
-            `}
+            `;
+            })()}
             <div class="field">
               <label>Add skillsets <span class="hint">(select one or more)</span></label>
               <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
@@ -9007,6 +9018,32 @@
             </div>
             <button type="button" class="btn btn-primary btn-sm" id="addSkillsetsBtn" ${addSkillsetsBusy || !s.robloxUserId ? 'disabled' : ''}>${addSkillsetsBusy ? 'Adding...' : 'Add selected skillsets'}</button>
           </div>
+
+          ${hasPermission('roles.manage') ? `
+          <div class="modal-section">
+            <div class="modal-section-title">Roles</div>
+            <p class="sub" style="margin:0 0 12px;">Assigned directly to this account, on top of any role they qualify for through a Roblox group/rank. You can only grant or remove roles below your own hierarchy.</p>
+            ${addRoleAssignmentMsg ? `<div class="${addRoleAssignmentMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(addRoleAssignmentMsg.text)}</span></div>` : ''}
+            ${userRoleAssignmentsLoading ? `<div class="dash-loading">Loading roles...</div>` : userRoleAssignments.length === 0 ? `<div class="empty-note" style="margin-bottom:12px;">No roles assigned directly to this account.</div>` : `
+              <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+                ${userRoleAssignments.map(ra => `
+                  <div class="role-row" style="margin:0;">
+                    <div class="role-row-top">
+                      <strong>${esc(ra.roles ? ra.roles.name : 'Unknown role')}</strong>
+                      <button type="button" class="btn btn-ghost btn-sm" data-remove-role-assignment="${esc(ra.id)}" ${removeRoleAssignmentBusyId === ra.id ? 'disabled' : ''}>${removeRoleAssignmentBusyId === ra.id ? 'Removing...' : 'Remove'}</button>
+                    </div>
+                  </div>`).join('')}
+              </div>
+            `}
+            <div class="field">
+              <label>Add role</label>
+              <select id="cfgAddRole">
+                <option value="">Select a role</option>
+                ${allRoles.filter(r => !userRoleAssignments.some(ra => String(ra.role_id) === String(r.id))).map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('')}
+              </select>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="addRoleAssignmentBtn" ${addRoleAssignmentBusy || !s.robloxUserId ? 'disabled' : ''}>${addRoleAssignmentBusy ? 'Adding...' : 'Add role'}</button>
+          </div>` : ''}
         </div>
       </div>
     </div>`;
@@ -9220,6 +9257,9 @@
         currentSkillsetsLoading = true;
         skillsetsCheckedIds = new Set();
         addSkillsetsMsg = null;
+        userRoleAssignments = [];
+        userRoleAssignmentsLoading = true;
+        addRoleAssignmentMsg = null;
         paintModal();
         try {
           const [t, sk] = await Promise.all([listTeams(), listSkillsets()]);
@@ -9228,6 +9268,11 @@
         } catch (e) {
           teamsList = [];
           skillsetsList = [];
+        }
+        try {
+          allRoles = hasPermission('roles.manage') ? await listRoles() : [];
+        } catch (e) {
+          allRoles = [];
         }
         try {
           currentAssignments = activeProfile.robloxUserId ? await listUserTeamAssignments(activeProfile.robloxUserId) : [];
@@ -9241,6 +9286,12 @@
           currentSkillsets = [];
         }
         currentSkillsetsLoading = false;
+        try {
+          userRoleAssignments = (activeProfile.robloxUserId && hasPermission('roles.manage')) ? await listRoleAssignments(activeProfile.robloxUserId) : [];
+        } catch (e) {
+          userRoleAssignments = [];
+        }
+        userRoleAssignmentsLoading = false;
         paintModal();
       }
 
@@ -9451,6 +9502,39 @@
           } catch (err) {
             removeSkillsetBusyId = null;
             addSkillsetsMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not remove that skillset.' };
+            paintModal();
+          }
+        }));
+
+        const addRoleAssignmentBtn = document.getElementById('addRoleAssignmentBtn');
+        if (addRoleAssignmentBtn) addRoleAssignmentBtn.addEventListener('click', async () => {
+          const roleId = document.getElementById('cfgAddRole').value;
+          if (!roleId) { addRoleAssignmentMsg = { ok: false, text: 'Select a role to add.' }; paintModal(); return; }
+          addRoleAssignmentBusy = true; addRoleAssignmentMsg = null; paintModal();
+          try {
+            await addRoleAssignment(roleId, activeProfile.robloxUserId);
+            userRoleAssignments = await listRoleAssignments(activeProfile.robloxUserId);
+            addRoleAssignmentBusy = false;
+            addRoleAssignmentMsg = { ok: true, text: 'Role added.' };
+            paintModal();
+          } catch (err) {
+            addRoleAssignmentBusy = false;
+            addRoleAssignmentMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not add that role.' };
+            paintModal();
+          }
+        });
+
+        document.querySelectorAll('[data-remove-role-assignment]').forEach(el => el.addEventListener('click', async () => {
+          const id = el.dataset.removeRoleAssignment;
+          removeRoleAssignmentBusyId = id; addRoleAssignmentMsg = null; paintModal();
+          try {
+            await deleteRoleAssignment(id);
+            userRoleAssignments = await listRoleAssignments(activeProfile.robloxUserId);
+            removeRoleAssignmentBusyId = null;
+            paintModal();
+          } catch (err) {
+            removeRoleAssignmentBusyId = null;
+            addRoleAssignmentMsg = { ok: false, text: (err && err.message) ? err.message : 'Could not remove that role.' };
             paintModal();
           }
         }));

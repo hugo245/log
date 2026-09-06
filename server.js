@@ -3353,10 +3353,14 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'list_role_assignments') {
         if (!requirePermission(res, session, 'roles.manage')) return;
-        const { data, error } = await supabase
+        let query = supabase
             .from('user_role_assignments')
             .select('id, roblox_user_id, role_id, roblox_username, roles(name, hierarchy)')
             .order('created_at', { ascending: false });
+        if (payload.robloxUserId != null && payload.robloxUserId !== '') {
+            query = query.eq('roblox_user_id', Number(payload.robloxUserId));
+        }
+        const { data, error } = await query;
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true, data });
         return;
