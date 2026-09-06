@@ -210,6 +210,61 @@ async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skil
     return { ok: true, mode: 'inserted' };
 }
 
+// Grants the actual Tool access (team/skillset assignment, plus role if the link had one) for an
+// invite/onboarding-link flow, once they've made it through the Discord-gated group-join steps
+// below. Mirrors what server.js used to do instantly on claim, but deferred until now.
+async function grantInviteLinkAccess(flow) {
+    if (!flow.link_token) return;
+
+    const { data: link } = await supabase.from('onboarding_links').select('*').eq('token', flow.link_token).maybeSingle();
+    const teamId = flow.team_id ?? (link && link.team_id) ?? null;
+    const skillsetId = flow.skillset_id ?? (link && link.skillset_id) ?? null;
+    const roleId = flow.role_id ?? (link && link.role_id) ?? null;
+    if (!teamId) return;
+
+    const result = await upsertUserAssignment({
+        robloxUserId: flow.roblox_user_id,
+        robloxUsername: flow.roblox_username,
+        teamId,
+        skillsetId
+    });
+    if (!result.ok) console.error(`grantInviteLinkAccess: failed to assign ${flow.roblox_username} to team ${teamId}:`, result.error);
+
+    if (link) {
+        await supabase.from('user_assignments')
+            .update({ source_link_token: flow.link_token })
+            .eq('roblox_user_id', flow.roblox_user_id)
+            .eq('team_id', teamId);
+    }
+
+    if (!roleId) return;
+    const { data: role } = await supabase.from('roles').select('*').eq('id', roleId).maybeSingle();
+    if (!role) return;
+
+    let meetsRankSafeguard = true;
+    if (role.link_only && role.min_rank != null && role.roblox_group_id != null) {
+        try {
+            const res = await fetch(`https://groups.roblox.com/v1/users/${flow.roblox_user_id}/groups/roles`);
+            const json = res.ok ? await res.json().catch(() => null) : null;
+            const membership = (json && json.data || []).find(g => g.group && g.group.id === Number(role.roblox_group_id));
+            const rank = membership ? membership.role.rank : null;
+            meetsRankSafeguard = rank != null && rank === role.min_rank;
+        } catch (e) {
+            meetsRankSafeguard = false;
+        }
+    }
+    if (!meetsRankSafeguard) return;
+
+    const { error: roleAssignErr } = await supabase.from('user_role_assignments').insert({
+        roblox_user_id: flow.roblox_user_id,
+        role_id: roleId,
+        roblox_username: flow.roblox_username
+    });
+    if (roleAssignErr && roleAssignErr.code !== '23505') {
+        console.error(`grantInviteLinkAccess: failed to assign role ${roleId} to ${flow.roblox_username}:`, roleAssignErr.message);
+    }
+}
+
 const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let nextReconcileAt = null;
 const TICKET_AUTO_DELETE_DELAY_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -380,13 +435,17 @@ client.on(Events.InteractionCreate, async interaction => {
 
                     // Look up the team (if any) up front so we know, before ranking anyone,
                     // whether the team's group is actually the same group as the main one.
+                    // team_id lives directly on the flow row for both ticket-based flows and
+                    // invite-link-based flows - fall back to the ticket lookup only for older rows.
                     let team = null;
-                    if (flow.ticket_id) {
+                    let teamId = flow.team_id;
+                    if (teamId == null && flow.ticket_id) {
                         const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
-                        if (ticket && ticket.placed_team_id) {
-                            const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', ticket.placed_team_id).maybeSingle();
-                            if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id) team = teamRow;
-                        }
+                        teamId = ticket ? ticket.placed_team_id : null;
+                    }
+                    if (teamId) {
+                        const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', teamId).maybeSingle();
+                        if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id) team = teamRow;
                     }
                     const sameAsMainGroup = !!team && config.groupId != null && Number(team.roblox_group_id) === Number(config.groupId);
 
@@ -436,8 +495,22 @@ client.on(Events.InteractionCreate, async interaction => {
                     const stepAfter = teamGroupNote ? 'main_ranked_awaiting_team' : 'done';
                     await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
 
+                    // Invite-link flows (as opposed to recruitment-ticket flows, where Tool access
+                    // was already granted back when the ticket was finalised) only get their actual
+                    // team/skillset/role granted here, once both group-join steps are fully done.
+                    let doneMessage = `You're all set, ${flow.roblox_username}. Welcome to the team.`;
+                    if (stepAfter === 'done' && flow.link_token) {
+                        try {
+                            await grantInviteLinkAccess(flow);
+                            doneMessage = `You're all set, ${flow.roblox_username}. Your access to the Tool is now active - head back to the invite page and refresh if it's still showing "waiting".`;
+                        } catch (e) {
+                            console.error(`onboarding_continue: grantInviteLinkAccess failed for flow ${flowId}:`, e.message);
+                            doneMessage = `You're ranked up in both groups, but something went wrong granting your Tool access automatically. Please ping a lead or admin to finish this manually.`;
+                        }
+                    }
+
                     await interaction.editReply({
-                        content: teamGroupNote || `You're all set, ${flow.roblox_username}. Welcome to the team.`,
+                        content: teamGroupNote || doneMessage,
                         components: teamGroupNote ? [{
                             type: 1,
                             components: [{ type: 2, style: 3, label: 'Continue', custom_id: `onboarding_continue_${flowId}` }]

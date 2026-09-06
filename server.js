@@ -1087,32 +1087,41 @@ async function getOnboardingGroupConfig() {
 // message with a Continue button that starts out disabled. The scheduled sweep below enables it
 // once they've actually joined; bot.js handles the button clicks themselves (Continue, then Get
 // Ranked) since those need a live gateway connection to respond to.
-async function startOnboardingFlow(ticket) {
+//
+// Generalized so it can be kicked off either from a finalised recruitment ticket, or from someone
+// claiming an invite/onboarding link - both cases end with the same "join main group, request to
+// join team group" Discord DM flow. Exactly one of ticketId/linkToken should be set so bot.js and
+// runOnboardingJoinCheck know which record to look at and (for links) what to grant once done.
+async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discordUserId, ticketId = null, linkToken = null, teamId = null, skillsetId = null, roleId = null }) {
     try {
         const config = await getOnboardingGroupConfig();
-        if (!config.groupId || !DISCORD_BOT_TOKEN || !ticket.discord_user_id) return;
+        if (!config.groupId || !DISCORD_BOT_TOKEN || !discordUserId) return null;
 
         const dmChannel = await discordApi('/users/@me/channels', {
             method: 'POST',
-            body: JSON.stringify({ recipient_id: ticket.discord_user_id })
+            body: JSON.stringify({ recipient_id: discordUserId })
         });
-        if (!dmChannel || !dmChannel.id) return;
+        if (!dmChannel || !dmChannel.id) return null;
 
         const { data: flow, error: flowErr } = await supabase.from('recruit_onboarding_flows').insert({
-            roblox_user_id: ticket.roblox_user_id,
-            roblox_username: ticket.roblox_username,
-            discord_user_id: ticket.discord_user_id,
+            roblox_user_id: robloxUserId,
+            roblox_username: robloxUsername,
+            discord_user_id: discordUserId,
             dm_channel_id: dmChannel.id,
-            ticket_id: ticket.id,
+            ticket_id: ticketId,
+            link_token: linkToken,
+            team_id: teamId,
+            skillset_id: skillsetId,
+            role_id: roleId,
             step: 'awaiting_group_join',
             last_prompt_state: 'neither'
         }).select('id').maybeSingle();
-        if (flowErr || !flow) { console.error('startOnboardingFlow: could not create flow row:', flowErr && flowErr.message); return; }
+        if (flowErr || !flow) { console.error('startAccessOnboardingFlow: could not create flow row:', flowErr && flowErr.message); return null; }
 
         let teamGroupLine = '';
         let teamJoinRow = null;
-        if (ticket.placed_team_id) {
-            const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
+        if (teamId) {
+            const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', teamId).maybeSingle();
             // If the team's own group IS the main onboarding group, there's nothing separate to
             // join or request - joining the main group covers it, and bot.js's continue handler
             // ranks them straight onto the team's configured role instead of the default main rank.
@@ -1140,16 +1149,30 @@ async function startOnboardingFlow(ticket) {
         const message = await discordApi(`/channels/${dmChannel.id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `Welcome to the team, ${ticket.roblox_username}. To finish setting up your access, you need to join the PlayVerse Roblox group first.${teamGroupLine}`,
+                content: `Welcome to the team, ${robloxUsername}. To finish setting up your access, you need to join the PlayVerse Roblox group first.${teamGroupLine}`,
                 components
             })
         });
         if (message && message.id) {
             await supabase.from('recruit_onboarding_flows').update({ message_id: message.id }).eq('id', flow.id);
         }
+        return flow;
     } catch (e) {
-        console.error(`startOnboardingFlow failed for ticket ${ticket.id}:`, e.message);
+        console.error(`startAccessOnboardingFlow failed:`, e.message);
+        return null;
     }
+}
+
+// Thin wrapper kept for the recruitment-ticket call site: pulls the team id straight off the
+// finalised ticket and hands off to the generalized flow starter above.
+async function startOnboardingFlow(ticket) {
+    return startAccessOnboardingFlow({
+        robloxUserId: ticket.roblox_user_id,
+        robloxUsername: ticket.roblox_username,
+        discordUserId: ticket.discord_user_id,
+        ticketId: ticket.id,
+        teamId: ticket.placed_team_id || null
+    });
 }
 
 // Checks whether someone has either already joined a group, or at least filed a join request for
@@ -1196,15 +1219,20 @@ async function runOnboardingJoinCheck() {
             const mainJoined = groupRoles.some(gr => gr.group && gr.group.id === config.groupId);
 
             let team = null;
-            if (flow.ticket_id) {
+            // team_id is stored directly on the flow row for both ticket-based and invite-link-based
+            // flows now - fall back to looking it up via the ticket for older rows created before
+            // that column existed.
+            let teamId = flow.team_id;
+            if (teamId == null && flow.ticket_id) {
                 const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
-                if (ticket && ticket.placed_team_id) {
-                    const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', ticket.placed_team_id).maybeSingle();
-                    // Skip treating this as a separate group to wait on when it's the same group
-                    // as the main one - joining the main group already satisfies it, and there's
-                    // no separate join-request step for bot.js to accept later.
-                    if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id && Number(teamRow.roblox_group_id) !== Number(config.groupId)) team = teamRow;
-                }
+                teamId = ticket ? ticket.placed_team_id : null;
+            }
+            if (teamId) {
+                const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', teamId).maybeSingle();
+                // Skip treating this as a separate group to wait on when it's the same group
+                // as the main one - joining the main group already satisfies it, and there's
+                // no separate join-request step for bot.js to accept later.
+                if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id && Number(teamRow.roblox_group_id) !== Number(config.groupId)) team = teamRow;
             }
             const teamRequested = team ? await hasJoinedOrRequestedGroup(team.roblox_group_id, flow.roblox_user_id) : true;
 
@@ -1679,40 +1707,12 @@ async function upsertUserAssignmentRecord({ robloxUserId, robloxUsername, teamId
     return { ok: true, mode: 'inserted' };
 }
 
-async function claimOnboardingLink(robloxUserId, robloxUsername, token) {
-    if (!token) return null;
-    const { data: link } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
-    if (!link) return null;
-    await supabase.from('user_assignments').upsert({
-        roblox_user_id: robloxUserId,
-        roblox_username: robloxUsername,
-        team_id: link.team_id,
-        skillset_id: link.skillset_id,
-        source_link_token: link.token,
-        assigned_at: new Date().toISOString()
-    }, { onConflict: 'roblox_user_id,team_id' });
-    if (link.role_id) {
-        const { data: role, error: roleErr } = await supabase.from('roles').select('*').eq('id', link.role_id).maybeSingle();
-        if (roleErr) throw roleErr;
-        let meetsRankSafeguard = true;
-        if (role && role.link_only && role.min_rank != null && role.roblox_group_id != null) {
-            const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
-            const membership = groupRoles.find(g => g.group && g.group.id === role.roblox_group_id);
-            const rank = membership ? membership.role.rank : null;
-            meetsRankSafeguard = rank != null && rank === role.min_rank;
-        }
-        if (role && meetsRankSafeguard) {
-            const { error: roleAssignErr } = await supabase.from('user_role_assignments').insert({
-                roblox_user_id: robloxUserId,
-                role_id: link.role_id,
-                roblox_username: robloxUsername
-            });
-            if (roleAssignErr && roleAssignErr.code !== '23505') throw roleAssignErr;
-        }
-    }
-    await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
-    return link;
-}
+// NOTE: invite/onboarding links used to be granted instantly here on claim. That's now handled by
+// the generalized Discord-gated group-join flow (see startAccessOnboardingFlow, the
+// claim_onboarding_link action, and bot.js's onboarding_continue handler / grantInviteLinkAccess),
+// which only grants the team/skillset/role once the person has linked Discord, is in the server,
+// and has joined (or requested to join) the relevant Roblox group(s) - matching how recruitment
+// finalisation already worked.
 
 async function getUserTeamAssignments(robloxUserId) {
     const { data: rows, error } = await supabase
@@ -2088,9 +2088,10 @@ app.get('/roblox-auth-callback', async (req, res) => {
 
     if (sessionErr) { fail('session_create_failed'); return; }
 
-    if (stateRow.ref_token) {
-        try { await claimOnboardingLink(robloxUserId, robloxUsername, stateRow.ref_token); } catch (e) { }
-    }
+    // Note: invite/onboarding links are no longer auto-claimed here. Claiming now requires a
+    // linked, in-server Discord account and joining the relevant Roblox group(s) first (see the
+    // claim_onboarding_link action below), so the frontend sends people with a pending ref back to
+    // the #/join/<token> page after signing in rather than granting anything at this step.
 
     res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
 });
@@ -2147,7 +2148,10 @@ app.get('/discord-auth-start-staff', async (req, res) => {
     if (!hrSession) { res.redirect(`${APP_ORIGIN}/#/?error=session_expired`); return; }
 
     const state = randomToken(16);
-    const { error } = await supabase.from('discord_oauth_states').insert({ state, rt: token, is_staff: true });
+    // Lets callers (e.g. the invite-link flow) send the user back to wherever they started from
+    // instead of always landing on the dashboard - falls back to the dashboard if not provided.
+    const returnHash = req.query.return ? String(req.query.return).slice(0, 200) : null;
+    const { error } = await supabase.from('discord_oauth_states').insert({ state, rt: token, is_staff: true, return_hash: returnHash });
     if (error) { res.status(500).send('Could not start Discord sign-in.'); return; }
 
     const authorizeUrl = new URL('https://discord.com/oauth2/authorize');
@@ -2166,8 +2170,9 @@ app.get('/discord-auth-callback', async (req, res) => {
     function fail(rt, reason) {
         res.redirect(`${APP_ORIGIN}/#/recruit/apply?rt=${encodeURIComponent(rt || '')}&error=${encodeURIComponent(reason)}`);
     }
-    function failStaff(reason) {
-        res.redirect(`${APP_ORIGIN}/#/dashboard?discordLinkError=${encodeURIComponent(reason)}`);
+    function failStaff(reason, returnHash) {
+        const target = (returnHash || '#/dashboard').split('?')[0];
+        res.redirect(`${APP_ORIGIN}/${target}?discordLinkError=${encodeURIComponent(reason)}`);
     }
 
     if (!code || !state) { fail(null, 'missing_code_or_state'); return; }
@@ -2182,8 +2187,9 @@ app.get('/discord-auth-callback', async (req, res) => {
     console.log(`[discord-auth-callback] matched state ${state} -> rt ${stateRow.rt}`);
 
     if (stateRow.is_staff) {
+        const returnHash = stateRow.return_hash || null;
         const { data: hrSession } = await supabase.from('hr_sessions').select('roblox_user_id, roblox_username').eq('token', stateRow.rt).maybeSingle();
-        if (!hrSession) { failStaff('session_expired'); return; }
+        if (!hrSession) { failStaff('session_expired', returnHash); return; }
 
         const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
             method: 'POST',
@@ -2196,13 +2202,13 @@ app.get('/discord-auth-callback', async (req, res) => {
                 client_secret: DISCORD_CLIENT_SECRET
             })
         });
-        if (!tokenRes.ok) { failStaff('token_exchange_failed'); return; }
+        if (!tokenRes.ok) { failStaff('token_exchange_failed', returnHash); return; }
         const tokenJson = await tokenRes.json();
 
         const userRes = await fetch('https://discord.com/api/v10/users/@me', {
             headers: { Authorization: `Bearer ${tokenJson.access_token}` }
         });
-        if (!userRes.ok) { failStaff('userinfo_failed'); return; }
+        if (!userRes.ok) { failStaff('userinfo_failed', returnHash); return; }
         const discordUser = await userRes.json();
         const discordUserId = discordUser.id;
         const discordUsername = discordUser.username + (discordUser.discriminator && discordUser.discriminator !== '0' ? `#${discordUser.discriminator}` : '');
@@ -2212,7 +2218,7 @@ app.get('/discord-auth-callback', async (req, res) => {
 
         const { data: existingLink } = await supabase.from('discord_links').select('roblox_user_id, roblox_username').eq('discord_user_id', discordUserId).maybeSingle();
         if (existingLink && String(existingLink.roblox_user_id) !== String(hrSession.roblox_user_id)) {
-            failStaff('discord_already_linked');
+            failStaff('discord_already_linked', returnHash);
             return;
         }
 
@@ -2225,11 +2231,12 @@ app.get('/discord-auth-callback', async (req, res) => {
             linked_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
         if (linkErr) {
-            failStaff(linkErr.code === '23505' ? 'discord_already_linked' : 'link_save_failed');
+            failStaff(linkErr.code === '23505' ? 'discord_already_linked' : 'link_save_failed', returnHash);
             return;
         }
 
-        res.redirect(`${APP_ORIGIN}/#/dashboard?discordLinked=1`);
+        const target = (returnHash || '#/dashboard').split('?')[0];
+        res.redirect(`${APP_ORIGIN}/${target}?discordLinked=1`);
         return;
     }
 
@@ -3905,12 +3912,66 @@ app.post('/hr-data', async (req, res) => {
         const token = payload.token && String(payload.token).trim();
         if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
         try {
-            const link = await claimOnboardingLink(session.roblox_user_id, session.roblox_username, token);
+            const { data: link, error: linkErr } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
+            if (linkErr) { res.status(500).json({ ok: false, error: linkErr.message }); return; }
             if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
-            res.json({ ok: true });
+
+            // Same gate as recruitment: must have a linked Discord account, and that account must
+            // actually be in the Discord server, before we'll start the group-join flow at all -
+            // otherwise there's no way to DM them the join instructions or verify they've joined.
+            const discordUserId = await getLinkedDiscordUserId(session.roblox_user_id);
+            if (!discordUserId) { res.status(400).json({ ok: false, error: 'discord_not_linked' }); return; }
+            if (DISCORD_GUILD_ID) {
+                const inServer = await isDiscordGuildMember(discordUserId);
+                if (!inServer) { res.status(403).json({ ok: false, error: 'discord_not_in_server' }); return; }
+            }
+
+            // Don't spin up a second DM/flow if they already started (or finished) this exact link.
+            const { data: existingFlow } = await supabase
+                .from('recruit_onboarding_flows')
+                .select('id, step')
+                .eq('roblox_user_id', session.roblox_user_id)
+                .eq('link_token', token)
+                .maybeSingle();
+            if (existingFlow) {
+                res.json({ ok: true, data: { alreadyStarted: true, done: existingFlow.step === 'done' } });
+                return;
+            }
+
+            const flow = await startAccessOnboardingFlow({
+                robloxUserId: session.roblox_user_id,
+                robloxUsername: session.roblox_username,
+                discordUserId,
+                linkToken: token,
+                teamId: link.team_id || null,
+                skillsetId: link.skillset_id || null,
+                roleId: link.role_id || null
+            });
+            if (!flow) {
+                res.status(500).json({ ok: false, error: 'Could not start setup - make sure the onboarding group is configured and the bot can DM you.' });
+                return;
+            }
+
+            await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
+
+            res.json({ ok: true, data: { started: true } });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not apply that invite link.' });
         }
+        return;
+    }
+
+    if (action === 'get_my_onboarding_link_flow_status') {
+        const token = payload.token && String(payload.token).trim();
+        if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
+        const { data: flow, error } = await supabase
+            .from('recruit_onboarding_flows')
+            .select('step')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .eq('link_token', token)
+            .maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data: { started: !!flow, done: !!flow && flow.step === 'done' } });
         return;
     }
 

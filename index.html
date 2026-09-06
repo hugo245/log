@@ -3700,7 +3700,12 @@
       return json.data;
     }
     async function claimOnboardingLinkToken(token) {
-      await callHrData('claim_onboarding_link', { token });
+      const json = await callHrData('claim_onboarding_link', { token });
+      return json.data || null;
+    }
+    async function getMyOnboardingLinkFlowStatus(token) {
+      const json = await callHrData('get_my_onboarding_link_flow_status', { token });
+      return json.data || null;
     }
     async function getMyAssignment() {
       const json = await callHrData('get_my_assignment');
@@ -4066,6 +4071,13 @@
       const path = window.location.hash.split('?')[0];
       if (path === '#/auth-callback') { handleAuthCallback(); return; }
 
+      // Coming back from linking Discord (discord-auth-start-staff -> discord-auth-callback)
+      // redirects here with ?discordLinked=1 - clear the "needs Discord" flag immediately rather
+      // than waiting for the next full verifySession(), so the blocking modal doesn't linger on
+      // whatever page (e.g. an invite link) sent the user to link Discord in the first place.
+      const routeQuery = new URLSearchParams(window.location.hash.split('?')[1] || '');
+      if (routeQuery.get('discordLinked') === '1') needsDiscordLink = false;
+
       if (path.indexOf('#/join/') === 0) {
         const token = decodeURIComponent(path.slice('#/join/'.length));
         handleJoinLink(token);
@@ -4153,7 +4165,8 @@
         document.body.appendChild(el);
       }
       const token = getStoredToken();
-      const linkUrl = EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(token || '');
+      const returnHash = window.location.hash.split('?')[0] || '#/dashboard';
+      const linkUrl = EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(token || '') + '&return=' + encodeURIComponent(returnHash);
       const hashQuery = (window.location.hash.split('?')[1] || '');
       const params = new URLSearchParams(hashQuery);
       const errorCode = params.get('discordLinkError');
@@ -4263,8 +4276,21 @@
       if (isHrAuthed) {
         let joining = false;
         let joinError = null;
+        let started = false;
+        let flowDone = false;
+
+        // If they already claimed this link in a previous visit (e.g. they closed the tab after
+        // clicking Join), pick back up where they left off instead of showing the Join button again.
+        try {
+          const status = await getMyOnboardingLinkFlowStatus(token);
+          if (status && status.started) { started = true; flowDone = !!status.done; }
+        } catch (e) { }
 
         const renderInvite = () => {
+          const teamPanels = `
+            ${info && info.team ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Team</div><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
+            ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}`;
+
           app.innerHTML = `
     ${topbar()}
     <div class="gate-shell">
@@ -4273,29 +4299,62 @@
         <h2>You've been invited</h2>
         ${loadFailed
               ? `<div class="error-box"><span>This invite link is invalid or has expired.</span></div>`
-              : `
-          <p>Click join to add this team and skillset to your account.</p>
-          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
-            ${info && info.team ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Team</div><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
-            ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
-          </div>`}
+              : flowDone
+                ? `
+          <p>You're all set - this team and skillset have been added to your account.</p>
+          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">${teamPanels}</div>`
+                : started
+                  ? `
+          <p>Check your Discord DMs from the bot. You'll need to join the PlayVerse Roblox group (and request to join your team's group, if it has one) - your access unlocks automatically once you've done that and clicked Continue there.</p>
+          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">${teamPanels}</div>`
+                  : `
+          <p>Click join to start setting up this team and skillset on your account. You'll need to join the PlayVerse Roblox group (and your team's group, if it has one) via a Discord DM before access unlocks.</p>
+          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">${teamPanels}</div>`}
         ${joinError ? `<div class="error-box"><span>${esc(joinError)}</span></div>` : ''}
-        ${!loadFailed ? `<button type="button" class="btn btn-primary" id="joinTeamBtn" ${joining ? 'disabled' : ''}>${joining ? 'Joining...' : 'Join'}</button>` : ''}
+        ${!loadFailed && !started ? `<button type="button" class="btn btn-primary" id="joinTeamBtn" ${joining ? 'disabled' : ''}>${joining ? 'Joining...' : 'Join'}</button>` : ''}
+        ${!loadFailed && started && !flowDone ? `<button type="button" class="btn btn-ghost" id="joinRefreshBtn">I've finished in Discord - refresh</button>` : ''}
+        ${flowDone ? `<button type="button" class="btn btn-primary" id="joinDoneBtn">Continue</button>` : ''}
       </div>
     </div>`;
           wireTopbarSignOut();
+          renderDiscordLinkModal();
+
           const btn = document.getElementById('joinTeamBtn');
           if (btn) btn.addEventListener('click', async () => {
             joining = true; joinError = null; renderInvite();
             try {
-              await claimOnboardingLinkToken(token);
-              clearPendingRef();
-              window.location.hash = '#/onboarding';
+              const data = await claimOnboardingLinkToken(token);
+              joining = false;
+              if (data && data.alreadyStarted) {
+                started = true;
+                flowDone = !!data.done;
+              } else {
+                started = true;
+              }
+              renderInvite();
             } catch (e) {
               joining = false;
-              joinError = "Could not apply that invite link. It may be invalid or expired.";
+              joinError = JOIN_LINK_ERROR_MESSAGES[e.message] || "Could not apply that invite link. It may be invalid or expired.";
               renderInvite();
             }
+          });
+
+          const refreshBtn = document.getElementById('joinRefreshBtn');
+          if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+            try {
+              const status = await getMyOnboardingLinkFlowStatus(token);
+              flowDone = !!(status && status.done);
+              if (!flowDone) joinError = "Still waiting on the group joins - finish those in Discord first.";
+              renderInvite();
+            } catch (e) {
+              renderInvite();
+            }
+          });
+
+          const doneBtn = document.getElementById('joinDoneBtn');
+          if (doneBtn) doneBtn.addEventListener('click', () => {
+            clearPendingRef();
+            window.location.hash = '#/onboarding';
           });
         };
 
@@ -4312,21 +4371,27 @@
         ${loadFailed
           ? `<div class="error-box"><span>This invite link is invalid or has expired. You can still sign in normally.</span></div>`
           : `
-          <p>Sign in with Roblox to finish setting up your account.</p>
+          <p>Sign in with Roblox to continue. You'll then need to link Discord and join a couple of Roblox groups before this team and skillset are added to your account.</p>
           <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
             ${info && info.team ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Team</div><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
             ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
           </div>`}
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         <button type="button" class="btn btn-primary roblox-btn" id="joinSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
-        <div class="gate-note">Signing in will assign you to this team and skillset automatically.</div>
+        <div class="gate-note">You'll finish setup (Discord link + group joins) right after signing in.</div>
       </div>
     </div>`;
 
       wireTopbarSignOut();
       const btn = document.getElementById('joinSignInBtn');
-      if (btn) btn.addEventListener('click', () => beginLogin('#/onboarding', token));
+      if (btn) btn.addEventListener('click', () => beginLogin('#/join/' + encodeURIComponent(token), token));
     }
+
+    const JOIN_LINK_ERROR_MESSAGES = {
+      discord_not_linked: 'Link your Discord account first (see the popup), then click Join again.',
+      discord_not_in_server: "You'll need to join our Discord server before you can claim this invite - once you're in, come back and try again.",
+      link_not_found: 'This invite link is invalid or has expired.'
+    };
 
     const RECRUIT_ERROR_MESSAGES = {
       session_expired: 'That took a little too long and your session expired. Please sign in with Roblox again.',
