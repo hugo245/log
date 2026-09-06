@@ -1113,7 +1113,10 @@ async function startOnboardingFlow(ticket) {
         let teamJoinRow = null;
         if (ticket.placed_team_id) {
             const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', ticket.placed_team_id).maybeSingle();
-            if (team && team.roblox_group_id) {
+            // If the team's own group IS the main onboarding group, there's nothing separate to
+            // join or request - joining the main group covers it, and bot.js's continue handler
+            // ranks them straight onto the team's configured role instead of the default main rank.
+            if (team && team.roblox_group_id && Number(team.roblox_group_id) !== Number(config.groupId)) {
                 teamGroupLine = ` You also need to request to join your team's group (${team.name}) below - it's invite-only, so the bot will accept your request and rank you automatically once you've asked to join.`;
                 teamJoinRow = {
                     type: 1,
@@ -1197,7 +1200,10 @@ async function runOnboardingJoinCheck() {
                 const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
                 if (ticket && ticket.placed_team_id) {
                     const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', ticket.placed_team_id).maybeSingle();
-                    if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id) team = teamRow;
+                    // Skip treating this as a separate group to wait on when it's the same group
+                    // as the main one - joining the main group already satisfies it, and there's
+                    // no separate join-request step for bot.js to accept later.
+                    if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id && Number(teamRow.roblox_group_id) !== Number(config.groupId)) team = teamRow;
                 }
             }
             const teamRequested = team ? await hasJoinedOrRequestedGroup(team.roblox_group_id, flow.roblox_user_id) : true;

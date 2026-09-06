@@ -372,11 +372,15 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({ content: 'One second...', components: [] });
 
                 try {
+                    // Fetched unconditionally (not just on the first pass) because we also need
+                    // config.groupId below, to detect whether the team's own group IS the main
+                    // group - in which case there's no separate group to join/request.
+                    const config = await getOnboardingGroupConfig();
+
                     // The main group step only ever needs to run once - retrying a rank change to
                     // the same role Roblox already has them at gets rejected as invalid, so once
                     // this succeeds we skip straight to the team-group step on any later click.
                     if (flow.step !== 'main_ranked_awaiting_team') {
-                        const config = await getOnboardingGroupConfig();
                         if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
 
                         await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
@@ -388,18 +392,28 @@ client.on(Events.InteractionCreate, async interaction => {
                     // membership in each team's separate community. Team groups are invite-only,
                     // so joining just files a request - accept it here, then rank them, retrying
                     // the accept step is safe (a no-op) if it was already accepted.
+                    //
+                    // Exception: if the team's configured group IS the main onboarding group, there's
+                    // no separate group to join a request for - they're already a member from the
+                    // main-group step above. In that case just re-rank them straight onto the team's
+                    // configured role, which takes priority over the plain main-group rank they just got.
                     let teamGroupNote = null;
                     if (flow.ticket_id) {
                         const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
                         if (ticket && ticket.placed_team_id) {
                             const { data: team } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', ticket.placed_team_id).maybeSingle();
                             if (team && team.roblox_group_id && team.default_group_role_id) {
+                                const sameAsMainGroup = config.groupId != null && Number(team.roblox_group_id) === Number(config.groupId);
                                 try {
-                                    const accepted = await acceptGroupJoinRequest(team.roblox_group_id, flow.roblox_user_id);
-                                    if (!accepted) {
-                                        teamGroupNote = `You're ranked in the main group. Now request to join **${team.name}**'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Continue to finish setting up your team access.`;
-                                    } else {
+                                    if (sameAsMainGroup) {
                                         await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
+                                    } else {
+                                        const accepted = await acceptGroupJoinRequest(team.roblox_group_id, flow.roblox_user_id);
+                                        if (!accepted) {
+                                            teamGroupNote = `You're ranked in the main group. Now request to join **${team.name}**'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Continue to finish setting up your team access.`;
+                                        } else {
+                                            await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
+                                        }
                                     }
                                 } catch (teamErr) {
                                     console.error(`onboarding_continue: failed to process ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
