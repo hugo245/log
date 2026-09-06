@@ -2698,10 +2698,10 @@
 
   <script>
     const SUPABASE_URL = 'https://tixfcxypoyedqbkiwbtx.supabase.co';
-    const SUPABASE_ANON_KEY = '';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGZjeHlwb3llZHFia2l3YnR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NzExMDUsImV4cCI6MjEwMTI0NzEwNX0.0biB2dg46s1Cy_Gpq6ZuL3fHnSLJP2xJO8RHpKRGaS8';
     const EDGE_BASE = 'https://api.playverseinternal.cc'
     const GAMES_TABLE = 'games';
-    const SETTINGS_TABLE = 'app_settings';
+    const PUBLIC_SETTINGS_VIEW = 'public_app_settings';
     const SESSION_STORAGE_KEY = 'pv_hr_session_token';
     const RETURN_HASH_KEY = 'pv_return_hash';
     const THEME_STORAGE_KEY = 'pv_theme';
@@ -3049,7 +3049,7 @@
 
     async function loadDevexRate() {
       if (!supabaseClient) return;
-      const { data, error } = await supabaseClient.from(SETTINGS_TABLE).select('devex_rate').eq('id', 1).maybeSingle();
+      const { data, error } = await supabaseClient.from(PUBLIC_SETTINGS_VIEW).select('devex_rate').eq('id', 1).maybeSingle();
       if (!error && data && data.devex_rate != null) DEVEX_RATE = Number(data.devex_rate);
     }
 
@@ -3067,7 +3067,7 @@
     async function checkSiteClosed() {
       if (!supabaseClient) return true;
       try {
-        const { data, error } = await supabaseClient.from(SETTINGS_TABLE).select('closed').eq('id', 1).maybeSingle();
+        const { data, error } = await supabaseClient.from(PUBLIC_SETTINGS_VIEW).select('closed').eq('id', 1).maybeSingle();
         if (error) return true;
         return !!(data && data.closed);
       } catch (e) {
