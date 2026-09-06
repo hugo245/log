@@ -1208,7 +1208,7 @@ async function runOnboardingJoinCheck() {
             }
             const teamRequested = team ? await hasJoinedOrRequestedGroup(team.roblox_group_id, flow.roblox_user_id) : true;
 
-            const currentState = mainJoined && teamRequested ? 'both' : mainJoined ? 'main_only' : teamRequested ? 'team_only' : 'neither';
+            const currentState = mainJoined && teamRequested ? 'both' : mainJoined ? 'main_only' : (team && teamRequested) ? 'team_only' : 'neither';
             if (currentState === (flow.last_prompt_state || 'neither')) continue;
 
             const updates = { last_prompt_state: currentState, updated_at: new Date().toISOString() };
@@ -1230,12 +1230,16 @@ async function runOnboardingJoinCheck() {
                 });
             }
 
+            // team is only ever non-null here when there's an actual separate group to wait on
+            // (see above) - every branch below that references team.name is guarded by `team`
+            // so it can't fire when there's no separate team group (or the team's group IS the
+            // main group), since teamRequested defaults to true in that case.
             if (mainJoined && teamRequested) {
                 updates.step = 'group_joined';
                 content = `You've joined both groups. Click Continue to finish setting up your access.`;
             } else if (mainJoined) {
                 content = `You've joined the main group. You still need to request to join ${team.name}'s group to continue.`;
-            } else if (teamRequested) {
+            } else if (team && teamRequested) {
                 content = `You've requested to join ${team.name}'s group. You still need to join the main PlayVerse group to continue.`;
             } else {
                 content = team
