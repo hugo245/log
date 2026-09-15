@@ -3355,13 +3355,28 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'roles.manage')) return;
         let query = supabase
             .from('user_role_assignments')
-            .select('id, roblox_user_id, role_id, roblox_username, roles(name, hierarchy)')
+            .select('id, roblox_user_id, role_id, roblox_username')
             .order('created_at', { ascending: false });
         if (payload.robloxUserId != null && payload.robloxUserId !== '') {
             query = query.eq('roblox_user_id', Number(payload.robloxUserId));
         }
-        const { data, error } = await query;
+        const { data: assignments, error } = await query;
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (!assignments || !assignments.length) { res.json({ ok: true, data: [] }); return; }
+
+        // Deliberately a second plain query instead of a PostgREST embed
+        // (user_role_assignments.select('..., roles(name, hierarchy)')) - the embed depends on
+        // PostgREST having detected the role_id foreign key, which can silently return nothing
+        // (not even an error, or a 500 that gets swallowed client-side) if the schema cache hasn't
+        // picked it up yet. That's exactly the kind of thing that looks like "no roles assigned"
+        // even when the row is right there in the table.
+        const roleIds = [...new Set(assignments.map(a => a.role_id).filter(Boolean))];
+        const { data: roleRows, error: rolesErr } = await supabase.from('roles').select('id, name, hierarchy').in('id', roleIds);
+        if (rolesErr) { res.status(500).json({ ok: false, error: rolesErr.message }); return; }
+        const roleById = {};
+        (roleRows || []).forEach(r => { roleById[r.id] = r; });
+        const data = assignments.map(a => ({ ...a, roles: roleById[a.role_id] || null }));
+
         res.json({ ok: true, data });
         return;
     }
@@ -3396,12 +3411,14 @@ app.post('/hr-data', async (req, res) => {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: assignment, error: assignErr } = await supabase
             .from('user_role_assignments')
-            .select('id, roles(hierarchy)')
+            .select('id, role_id')
             .eq('id', id)
             .maybeSingle();
         if (assignErr) { res.status(500).json({ ok: false, error: assignErr.message }); return; }
         if (!assignment) { res.status(404).json({ ok: false, error: 'assignment_not_found' }); return; }
-        if (!requireHigherHierarchy(res, session, assignment.roles && assignment.roles.hierarchy)) return;
+        const { data: role, error: roleErr } = await supabase.from('roles').select('hierarchy').eq('id', assignment.role_id).maybeSingle();
+        if (roleErr) { res.status(500).json({ ok: false, error: roleErr.message }); return; }
+        if (!requireHigherHierarchy(res, session, role && role.hierarchy)) return;
         const { error } = await supabase.from('user_role_assignments').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
@@ -3475,12 +3492,12 @@ app.post('/hr-data', async (req, res) => {
             const [sessionsRes, requestsRes, assignmentsRes, progressRes, teamAssignRes, warningsRes, bansRes, rolesRes] = await Promise.all([
                 supabase.from('hr_sessions').select('roblox_user_id, roblox_username, roles, last_synced_at, expires_at'),
                 supabase.from('payment_requests').select('roblox_user_id, roblox_username, payment, currency, paid, status'),
-                supabase.from('user_role_assignments').select('roblox_user_id, roblox_username, roles(name)'),
+                supabase.from('user_role_assignments').select('roblox_user_id, roblox_username, role_id'),
                 supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id'),
                 supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id'),
                 supabase.from('staff_warnings').select('roblox_user_id'),
                 supabase.from('banned_users').select('roblox_user_id'),
-                supabase.from('roles').select('name, hierarchy')
+                supabase.from('roles').select('id, name, hierarchy')
             ]);
             if (sessionsRes.error) throw sessionsRes.error;
             if (requestsRes.error) throw requestsRes.error;
@@ -3489,7 +3506,11 @@ app.post('/hr-data', async (req, res) => {
             if (teamAssignRes.error) throw teamAssignRes.error;
 
             const hierarchyByRoleName = {};
-            (rolesRes.data || []).forEach(r => { hierarchyByRoleName[r.name] = Number(r.hierarchy) || 0; });
+            const roleNameById = {};
+            (rolesRes.data || []).forEach(r => {
+                hierarchyByRoleName[r.name] = Number(r.hierarchy) || 0;
+                roleNameById[r.id] = r.name;
+            });
 
             const teamIds = [...new Set((teamAssignRes.data || []).filter(a => a.team_id != null).map(a => a.team_id))];
             const skillsetIds = [...new Set((teamAssignRes.data || []).filter(a => a.skillset_id != null).map(a => a.skillset_id))];
@@ -3551,7 +3572,12 @@ app.post('/hr-data', async (req, res) => {
             (assignmentsRes.data || []).forEach(a => {
                 const row = ensure(a.roblox_user_id, a.roblox_username);
                 if (!row) return;
-                const roleName = a.roles && a.roles.name;
+                // Deliberately looking this up in roleNameById rather than relying on a PostgREST
+                // embed (user_role_assignments.select('..., roles(name)')) here too - same fragile
+                // relationship-detection issue as list_role_assignments, and this is the query that
+                // feeds the main Staff Database table, so a silent failure here hides role badges
+                // for everyone, not just in one modal.
+                const roleName = roleNameById[a.role_id];
                 if (roleName && !row.roles.includes(roleName)) row.roles.push(roleName);
             });
 
