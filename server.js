@@ -381,8 +381,30 @@ async function listRecruiters({ skipCache } = {}) {
     return result;
 }
 
+const DISCORD_BLOCK_PAUSE_MS = 5 * 60 * 1000;
+let discordBlockedUntil = 0;
+
+function isCloudflareBlock(status, text) {
+    return (status === 429 || status === 403) && /cloudflare|error code: 10\d\d|access denied/i.test(String(text || ''));
+}
+
+function noteDiscordBlock(status, text, where) {
+    if (!isCloudflareBlock(status, text)) return false;
+    const wasBlocked = Date.now() < discordBlockedUntil;
+    discordBlockedUntil = Date.now() + DISCORD_BLOCK_PAUSE_MS;
+    if (!wasBlocked) {
+        console.error(`[discord] Cloudflare is blocking this server's IP from Discord (seen in ${where}, status ${status}). Pausing Discord API calls for ${DISCORD_BLOCK_PAUSE_MS / 60000} minutes so the block isn't extended. This is an IP-level block, usually caused by other tenants on a shared host.`);
+    }
+    return true;
+}
+
+function discordPaused() {
+    return Date.now() < discordBlockedUntil;
+}
+
 async function discordApi(path, options) {
     if (!DISCORD_BOT_TOKEN) throw new Error('discord_bot_not_configured');
+    if (discordPaused()) throw new Error('discord_api_blocked: Discord is blocking this server right now');
     const res = await fetch(`https://discord.com/api/v10${path}`, {
         ...options,
         headers: {
@@ -393,6 +415,7 @@ async function discordApi(path, options) {
     });
     if (!res.ok) {
         const body = await res.text().catch(() => '');
+        if (noteDiscordBlock(res.status, body, `discordApi ${path}`)) throw new Error('discord_api_blocked: Discord is blocking this server right now');
         throw new Error(`discord_api_${res.status}: ${body}`);
     }
     const text = await res.text();
@@ -438,6 +461,7 @@ async function ticketEmbedPayload(ticket) {
 
 async function isDiscordGuildMember(discordUserId, guildId = DISCORD_GUILD_ID) {
     if (!DISCORD_BOT_TOKEN || !guildId || !discordUserId) return false;
+    if (discordPaused()) return false;
     try {
         const res = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${discordUserId}`, {
             headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` }
@@ -445,7 +469,8 @@ async function isDiscordGuildMember(discordUserId, guildId = DISCORD_GUILD_ID) {
         if (res.status === 404) return false;
         if (!res.ok) {
             const bodyText = await res.text().catch(() => '');
-            console.error(`isDiscordGuildMember: unexpected status ${res.status} checking ${discordUserId} in guild ${guildId}: ${bodyText}`);
+            if (noteDiscordBlock(res.status, bodyText, 'isDiscordGuildMember')) return false;
+            console.error(`isDiscordGuildMember: unexpected status ${res.status} checking ${discordUserId} in guild ${guildId}: ${bodyText.slice(0, 300)}`);
             return false;
         }
         return true;
@@ -2167,6 +2192,10 @@ async function exchangeDiscordCode(code, context) {
         client_id: DISCORD_CLIENT_ID,
         client_secret: DISCORD_CLIENT_SECRET
     });
+    if (discordPaused()) {
+        console.error(`[discord-auth-callback] skipped token exchange for ${context}: Discord is blocking this server (pause active)`);
+        return { ok: false, reason: 'discord_blocked', status: 0 };
+    }
     let lastStatus = 0;
     let lastText = '';
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -2187,6 +2216,10 @@ async function exchangeDiscordCode(code, context) {
         if (tokenRes.ok) return { ok: true, tokenJson: await tokenRes.json() };
         lastStatus = tokenRes.status;
         lastText = await tokenRes.text().catch(() => '');
+        if (noteDiscordBlock(lastStatus, lastText, 'oauth2 token exchange')) {
+            console.error(`[discord-auth-callback] token exchange blocked by Cloudflare for ${context}`);
+            return { ok: false, reason: 'discord_blocked', status: lastStatus };
+        }
         console.error(`[discord-auth-callback] token exchange failed (status ${lastStatus}, attempt ${attempt}) for ${context}: ${lastText.slice(0, 500)}`);
         if (lastStatus === 429 || lastStatus >= 500) {
             let waitMs = 1000 * attempt;

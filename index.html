@@ -3862,6 +3862,12 @@
       color: var(--accent);
     }
 
+    .ob-rail li.skipped .ob-mark {
+      border-style: dashed;
+      color: var(--warn-text);
+      border-color: var(--warn-text);
+    }
+
     .ob-rail li.done .ob-mark {
       background: var(--ok-text);
       border-color: var(--ok-text);
@@ -6244,7 +6250,7 @@
         return;
       }
 
-      if (isHrAuthed && (needsOnboarding || needsDiscordLink) && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
+      if (isHrAuthed && (needsOnboarding || (needsDiscordLink && !discordDeferred())) && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
         window.location.hash = '#/onboarding';
         return;
       }
@@ -6307,6 +6313,7 @@
       link_save_failed: 'Something went wrong saving that link. Please try again.',
       token_exchange_failed: 'Discord did not confirm that sign-in. Please try again.',
       discord_rate_limited: 'Discord is limiting sign-ins from our server right now. Wait a minute, then press Link Discord again.',
+      discord_blocked: "Discord is temporarily blocking our server, so Discord can't be linked right now. This isn't anything you did. Try again later.",
       discord_bad_credentials: "Discord sign-in isn't set up correctly on our server, so this can't work yet. Let an admin know (the Discord client secret needs checking).",
       discord_code_rejected: 'Discord rejected that sign-in, usually because it expired or was already used. Press Link Discord to try again.',
       discord_unavailable: "Couldn't reach Discord. Try again in a moment.",
@@ -6494,6 +6501,7 @@
       invalid_state: 'That Discord sign-in attempt was invalid or expired, please try again.',
       token_exchange_failed: 'Discord could not confirm your sign-in, please try again.',
       discord_rate_limited: 'Discord is limiting sign-ins from our server right now. Wait a minute, then press Link Discord again.',
+      discord_blocked: "Discord is temporarily blocking our server, so Discord can't be linked right now. This isn't anything you did. Try again later.",
       discord_bad_credentials: "Discord sign-in isn't set up correctly on our server, so this can't work yet. Let an admin know (the Discord client secret needs checking).",
       discord_code_rejected: 'Discord rejected that sign-in, usually because it expired or was already used. Press Link Discord to try again.',
       discord_unavailable: "Couldn't reach Discord. Try again in a moment.",
@@ -10762,6 +10770,9 @@
       load();
     }
 
+    const DISCORD_DEFER_KEY = 'pv_discord_deferred';
+    function discordDeferred() { try { return sessionStorage.getItem(DISCORD_DEFER_KEY) === '1'; } catch (e) { return false; } }
+    function deferDiscord() { try { sessionStorage.setItem(DISCORD_DEFER_KEY, '1'); } catch (e) { } }
     const INVITE_STORAGE_KEY = 'pv_pending_invite';
     function getPendingInvite() { try { return localStorage.getItem(INVITE_STORAGE_KEY) || null; } catch (e) { return null; } }
     function setPendingInvite(token) { try { localStorage.setItem(INVITE_STORAGE_KEY, token); } catch (e) { } }
@@ -10791,13 +10802,13 @@
         const list = [];
         list.push({
           id: 'discord', title: 'Link Discord', blurb: 'So we can reach you and give you access.',
-          required: true, done: !needsDiscordLink
+          required: true, done: !needsDiscordLink, skipped: needsDiscordLink && discordDeferred()
         });
         if (inviteToken && !invite.invalid) {
           const teamName = invite.info && invite.info.team ? invite.info.team.name : null;
           list.push({
             id: 'invite', title: teamName ? `Join ${teamName}` : 'Join your team', blurb: 'Finish your invite in Discord.',
-            required: true, done: invite.done
+            required: true, done: invite.done, skipped: !invite.done && needsDiscordLink && discordDeferred()
           });
         }
         serverSteps.forEach(s => list.push({
@@ -10812,10 +10823,10 @@
 
       function currentStep(list) {
         if (viewing) { const v = list.find(s => s.id === viewing); if (v) return v; }
-        return list.find(s => !s.done && s.id !== 'payout') || null;
+        return list.find(s => !s.done && !s.skipped && s.id !== 'payout') || null;
       }
 
-      function allRequiredDone(list) { return list.filter(s => s.required).every(s => s.done); }
+      function allRequiredDone(list) { return list.filter(s => s.required).every(s => s.done || s.skipped); }
 
       function paragraphs(text) {
         return String(text || '').split(/\n\s*\n/).map(p => `<p>${esc(p.trim())}</p>`).join('');
@@ -10824,11 +10835,11 @@
       function railHtml(list, cur) {
         return `<ol class="ob-rail" aria-label="Setup steps">
           ${list.map((s, i) => {
-          const state = s.done ? 'done' : (cur && cur.id === s.id ? 'now' : '');
+          const state = s.done ? 'done' : (cur && cur.id === s.id ? 'now' : (s.skipped ? 'skipped' : ''));
           return `<li class="${state}">
               <button type="button" data-ob-view="${esc(s.id)}" ${cur && cur.id === s.id ? 'aria-current="step"' : ''}>
                 <span class="ob-mark" aria-hidden="true">${s.done ? '&#10003;' : i + 1}</span>
-                <span class="ob-rail-text"><span class="ob-rail-title">${esc(s.title)}</span>${!s.required ? '<span class="ob-rail-sub">Optional</span>' : ''}</span>
+                <span class="ob-rail-text"><span class="ob-rail-title">${esc(s.title)}</span>${s.skipped ? '<span class="ob-rail-sub">Skipped for now</span>' : !s.required ? '<span class="ob-rail-sub">Optional</span>' : ''}</span>
               </button>
             </li>`;
         }).join('')}
@@ -10845,7 +10856,11 @@
           ${errMsg ? `<div class="error-box"><span>${esc(errMsg)}</span></div>` : ''}
           ${s.done
             ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Discord is linked</strong><span>You can change this later from your account.</span></div></div>`
-            : `<a class="btn btn-primary" href="${linkUrl}">Link Discord</a>`}`;
+            : `<div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <a class="btn btn-primary" href="${linkUrl}">${errMsg ? 'Try again' : 'Link Discord'}</a>
+                ${(discordError === 'discord_blocked' || discordError === 'discord_rate_limited' || discordError === 'discord_unavailable' || discordDeferred()) && !discordDeferred() ? `<button type="button" class="btn btn-ghost" id="obSkipDiscord">Skip for now</button>` : ''}
+              </div>
+              ${discordDeferred() ? `<p class="hint">You skipped this earlier. You'll be asked again next time you sign in.</p>` : (discordError === 'discord_blocked' ? `<p class="hint">You can skip this and carry on. You'll be asked again next time you sign in.${inviteToken ? ' Joining your team has to wait until Discord is linked.' : ''}</p>` : '')}`}`;
       }
 
       function inviteStepHtml(s) {
@@ -10913,9 +10928,11 @@
 
       function finishHtml(list) {
         const optionalLeft = list.filter(s => !s.required && !s.done);
+        const skippedLeft = list.filter(s => s.skipped);
         return `
           <h2>You're all set</h2>
           <p class="ob-lead">Your account is ready. You can come back to this page any time to reread the policies.</p>
+          ${skippedLeft.length ? `<div class="filter-notice" style="margin:0;">Still to do when Discord is working again: ${skippedLeft.map(s => esc(s.title.toLowerCase())).join(' and ')}. You'll be asked next time you sign in.</div>` : ''}
           ${optionalLeft.length ? `<p class="hint">Still optional: ${optionalLeft.map(s => esc(s.title.toLowerCase())).join(', ')}.</p>` : ''}
           <a class="btn btn-primary" href="${hasPermission('dashboard.view') ? '#/dashboard' : '#/my'}">Go to PlayVerse</a>`;
       }
@@ -10958,6 +10975,8 @@
         if (join) join.addEventListener('click', acceptInvite);
         const check = document.getElementById('obInviteCheck');
         if (check) check.addEventListener('click', () => checkInvite(true));
+        const skipDiscord = document.getElementById('obSkipDiscord');
+        if (skipDiscord) skipDiscord.addEventListener('click', () => { deferDiscord(); viewing = null; history.replaceState(null, '', '#/onboarding'); paint(); });
         const finish = document.getElementById('obFinish');
         if (finish) finish.addEventListener('click', () => { viewing = null; window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my'; });
       }
