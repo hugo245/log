@@ -3784,6 +3784,227 @@
       word-break: break-word;
     }
 
+    .ob-progress {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--line);
+      overflow: hidden;
+      max-width: 420px;
+      margin-top: 14px;
+    }
+
+    .ob-progress i {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+      transition: width .3s ease;
+    }
+
+    .ob-layout {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .ob-rail {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      position: sticky;
+      top: 96px;
+    }
+
+    .ob-rail button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 9px 10px;
+      border: none;
+      border-radius: 9px;
+      background: none;
+      font: inherit;
+      text-align: left;
+      color: var(--ink-soft);
+      cursor: pointer;
+    }
+
+    .ob-rail button:hover {
+      background: var(--surface);
+    }
+
+    .ob-rail li.now button {
+      background: var(--accent-soft);
+      color: var(--ink);
+    }
+
+    .ob-mark {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 1.5px solid var(--line);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+      background: var(--surface);
+    }
+
+    .ob-rail li.now .ob-mark {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .ob-rail li.done .ob-mark {
+      background: var(--ok-text);
+      border-color: var(--ok-text);
+      color: #fff;
+    }
+
+    .ob-rail-text {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .ob-rail-title {
+      font-size: 13.5px;
+      font-weight: 600;
+    }
+
+    .ob-rail-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+    }
+
+    .ob-main {
+      margin: 0;
+      padding: 26px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .ob-main>* {
+      margin: 0;
+      max-width: 68ch;
+    }
+
+    .ob-main .btn {
+      width: auto;
+      align-self: flex-start;
+    }
+
+    .ob-main h2 {
+      font-size: 21px;
+    }
+
+    .ob-lead {
+      color: var(--ink-soft);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    .ob-copy p {
+      margin: 0 0 10px;
+      line-height: 1.6;
+      color: var(--ink);
+    }
+
+    .ob-policy {
+      white-space: pre-wrap;
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: var(--ink-soft);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px 16px;
+      max-height: 48vh;
+      overflow-y: auto;
+      width: 100%;
+      background: var(--row-alt);
+    }
+
+    .ob-invite {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .ob-invite div {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 16px;
+    }
+
+    .ob-teams {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .ob-done-note {
+      color: var(--ok-text);
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .ob-main .confirm-box,
+    .ob-main .error-box {
+      width: 100%;
+      max-width: none;
+    }
+
+    @media (max-width:760px) {
+      .ob-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .ob-rail {
+        position: static;
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 4px;
+      }
+
+      .ob-rail button {
+        white-space: nowrap;
+      }
+
+      .ob-rail-sub {
+        display: none;
+      }
+
+      .ob-main {
+        padding: 20px;
+      }
+    }
+
+    .ob-overview {
+      margin: 0;
+      padding-left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--ink-soft);
+    }
+
+    .ob-overview strong {
+      color: var(--ink);
+    }
+
     .sec-title {
       font-size: 19px;
       margin: 0 0 6px;
@@ -5443,7 +5664,7 @@
           </select>
           <button type="button" class="btn btn-primary btn-sm" id="ppAddTeamBtn" ${addBusy ? 'disabled' : ''}>${addBusy ? 'Adding...' : 'Add'}</button>` : ''}
         </div>` : `<p class="hint" style="margin:8px 0 0;">They're on every team.</p>`)
-        : `<p class="hint" style="margin:8px 0 0;">No teams exist yet. Create them in Manage, Teams &amp; invites.</p>`;
+        : `<p class="hint" style="margin:8px 0 0;">No teams exist yet. Create them in Manage, Teams &amp; skills.</p>`;
 
       const skillChips = skills.length ? skills.map(k => {
         const fromTeam = teamSkillIds.has(String(k.id));
@@ -5453,7 +5674,7 @@
           title="${fromTeam ? `Comes from their ${esc(teamNameForSkill(k.id))} team. Change it above.` : on ? 'Click to remove' : 'Click to add'}">
           ${colorDot(k.color)}${esc(k.name)}${fromTeam ? ' <span class="pp-toggle-note">via team</span>' : ''}
         </button>`;
-      }).join('') : `<p class="hint" style="margin:0;">No skills exist yet. Create them in Manage, Teams &amp; invites.</p>`;
+      }).join('') : `<p class="hint" style="margin:0;">No skills exist yet. Create them in Manage, Teams &amp; skills.</p>`;
 
       return `
         <div class="pp-section">
@@ -6023,7 +6244,7 @@
         return;
       }
 
-      if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
+      if (isHrAuthed && (needsOnboarding || needsDiscordLink) && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
         window.location.hash = '#/onboarding';
         return;
       }
@@ -6090,35 +6311,8 @@
     };
 
     function renderDiscordLinkModal() {
-      const show = isHrAuthed && needsDiscordLink;
-      let el = document.getElementById('discordLinkModal');
-      if (!show) {
-        if (el) el.remove();
-        return;
-      }
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'discordLinkModal';
-        el.className = 'modal-scrim';
-        el.style.zIndex = '900';
-        document.body.appendChild(el);
-      }
-      const token = getStoredToken();
-      const returnHash = window.location.hash.split('?')[0] || '#/dashboard';
-      const linkUrl = EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(token || '') + '&return=' + encodeURIComponent(returnHash);
-      const hashQuery = (window.location.hash.split('?')[1] || '');
-      const params = new URLSearchParams(hashQuery);
-      const errorCode = params.get('discordLinkError');
-      const errorMsg = errorCode ? (DISCORD_LINK_ERROR_MESSAGES[errorCode] || 'Could not link that Discord account. Please try again.') : null;
-      el.innerHTML = `
-        <div class="modal-card" style="max-width:420px;text-align:center;">
-          <div class="modal-body" style="padding:32px 24px;">
-            <h3 style="margin:0 0 10px;">Link your Discord account</h3>
-            <p style="color:var(--ink-soft);font-size:14px;margin-bottom:22px;">You need to link your Discord account to continue using this tool. This is required so we can reach you about recruitment tickets and other notifications.</p>
-            ${errorMsg ? `<div class="error-box" style="text-align:left;margin-bottom:18px;"><span>${esc(errorMsg)}</span></div>` : ''}
-            <a class="btn btn-primary" href="${linkUrl}">Link Discord account</a>
-          </div>
-        </div>`;
+      const el = document.getElementById('discordLinkModal');
+      if (el) el.remove();
     }
 
     function canSeeAnalytics() {
@@ -6146,8 +6340,9 @@
         { group: 'admin', label: 'Manage: Access', href: '#/manage?tab=access', navHidden: true, show: hasPermission('settings.manage_base_access') || hasPermission('settings.manage_groups'), keywords: 'sign in groups eligibility discord servers' },
         { group: 'admin', label: 'Manage: Games & rate', href: '#/manage?tab=games', navHidden: true, show: hasPermission('settings.manage_games') || hasPermission('settings.manage_rate'), keywords: 'devex usd minimum' },
         { group: 'admin', label: 'Manage: Roles', href: '#/manage?tab=roles', navHidden: true, show: hasPermission('roles.manage'), keywords: 'permissions hierarchy' },
-        { group: 'admin', label: 'Manage: Teams & invites', href: '#/manage?tab=onboarding', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'onboarding skillsets invite links' },
-        { group: 'admin', label: 'Manage: Recruitment', href: '#/manage?tab=recruitment', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'positions auto-hire sign-off finalise discord onboarding' },
+        { group: 'admin', label: 'Manage: Teams & skills', href: '#/manage?tab=teams', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'teams skillsets' },
+        { group: 'admin', label: 'Manage: Onboarding', href: '#/manage?tab=onboarding', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'onboarding invite links roblox group' },
+        { group: 'admin', label: 'Manage: Recruitment', href: '#/manage?tab=recruitment', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'positions auto-hire sign-off finalise' },
         { group: 'admin', label: 'Manage: Broadcasts', href: '#/manage?tab=broadcasts', navHidden: true, show: hasPermission('broadcasts.manage'), keywords: 'announcements message' },
         { group: 'you', label: 'My teams & skillsets', href: '#/my', navHidden: true },
         { group: 'you', label: 'Terms of Service', href: '#/tos', navHidden: true },
@@ -6252,89 +6447,9 @@
       }
 
       if (isHrAuthed) {
-        let joining = false;
-        let joinError = null;
-        let started = false;
-        let flowDone = false;
-
-        try {
-          const status = await getMyOnboardingLinkFlowStatus(token);
-          if (status && status.started) { started = true; flowDone = !!status.done; }
-        } catch (e) { }
-
-        const renderInvite = () => {
-          const teamPanels = `
-            ${info && info.team ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Team</div><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
-            ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}`;
-
-          app.innerHTML = `
-    ${topbar()}
-    <div class="gate-shell">
-      <div class="gate-card">
-        <div class="gate-icon">PV</div>
-        <h2>You've been invited</h2>
-        ${loadFailed
-              ? `<div class="error-box"><span>This invite link is invalid or has expired.</span></div>`
-              : flowDone
-                ? `
-          <p>You're all set - this team and skillset have been added to your account.</p>
-          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">${teamPanels}</div>`
-                : started
-                  ? `
-          <p>Check your Discord DMs from the bot. You'll need to join the PlayVerse Roblox group (and request to join your team's group, if it has one) - your access unlocks automatically once you've done that and clicked Continue there.</p>
-          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">${teamPanels}</div>`
-                  : `
-          <p>Click join to start setting up this team and skillset on your account. You'll need to join the PlayVerse Roblox group (and your team's group, if it has one) via a Discord DM before access unlocks.</p>
-          <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">${teamPanels}</div>`}
-        ${joinError ? `<div class="error-box"><span>${esc(joinError)}</span></div>` : ''}
-        ${!loadFailed && !started ? `<button type="button" class="btn btn-primary" id="joinTeamBtn" ${joining ? 'disabled' : ''}>${joining ? 'Joining...' : 'Join'}</button>` : ''}
-        ${!loadFailed && started && !flowDone ? `<button type="button" class="btn btn-ghost" id="joinRefreshBtn">I've finished in Discord - refresh</button>` : ''}
-        ${flowDone ? `<button type="button" class="btn btn-primary" id="joinDoneBtn">Continue</button>` : ''}
-      </div>
-    </div>`;
-          wireTopbarSignOut();
-          renderDiscordLinkModal();
-
-          const btn = document.getElementById('joinTeamBtn');
-          if (btn) btn.addEventListener('click', async () => {
-            joining = true; joinError = null; renderInvite();
-            try {
-              const data = await claimOnboardingLinkToken(token);
-              joining = false;
-              if (data && data.alreadyStarted) {
-                started = true;
-                flowDone = !!data.done;
-              } else {
-                started = true;
-              }
-              renderInvite();
-            } catch (e) {
-              joining = false;
-              joinError = JOIN_LINK_ERROR_MESSAGES[e.message] || "Could not apply that invite link. It may be invalid or expired.";
-              renderInvite();
-            }
-          });
-
-          const refreshBtn = document.getElementById('joinRefreshBtn');
-          if (refreshBtn) refreshBtn.addEventListener('click', async () => {
-            try {
-              const status = await getMyOnboardingLinkFlowStatus(token);
-              flowDone = !!(status && status.done);
-              if (!flowDone) joinError = "Still waiting on the group joins - finish those in Discord first.";
-              renderInvite();
-            } catch (e) {
-              renderInvite();
-            }
-          });
-
-          const doneBtn = document.getElementById('joinDoneBtn');
-          if (doneBtn) doneBtn.addEventListener('click', () => {
-            clearPendingRef();
-            window.location.hash = '#/onboarding';
-          });
-        };
-
-        renderInvite();
+        if (!loadFailed) setPendingInvite(token);
+        clearPendingRef();
+        window.location.hash = '#/onboarding';
         return;
       }
 
@@ -6347,14 +6462,14 @@
         ${loadFailed
           ? `<div class="error-box"><span>This invite link is invalid or has expired. You can still sign in normally.</span></div>`
           : `
-          <p>Sign in with Roblox to continue. You'll then need to link Discord and join a couple of Roblox groups before this team and skillset are added to your account.</p>
+          <p>Sign in with Roblox to accept this invite. We'll then walk you through linking Discord and joining the team, one step at a time.</p>
           <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
             ${info && info.team ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Team</div><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
             ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
           </div>`}
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         <button type="button" class="btn btn-primary roblox-btn" id="joinSignInBtn" ${configError ? 'disabled' : ''}>Sign in with Roblox</button>
-        <div class="gate-note">You'll finish setup (Discord link + group joins) right after signing in.</div>
+        
       </div>
     </div>`;
 
@@ -6364,7 +6479,7 @@
     }
 
     const JOIN_LINK_ERROR_MESSAGES = {
-      discord_not_linked: 'Link your Discord account first (see the popup), then click Join again.',
+      discord_not_linked: 'Link your Discord account first, then accept the invite.',
       discord_not_in_server: "You'll need to join our Discord server before you can claim this invite - once you're in, come back and try again.",
       link_not_found: 'This invite link is invalid or has expired.'
     };
@@ -9102,7 +9217,8 @@
         { id: 'access', label: 'Access', enabled: canManageBaseAccess || canManageGroups },
         { id: 'games', label: 'Games & rate', enabled: canManageGames || canManageRate },
         { id: 'roles', label: 'Roles', enabled: canManageRoles },
-        { id: 'onboarding', label: 'Teams & invites', enabled: canManageOnboarding },
+        { id: 'teams', label: 'Teams & skills', enabled: canManageOnboarding },
+        { id: 'onboarding', label: 'Onboarding', enabled: canManageOnboarding },
         { id: 'recruitment', label: 'Recruitment', enabled: canManageOnboarding },
         { id: 'broadcasts', label: 'Broadcasts', enabled: canManageBroadcasts }
       ].filter(t => t.enabled);
@@ -9214,15 +9330,16 @@
           ],
           games: [],
           roles: [],
+          teams: [],
           onboarding: [
-            { id: 'sec-teams', label: 'Teams & skillsets' },
-            { id: 'sec-invites', label: 'Invite links' }
+            { id: 'sec-ob-overview', label: 'How it works' },
+            { id: 'sec-invites', label: 'Invite links' },
+            { id: 'sec-onboarding-flow', label: 'Roblox group step' }
           ],
           recruitment: [
             { id: 'sec-positions', label: 'Positions' },
             { id: 'sec-autohire', label: 'Auto-hire' },
-            { id: 'sec-signoff', label: 'Sign-off & finalise' },
-            { id: 'sec-onboarding-flow', label: 'Discord onboarding' }
+            { id: 'sec-signoff', label: 'Sign-off & finalise' }
           ],
           broadcasts: [
             { id: 'sec-broadcasts', label: 'Broadcasts' },
@@ -9517,7 +9634,7 @@
         </div>
       </div>` : ''}
 
-      ${manageTab === 'onboarding' && canManageOnboarding ? `
+      ${manageTab === 'teams' && canManageOnboarding ? `
       <div class="heading-block" id="sec-teams">
         <h2 class="sec-title">Teams &amp; skillsets</h2>
         <p class="sub">Create a team for each Discord/Roblox group, tag it with the skillsets that apply to it, then generate an invite link below. Anyone who signs in through that link gets assigned to that team and skillset automatically, and sees the right Discord and Roblox group buttons in their onboarding.</p>
@@ -9620,9 +9737,25 @@
         </div>
       </div>
 
+      ` : ''}
+      ${manageTab === 'onboarding' && canManageOnboarding ? `
+      <div class="heading-block" id="sec-ob-overview">
+        <h2 class="sec-title">How onboarding works</h2>
+        <p class="sub">Everyone new goes through the same setup page after signing in. It shows one step at a time and remembers where they got to.</p>
+      </div>
+      <div class="panel" style="max-width:640px;">
+        <ol class="ob-overview">
+          <li><strong>Link Discord.</strong> Required for everyone.</li>
+          <li><strong>Join their team.</strong> Only if they came in through an invite link below. The bot DMs them the Roblox group step, and the team, skill and role are added once they finish.</li>
+          <li><strong>Welcome, team info, Terms of Service and Acceptable Use Policy.</strong> They read and accept each one.</li>
+          <li><strong>Add a payout method.</strong> Optional, they can skip it.</li>
+        </ol>
+        <p class="hint" style="margin:10px 0 0;">Recruits hired through Recruitment go through the same Roblox group step after they're finalised.</p>
+      </div>
+
       <div class="heading-block" id="sec-invites" style="margin-top:36px;">
-        <h2 class="sec-title">Onboarding links</h2>
-        <p class="sub">Pick a team, skillset, and optional role, generate a link, and send it to whoever you're onboarding. When they sign in through it, they'll be assigned automatically.</p>
+        <h2 class="sec-title">Invite links</h2>
+        <p class="sub">Pick a team, skill and optional role, then send the link to the person you're bringing in. They sign in through it and the setup page takes them through the rest.</p>
       </div>
       <div class="panel" style="max-width:760px;">
         ${teamsLoading ? `<div class="dash-loading">Loading links...</div>` : onboardingLinks.length === 0 ? `<div class="empty-note">No invite links yet. Create one below.</div>` : onboardingLinks.map(l => `
@@ -9672,7 +9805,35 @@
         </div>
       </div>
 
-      ` : ''}
+      
+      <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
+        <h2 class="sec-title">Roblox group step</h2>
+        <p class="sub">Both invite links and finalised recruits go through this. The bot DMs them to join this Roblox group, then ranks them automatically. Ranking needs a Roblox Open Cloud API key (ROBLOX_GROUP_API_KEY) on the bot, created under your own account with read/write access to this group. Without it, they're asked to see a lead instead.</p>
+      </div>
+      <div class="panel" style="max-width:640px;margin-bottom:20px;">
+        <div class="preview-label">Roblox group API key</div>
+        ${robloxGroupApiKeyStatusLoading ? `<div class="dash-loading">Checking...</div>` : robloxGroupApiKeyStatus.configured ? `
+          <p style="color:var(--ok-text);font-size:13px;">ROBLOX_GROUP_API_KEY is set - auto-ranking is ready to go.</p>
+        ` : `
+          <p style="color:var(--warn-text);font-size:13px;">ROBLOX_GROUP_API_KEY is not set on the bot yet - the "Get Ranked" step will fail until it is.</p>
+        `}
+      </div>
+      <div class="panel" style="max-width:640px;">
+        ${onboardingGroupConfigError ? `<div class="error-box"><span>${esc(onboardingGroupConfigError)}</span></div>` : ''}
+        ${onboardingGroupConfigSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Onboarding group settings updated</strong></div></div>` : ''}
+        ${onboardingGroupConfigLoading ? `<div class="dash-loading">Loading settings...</div>` : `
+        <div class="field">
+          <label>Roblox group ID</label>
+          <input type="number" id="onboardingGroupId" placeholder="e.g. 123456" value="${onboardingGroupConfig.groupId != null ? esc(onboardingGroupConfig.groupId) : ''}">
+        </div>
+        <div class="field">
+          <label>Group role ID to assign <span class="hint">(the numeric role/rank id, not its name)</span></label>
+          <input type="number" id="onboardingGroupRoleId" placeholder="e.g. 5" value="${onboardingGroupConfig.groupRoleId != null ? esc(onboardingGroupConfig.groupRoleId) : ''}">
+          <p class="sub" style="margin:6px 0 0;">Find this in the group's role management page - it's not the same as the rank number shown to members.</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="saveOnboardingGroupConfigBtn" ${savingOnboardingGroupConfig ? 'disabled' : ''}>${savingOnboardingGroupConfig ? 'Saving...' : 'Save settings'}</button>
+        `}
+      </div>` : ''}
       ${manageTab === 'recruitment' && canManageOnboarding ? `
       <div class="heading-block" id="sec-positions">
         <h2 class="sec-title">Positions</h2>
@@ -9766,34 +9927,7 @@
         `}
       </div>
 
-      <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
-        <h2 class="sec-title">Post-finalise Discord onboarding</h2>
-        <p class="sub">Once a recruit is finalised, the bot DMs them to join the Roblox group, then confirm and get ranked automatically. The actual ranking step needs a Roblox Open Cloud API key set as the ROBLOX_GROUP_API_KEY environment variable on the bot - create it under your own account in the Roblox Creator Dashboard (group-owned keys are deprecated), then authorize it for the target group with group read/write access. Without it, the DM flow still runs but ranking will fail and ask them to see a lead instead.</p>
-      </div>
-      <div class="panel" style="max-width:640px;margin-bottom:20px;">
-        <div class="preview-label">Roblox group API key</div>
-        ${robloxGroupApiKeyStatusLoading ? `<div class="dash-loading">Checking...</div>` : robloxGroupApiKeyStatus.configured ? `
-          <p style="color:var(--ok-text);font-size:13px;">ROBLOX_GROUP_API_KEY is set - auto-ranking is ready to go.</p>
-        ` : `
-          <p style="color:var(--warn-text);font-size:13px;">ROBLOX_GROUP_API_KEY is not set on the bot yet - the "Get Ranked" step will fail until it is.</p>
-        `}
-      </div>
-      <div class="panel" style="max-width:640px;">
-        ${onboardingGroupConfigError ? `<div class="error-box"><span>${esc(onboardingGroupConfigError)}</span></div>` : ''}
-        ${onboardingGroupConfigSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Onboarding group settings updated</strong></div></div>` : ''}
-        ${onboardingGroupConfigLoading ? `<div class="dash-loading">Loading settings...</div>` : `
-        <div class="field">
-          <label>Roblox group ID</label>
-          <input type="number" id="onboardingGroupId" placeholder="e.g. 123456" value="${onboardingGroupConfig.groupId != null ? esc(onboardingGroupConfig.groupId) : ''}">
-        </div>
-        <div class="field">
-          <label>Group role ID to assign <span class="hint">(the numeric role/rank id, not its name)</span></label>
-          <input type="number" id="onboardingGroupRoleId" placeholder="e.g. 5" value="${onboardingGroupConfig.groupRoleId != null ? esc(onboardingGroupConfig.groupRoleId) : ''}">
-          <p class="sub" style="margin:6px 0 0;">Find this in the group's role management page - it's not the same as the rank number shown to members.</p>
-        </div>
-        <button type="button" class="btn btn-primary" id="saveOnboardingGroupConfigBtn" ${savingOnboardingGroupConfig ? 'disabled' : ''}>${savingOnboardingGroupConfig ? 'Saving...' : 'Save settings'}</button>
-        `}
-      </div>` : ''}
+` : ''}
 
       ${manageTab === 'broadcasts' && canManageBroadcasts ? `
       <div class="heading-block" id="sec-broadcasts">
@@ -10619,165 +10753,307 @@
       load();
     }
 
+    const INVITE_STORAGE_KEY = 'pv_pending_invite';
+    function getPendingInvite() { try { return localStorage.getItem(INVITE_STORAGE_KEY) || null; } catch (e) { return null; } }
+    function setPendingInvite(token) { try { localStorage.setItem(INVITE_STORAGE_KEY, token); } catch (e) { } }
+    function clearPendingInvite() { try { localStorage.removeItem(INVITE_STORAGE_KEY); } catch (e) { } }
+
     function renderOnboarding() {
       if (!authReady) { app.innerHTML = topbar(); return; }
       if (!isHrAuthed) { renderHrGate(); return; }
 
       const myGen = renderGen;
-      let steps = [];
+      const query = parseHashQuery();
+      const discordError = query.get('discordLinkError');
+      let serverSteps = [];
+      let myAssignment = [];
+      let payoutMethod = null;
       let loading = true;
       let loadError = null;
-      let busyStepId = null;
-      let stepMessage = {};
-      let myAssignment = [];
+      let busy = false;
+      let stepError = null;
+      let viewing = null;
 
-      function renderTeamInfoBody(s) {
-        const assignments = myAssignment || [];
-        if (!assignments.length) {
-          return `<div class="empty-note" style="margin-top:10px;">You haven't been assigned to a team yet. Ask whoever invited you for an invite link, or check back later.</div>`;
+      let inviteToken = getPendingInvite();
+      let invite = { info: null, invalid: false, started: false, done: false };
+      let pollTimer = null;
+
+      function buildSteps() {
+        const list = [];
+        list.push({
+          id: 'discord', title: 'Link Discord', blurb: 'So we can reach you and give you access.',
+          required: true, done: !needsDiscordLink
+        });
+        if (inviteToken && !invite.invalid) {
+          const teamName = invite.info && invite.info.team ? invite.info.team.name : null;
+          list.push({
+            id: 'invite', title: teamName ? `Join ${teamName}` : 'Join your team', blurb: 'Finish your invite in Discord.',
+            required: true, done: invite.done
+          });
         }
-        return `
-          <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
-            ${assignments.map(a => {
-          const team = a.team;
-          const skillset = a.skillset;
-          if (!team && !skillset) return '';
-          return `
-            <div class="panel" style="margin:0;padding:14px 16px;">
-              <div style="display:flex;flex-wrap:wrap;gap:16px;">
-                ${team ? `
-                <div style="flex:1;min-width:160px;">
-                  <div class="preview-label" style="margin-bottom:2px;">Team</div>
-                  <strong style="font-size:15px;color:${esc(team.color || 'var(--ink)')};">${esc(team.name)}</strong>
-                  ${team.info ? `<p class="sub" style="margin:8px 0 0;white-space:pre-wrap;">${esc(team.info)}</p>` : ''}
-                  <div style="display:flex;gap:8px;margin-top:12px;">
-                    ${team.discord_url ? `<a class="btn btn-primary btn-sm btn-equal" href="${esc(team.discord_url)}" target="_blank" rel="noopener">Join Discord</a>` : ''}
-                    ${team.roblox_group_url ? `<a class="btn btn-ghost btn-sm btn-equal" href="${esc(team.roblox_group_url)}" target="_blank" rel="noopener">Roblox group</a>` : ''}
-                  </div>
-                </div>` : ''}
-                ${skillset ? `
-                <div style="flex:1;min-width:160px;">
-                  <div class="preview-label" style="margin-bottom:2px;">Skillset</div>
-                  <strong style="font-size:15px;color:${esc(skillset.color || 'var(--ink)')};">${esc(skillset.name)}</strong>
-                  ${skillset.description ? `<p class="sub" style="margin:8px 0 0;">${esc(skillset.description)}</p>` : ''}
-                </div>` : ''}
-              </div>
-            </div>`;
+        serverSteps.forEach(s => list.push({
+          id: s.id, title: s.title, blurb: s.description, required: !!s.required || s.type === 'team_info', done: !!s.completedAt, server: s
+        }));
+        list.push({
+          id: 'payout', title: 'Add a payout method', blurb: 'Optional. You can do this later.',
+          required: false, done: !!payoutMethod
+        });
+        return list;
+      }
+
+      function currentStep(list) {
+        if (viewing) { const v = list.find(s => s.id === viewing); if (v) return v; }
+        return list.find(s => !s.done && s.id !== 'payout') || null;
+      }
+
+      function allRequiredDone(list) { return list.filter(s => s.required).every(s => s.done); }
+
+      function paragraphs(text) {
+        return String(text || '').split(/\n\s*\n/).map(p => `<p>${esc(p.trim())}</p>`).join('');
+      }
+
+      function railHtml(list, cur) {
+        return `<ol class="ob-rail" aria-label="Setup steps">
+          ${list.map((s, i) => {
+          const state = s.done ? 'done' : (cur && cur.id === s.id ? 'now' : '');
+          return `<li class="${state}">
+              <button type="button" data-ob-view="${esc(s.id)}" ${cur && cur.id === s.id ? 'aria-current="step"' : ''}>
+                <span class="ob-mark" aria-hidden="true">${s.done ? '&#10003;' : i + 1}</span>
+                <span class="ob-rail-text"><span class="ob-rail-title">${esc(s.title)}</span>${!s.required ? '<span class="ob-rail-sub">Optional</span>' : ''}</span>
+              </button>
+            </li>`;
         }).join('')}
+        </ol>`;
+      }
+
+      function discordStepHtml(s) {
+        const token = getStoredToken();
+        const linkUrl = EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(token || '') + '&return=' + encodeURIComponent('#/onboarding');
+        const errMsg = discordError && !s.done ? (DISCORD_LINK_ERROR_MESSAGES[discordError] || 'Could not link that Discord account. Try again.') : null;
+        return `
+          <h2>Link your Discord account</h2>
+          <p class="ob-lead">We use Discord to message you about your team, applications and payments. It only takes a few seconds.</p>
+          ${errMsg ? `<div class="error-box"><span>${esc(errMsg)}</span></div>` : ''}
+          ${s.done
+            ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Discord is linked</strong><span>You can change this later from your account.</span></div></div>`
+            : `<a class="btn btn-primary" href="${linkUrl}">Link Discord</a>`}`;
+      }
+
+      function inviteStepHtml(s) {
+        const info = invite.info || {};
+        const chips = `
+          <div class="ob-invite">
+            ${info.team ? `<div><span class="hint">Team</span><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
+            ${info.skillset ? `<div><span class="hint">Skill</span><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
           </div>`;
+        if (needsDiscordLink) return `<h2>${esc(s.title)}</h2>${chips}<p class="ob-lead">Link Discord first, then come back to this step.</p><button type="button" class="btn btn-ghost" data-ob-view="discord">Go to Link Discord</button>`;
+        if (invite.done) return `<h2>${esc(s.title)}</h2>${chips}<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>You're on the team</strong><span>This team and skill are on your account now.</span></div></div>`;
+        if (invite.started) return `
+          <h2>${esc(s.title)}</h2>
+          ${chips}
+          <p class="ob-lead">Our bot has sent you a Discord DM. Follow it to join the PlayVerse Roblox group (and your team's group if it has one), then press Continue in that DM.</p>
+          <p class="hint">This page checks automatically every few seconds.</p>
+          <button type="button" class="btn btn-ghost" id="obInviteCheck" ${busy ? 'disabled' : ''}>${busy ? 'Checking...' : 'Check now'}</button>`;
+        return `
+          <h2>${esc(s.title)}</h2>
+          ${chips}
+          <p class="ob-lead">You were invited to join this team. When you continue, our bot will DM you on Discord with a couple of quick steps.</p>
+          <button type="button" class="btn btn-primary" id="obInviteJoin" ${busy ? 'disabled' : ''}>${busy ? 'Starting...' : 'Accept invite'}</button>`;
+      }
+
+      function teamInfoHtml() {
+        if (!myAssignment || !myAssignment.length) {
+          return `<div class="empty-note">You're not on a team yet. That's fine, a lead will add you, or ask for an invite link.</div>`;
+        }
+        return `<div class="ob-teams">${myAssignment.map(a => `
+          <div class="panel" style="margin:0;">
+            ${a.team ? `<strong style="color:${esc(a.team.color || 'var(--ink)')};font-size:15px;">${esc(a.team.name)}</strong>` : ''}
+            ${a.skillset ? `<span class="hint"> as ${esc(a.skillset.name)}</span>` : ''}
+            ${a.team && a.team.info ? `<p class="sub" style="margin:8px 0 0;white-space:pre-wrap;">${esc(a.team.info)}</p>` : ''}
+            ${a.team && (a.team.discord_url || a.team.roblox_group_url) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+              ${a.team.discord_url ? `<a class="btn btn-primary btn-sm" href="${esc(safeUrl(a.team.discord_url) || '#')}" target="_blank" rel="noopener">Team Discord</a>` : ''}
+              ${a.team.roblox_group_url ? `<a class="btn btn-ghost btn-sm" href="${esc(safeUrl(a.team.roblox_group_url) || '#')}" target="_blank" rel="noopener">Team Roblox group</a>` : ''}
+            </div>` : ''}
+          </div>`).join('')}</div>`;
+      }
+
+      function serverStepHtml(s) {
+        const st = s.server;
+        const isPolicy = st.type === 'tos' || st.type === 'aup';
+        let body = '';
+        if (st.type === 'team_info') body = teamInfoHtml();
+        else if (isPolicy) body = `<div class="ob-policy" tabindex="0" aria-label="${esc(st.title)}">${esc(st.content)}</div>`;
+        else body = `<div class="ob-copy">${paragraphs(st.content)}</div>`;
+        return `
+          <h2>${esc(st.title)}</h2>
+          ${st.description ? `<p class="ob-lead">${esc(st.description)}</p>` : ''}
+          ${body}
+          ${stepError ? `<div class="error-box"><span>${esc(stepError)}</span></div>` : ''}
+          ${s.done
+            ? `<p class="ob-done-note">&#10003; ${isPolicy ? 'You accepted this' : 'Done'} ${st.completedAt ? esc(relTime(st.completedAt)) : ''}.</p>`
+            : `<button type="button" class="btn btn-primary" data-ob-complete="${esc(st.id)}" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : isPolicy ? 'I agree' : 'Continue'}</button>`}`;
+      }
+
+      function payoutStepHtml(s) {
+        return `
+          <h2>Add a payout method</h2>
+          <p class="ob-lead">Tell us whether you want to be paid in Robux, PayPal or Venmo. You can skip this and do it any time from My payments.</p>
+          ${s.done ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Payout method saved</strong><span>${esc(PAYMENT_METHODS[payoutMethod.method] ? PAYMENT_METHODS[payoutMethod.method].label : payoutMethod.method)}</span></div></div>`
+            : `<div style="display:flex;gap:8px;flex-wrap:wrap;"><a class="btn btn-primary" href="#/my">Add payout method</a><button type="button" class="btn btn-ghost" id="obFinish">Skip for now</button></div>`}`;
+      }
+
+      function finishHtml(list) {
+        const optionalLeft = list.filter(s => !s.required && !s.done);
+        return `
+          <h2>You're all set</h2>
+          <p class="ob-lead">Your account is ready. You can come back to this page any time to reread the policies.</p>
+          ${optionalLeft.length ? `<p class="hint">Still optional: ${optionalLeft.map(s => esc(s.title.toLowerCase())).join(', ')}.</p>` : ''}
+          <a class="btn btn-primary" href="${hasPermission('dashboard.view') ? '#/dashboard' : '#/my'}">Go to PlayVerse</a>`;
       }
 
       function paint() {
-        const requiredSteps = steps.filter(s => s.required);
-        const completedRequired = requiredSteps.filter(s => s.completedAt).length;
-        const allDone = requiredSteps.length > 0 && completedRequired === requiredSteps.length;
+        if (myGen !== renderGen) return;
+        const list = buildSteps();
+        const cur = currentStep(list);
+        const required = list.filter(s => s.required);
+        const doneCount = required.filter(s => s.done).length;
+        let main;
+        if (loading) main = `<div class="dash-loading">Loading your setup...</div>`;
+        else if (loadError) main = `<div class="dash-empty"><h3>Could not load your setup</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="obRetry">Try again</button></div>`;
+        else if (!cur) main = finishHtml(list);
+        else if (cur.id === 'discord') main = discordStepHtml(cur);
+        else if (cur.id === 'invite') main = inviteStepHtml(cur);
+        else if (cur.id === 'payout') main = payoutStepHtml(cur);
+        else main = serverStepHtml(cur);
 
         app.innerHTML = `
     ${topbar()}
     <div class="shell">
       <div class="heading-block">
-        <h1>Welcome to PlayVerse</h1>
-        <p class="sub">Before you get started, take a quick look through this and accept our policies below.</p>
+        <h1>${allRequiredDone(list) && !loading ? 'Your setup' : 'Welcome to PlayVerse'}</h1>
+        <p class="sub">${loading ? '' : allRequiredDone(list) ? 'Everything required is done.' : `${doneCount} of ${required.length} required steps done. It takes a couple of minutes.`}</p>
+        ${!loading ? `<div class="ob-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${required.length}" aria-valuenow="${doneCount}"><i style="width:${required.length ? Math.round(doneCount / required.length * 100) : 100}%"></i></div>` : ''}
       </div>
-
-      ${!loading && requiredSteps.length > 0 ? (
-            allDone
-              ? `<div class="confirm-box" style="margin-bottom:22px;"><div class="icon">&#10003;</div><div class="txt"><strong>All set</strong><span>Taking you in...</span></div></div>`
-              : `<div class="panel" style="margin-bottom:22px;padding:16px 18px;"><strong>${completedRequired} of ${requiredSteps.length} steps done</strong></div>`
-          ) : ''}
-
-      <div class="table-wrap">
-        ${loading ? `<div class="dash-loading">Loading...</div>` : loadError ? `
-          <div class="dash-empty"><h3>Could not load onboarding</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryOnboardingBtn">Try again</button></div>
-        ` : `
-        <div style="display:flex;flex-direction:column;gap:12px;padding:18px;">
-          ${steps.map(s => {
-            const done = !!s.completedAt;
-            const msg = stepMessage[s.id];
-            return `
-          <div class="panel" style="margin:0;${done ? 'border-color:var(--ok-line);background:var(--ok-bg);' : ''}">
-            <div class="role-row-top" style="align-items:flex-start;">
-              <div>
-                <strong>${esc(s.title)}</strong>
-                <div class="role-meta">${esc(ONBOARDING_TYPE_LABELS[s.type] || s.type)}</div>
-                ${s.description ? `<p class="sub" style="margin:8px 0 0;">${esc(s.description)}</p>` : ''}
-                ${s.type === 'team_info' ? renderTeamInfoBody(s) : (s.content ? `<div class="empty-note" style="white-space:pre-wrap;margin-top:10px;max-height:220px;overflow:auto;">${esc(s.content)}</div>` : '')}
-                ${msg ? `<div class="error-box" style="margin-top:10px;"><span>${esc(msg)}</span></div>` : ''}
-              </div>
-              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-                ${done ? `<span class="perm-chip" style="background:var(--ok-bg);color:var(--ok-text);border-color:var(--ok-line);">Completed</span>` : `
-                  <button type="button" class="btn btn-primary btn-sm" data-complete-step="${esc(s.id)}" ${busyStepId === s.id ? 'disabled' : ''}>
-                    ${busyStepId === s.id ? 'Saving...' : (s.type === 'tos' || s.type === 'aup') ? 'I agree' : 'Got it, continue'}
-                  </button>`}
-              </div>
-            </div>
-          </div>`;
-          }).join('')}
-        </div>`}
+      <div class="ob-layout">
+        ${loading || loadError ? '' : railHtml(list, cur)}
+        <section class="panel ob-main" aria-live="polite">${main}</section>
       </div>
     </div>`;
 
         wireTopbarSignOut();
-
-        const retryBtn = document.getElementById('retryOnboardingBtn');
-        if (retryBtn) retryBtn.addEventListener('click', load);
-
-        document.querySelectorAll('[data-complete-step]').forEach(el => el.addEventListener('click', async () => {
-          const id = el.dataset.completeStep;
-          busyStepId = id; stepMessage = { ...stepMessage, [id]: null }; paint();
-          try {
-            await completeOnboardingStep(id);
-            busyStepId = null;
-            steps = steps.map(s => s.id === id ? { ...s, completedAt: new Date().toISOString() } : s);
-            paint();
-
-            const requiredSteps = steps.filter(s => s.required);
-            const allDone = requiredSteps.length > 0 && requiredSteps.every(s => s.completedAt);
-            if (allDone) {
-              needsOnboarding = false;
-              setTimeout(() => {
-                window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my';
-              }, 700);
-            }
-          } catch (err) {
-            busyStepId = null;
-            stepMessage = { ...stepMessage, [id]: (err && err.message) ? err.message : 'Could not save that step.' };
-            paint();
-          }
-        }));
+        const retry = document.getElementById('obRetry');
+        if (retry) retry.addEventListener('click', load);
+        document.querySelectorAll('[data-ob-view]').forEach(b => b.addEventListener('click', () => { viewing = b.dataset.obView; stepError = null; paint(); }));
+        document.querySelectorAll('[data-ob-complete]').forEach(b => b.addEventListener('click', () => completeServerStep(b.dataset.obComplete)));
+        const join = document.getElementById('obInviteJoin');
+        if (join) join.addEventListener('click', acceptInvite);
+        const check = document.getElementById('obInviteCheck');
+        if (check) check.addEventListener('click', () => checkInvite(true));
+        const finish = document.getElementById('obFinish');
+        if (finish) finish.addEventListener('click', () => { viewing = null; window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my'; });
       }
 
-      async function load() {
-        loading = true; loadError = null; busyStepId = null; paint();
+      function afterStepDone() {
+        viewing = null;
+        stepError = null;
+        const list = buildSteps();
+        needsOnboarding = serverSteps.some(s => s.required && !s.completedAt);
+        paint();
+        if (allRequiredDone(list)) window.scrollTo(0, 0);
+      }
+
+      async function completeServerStep(id) {
+        busy = true; stepError = null; paint();
         try {
-          const [stepsResult, assignmentResult] = await Promise.all([
-            loadMyOnboarding(),
-            getMyAssignment().catch(() => null)
-          ]);
-          steps = stepsResult;
-          myAssignment = assignmentResult;
-        } catch (err) {
-          loadError = (err && err.message) ? err.message : 'Could not load your onboarding checklist.';
-          if (myGen !== renderGen) return;
-          loading = false;
+          await completeOnboardingStep(id);
+          serverSteps = serverSteps.map(s => s.id === id ? { ...s, completedAt: new Date().toISOString() } : s);
+          busy = false;
+          afterStepDone();
+        } catch (e) {
+          busy = false;
+          stepError = e.message || 'Could not save that step.';
           paint();
-          return;
+        }
+      }
+
+      async function acceptInvite() {
+        busy = true; stepError = null; paint();
+        try {
+          const data = await claimOnboardingLinkToken(inviteToken);
+          invite.started = true;
+          invite.done = !!(data && data.done);
+          if (invite.done) finishInvite();
+        } catch (e) {
+          const msg = JOIN_LINK_ERROR_MESSAGES[e.code] || e.message || 'Could not accept that invite.';
+          if (e.code === 'link_not_found') { invite.invalid = true; clearPendingInvite(); toast('That invite link is no longer valid.', 'err'); }
+          else toast(msg, 'err');
+        }
+        busy = false;
+        paint();
+        startPolling();
+      }
+
+      async function checkInvite(manual) {
+        if (manual) { busy = true; paint(); }
+        try {
+          const status = await getMyOnboardingLinkFlowStatus(inviteToken);
+          invite.started = !!(status && status.started);
+          if (status && status.done && !invite.done) { invite.done = true; finishInvite(); }
+          else if (manual && invite.started) toast("Not finished yet. Complete the steps in the Discord DM, then check again.");
+        } catch (e) { }
+        if (manual) busy = false;
+        if (myGen === renderGen) paint();
+      }
+
+      async function finishInvite() {
+        clearPendingInvite();
+        stopPolling();
+        try { myAssignment = await getMyAssignment() || []; } catch (e) { }
+        toast("You've joined the team.");
+        afterStepDone();
+      }
+
+      function startPolling() {
+        stopPolling();
+        if (!inviteToken || invite.done || !invite.started) return;
+        pollTimer = setInterval(() => {
+          if (myGen !== renderGen || invite.done) { stopPolling(); return; }
+          checkInvite(false);
+        }, 6000);
+      }
+      function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+
+      async function load() {
+        loading = true; loadError = null; paint();
+        try {
+          const tasks = [loadMyOnboarding(), getMyAssignment().catch(() => []), getMyPaymentMethod().catch(() => null)];
+          if (inviteToken) {
+            tasks.push(fetchOnboardingLinkPreview(inviteToken).catch(() => null));
+            tasks.push(getMyOnboardingLinkFlowStatus(inviteToken).catch(() => null));
+          }
+          const [steps, assignment, method, info, status] = await Promise.all(tasks);
+          serverSteps = steps || [];
+          myAssignment = assignment || [];
+          payoutMethod = method;
+          if (inviteToken) {
+            if (!info) { invite.invalid = true; clearPendingInvite(); }
+            else {
+              invite.info = info;
+              invite.started = !!(status && status.started);
+              invite.done = !!(status && status.done);
+              if (invite.done) clearPendingInvite();
+            }
+          }
+        } catch (e) {
+          loadError = e.message || 'Could not load your setup.';
         }
         if (myGen !== renderGen) return;
         loading = false;
-
-        const requiredSteps = steps.filter(s => s.required);
-        const allDone = requiredSteps.length > 0 && requiredSteps.every(s => s.completedAt);
-        if (allDone) {
-          needsOnboarding = false;
-          paint();
-          setTimeout(() => {
-            window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my';
-          }, 700);
-          return;
-        }
-
+        needsOnboarding = serverSteps.some(s => s.required && !s.completedAt);
+        if (discordError || query.get('discordLinked')) history.replaceState(null, '', '#/onboarding');
+        if (invite.invalid && inviteToken) toast('That invite link is invalid or has expired.', 'err');
         paint();
+        startPolling();
       }
 
       load();
