@@ -2159,6 +2159,59 @@ app.get('/discord-auth-start-staff', async (req, res) => {
     res.redirect(authorizeUrl.toString());
 });
 
+async function exchangeDiscordCode(code, context) {
+    const body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: DISCORD_REDIRECT_URI,
+        client_id: DISCORD_CLIENT_ID,
+        client_secret: DISCORD_CLIENT_SECRET
+    });
+    let lastStatus = 0;
+    let lastText = '';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        let tokenRes;
+        try {
+            tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'PlayVerseHR (https://playverse.cc, 1.0)' },
+                body
+            });
+        } catch (e) {
+            lastStatus = 0;
+            lastText = e.message;
+            console.error(`[discord-auth-callback] token exchange network error (attempt ${attempt}) for ${context}: ${e.message}`);
+            await new Promise(r => setTimeout(r, 800 * attempt));
+            continue;
+        }
+        if (tokenRes.ok) return { ok: true, tokenJson: await tokenRes.json() };
+        lastStatus = tokenRes.status;
+        lastText = await tokenRes.text().catch(() => '');
+        console.error(`[discord-auth-callback] token exchange failed (status ${lastStatus}, attempt ${attempt}) for ${context}: ${lastText.slice(0, 500)}`);
+        if (lastStatus === 429 || lastStatus >= 500) {
+            let waitMs = 1000 * attempt;
+            try {
+                const parsed = JSON.parse(lastText);
+                if (parsed && parsed.retry_after) waitMs = Math.ceil(Number(parsed.retry_after) * 1000);
+            } catch (e) { }
+            const headerWait = Number(tokenRes.headers.get('retry-after'));
+            if (headerWait > 0) waitMs = Math.max(waitMs, headerWait * 1000);
+            if (waitMs > 6000) break;
+            await new Promise(r => setTimeout(r, waitMs));
+            continue;
+        }
+        break;
+    }
+    let reason = 'token_exchange_failed';
+    let discordError = '';
+    try { discordError = (JSON.parse(lastText) || {}).error || ''; } catch (e) { }
+    if (lastStatus === 429 || /error code: 1015|rate limit/i.test(lastText)) reason = 'discord_rate_limited';
+    else if (discordError === 'invalid_client' || lastStatus === 401) reason = 'discord_bad_credentials';
+    else if (discordError === 'invalid_grant') reason = 'discord_code_rejected';
+    else if (lastStatus >= 500 || lastStatus === 0) reason = 'discord_unavailable';
+    return { ok: false, reason, status: lastStatus };
+}
+
 app.get('/discord-auth-callback', async (req, res) => {
     const code = req.query.code;
     const state = req.query.state;
@@ -2187,19 +2240,9 @@ app.get('/discord-auth-callback', async (req, res) => {
         const { data: hrSession } = await supabase.from('hr_sessions').select('roblox_user_id, roblox_username').eq('token', stateRow.rt).maybeSingle();
         if (!hrSession) { failStaff('session_expired', returnHash); return; }
 
-        const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'authorization_code',
-                code,
-                redirect_uri: DISCORD_REDIRECT_URI,
-                client_id: DISCORD_CLIENT_ID,
-                client_secret: DISCORD_CLIENT_SECRET
-            })
-        });
-        if (!tokenRes.ok) { failStaff('token_exchange_failed', returnHash); return; }
-        const tokenJson = await tokenRes.json();
+        const exchange = await exchangeDiscordCode(code, `staff session for roblox user ${hrSession.roblox_user_id}`);
+        if (!exchange.ok) { failStaff(exchange.reason, returnHash); return; }
+        const tokenJson = exchange.tokenJson;
 
         const userRes = await fetch('https://discord.com/api/v10/users/@me', {
             headers: { Authorization: `Bearer ${tokenJson.access_token}` }
@@ -2239,24 +2282,9 @@ app.get('/discord-auth-callback', async (req, res) => {
     const recruitSession = await getRecruitSession({ query: { rt: stateRow.rt } });
     if (!recruitSession) { fail(stateRow.rt, 'session_expired'); return; }
 
-    const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: DISCORD_REDIRECT_URI,
-            client_id: DISCORD_CLIENT_ID,
-            client_secret: DISCORD_CLIENT_SECRET
-        })
-    });
-    if (!tokenRes.ok) {
-        const errBody = await tokenRes.text().catch(() => '');
-        console.error(`[discord-auth-callback] token exchange failed (status ${tokenRes.status}) for rt ${stateRow.rt}: ${errBody}`);
-        fail(stateRow.rt, 'token_exchange_failed');
-        return;
-    }
-    const tokenJson = await tokenRes.json();
+    const exchange = await exchangeDiscordCode(code, `recruit session ${stateRow.rt}`);
+    if (!exchange.ok) { fail(stateRow.rt, exchange.reason); return; }
+    const tokenJson = exchange.tokenJson;
 
     const userRes = await fetch('https://discord.com/api/v10/users/@me', {
         headers: { Authorization: `Bearer ${tokenJson.access_token}` }
