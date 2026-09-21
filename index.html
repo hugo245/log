@@ -4474,7 +4474,7 @@
 
     function beginLogin(returnHash, refToken) {
       try { sessionStorage.setItem(RETURN_HASH_KEY, returnHash || window.location.hash || '#/'); } catch (e) { }
-      const ref = refToken || getPendingRef();
+      const ref = refToken || getPendingRef() || getPendingInvite();
       window.location.href = EDGE_BASE + '/roblox-auth-start' + (ref ? ('?ref=' + encodeURIComponent(ref)) : '');
     }
 
@@ -6462,7 +6462,7 @@
         ${loadFailed
           ? `<div class="error-box"><span>This invite link is invalid or has expired. You can still sign in normally.</span></div>`
           : `
-          <p>Sign in with Roblox to accept this invite. We'll then walk you through linking Discord and joining the team, one step at a time.</p>
+          <p>Sign in with Roblox to accept this invite. You don't need to apply, we'll walk you straight through linking Discord and joining the team.</p>
           <div style="display:flex;flex-direction:column;gap:10px;margin:16px 0;">
             ${info && info.team ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Team</div><strong style="color:${esc(info.team.color || 'var(--ink)')};">${esc(info.team.name)}</strong></div>` : ''}
             ${info && info.skillset ? `<div class="panel" style="margin:0;padding:14px 16px;"><div class="preview-label" style="margin-bottom:4px;">Skillset</div><strong style="color:${esc(info.skillset.color || 'var(--ink)')};">${esc(info.skillset.name)}</strong></div>` : ''}
@@ -6474,6 +6474,7 @@
     </div>`;
 
       wireTopbarSignOut();
+      if (!loadFailed) setPendingInvite(token);
       const btn = document.getElementById('joinSignInBtn');
       if (btn) btn.addEventListener('click', () => beginLogin('#/join/' + encodeURIComponent(token), token));
     }

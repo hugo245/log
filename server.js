@@ -1454,6 +1454,24 @@ async function convertPendingForUser(robloxUserId, robloxUsername) {
 
 const PAYMENT_CONVERSION_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
+async function getValidInvite(token) {
+    if (!token) return null;
+    const { data } = await supabase.from('onboarding_links').select('*').eq('token', String(token).trim()).maybeSingle();
+    return data || null;
+}
+
+async function hasActiveInvite(robloxUserId) {
+    const { data: flows } = await supabase
+        .from('recruit_onboarding_flows')
+        .select('link_token')
+        .eq('roblox_user_id', robloxUserId)
+        .not('link_token', 'is', null);
+    const tokens = [...new Set((flows || []).map(f => f.link_token).filter(Boolean))];
+    if (!tokens.length) return false;
+    const { data: links } = await supabase.from('onboarding_links').select('token').in('token', tokens).limit(1);
+    return !!(links && links.length);
+}
+
 async function checkBaseAccess(robloxUserId) {
     const [groups, discordServers] = await Promise.all([getBaseAccessGroups(), getBaseAccessDiscordServers()]);
 
@@ -1467,7 +1485,8 @@ async function checkBaseAccess(robloxUserId) {
     ]);
     if (manualErr) throw manualErr;
     if (placementErr) throw placementErr;
-    const hasBypass = (manualRows && manualRows.length > 0) || (placementRows && placementRows.length > 0);
+    let hasBypass = (manualRows && manualRows.length > 0) || (placementRows && placementRows.length > 0);
+    if (!hasBypass) hasBypass = await hasActiveInvite(robloxUserId);
 
     let isMember = false;
 
@@ -2033,7 +2052,11 @@ app.get('/roblox-auth-callback', async (req, res) => {
         fail('base_access_check_failed');
         return;
     }
-    if (!baseCheck.allowed) {
+    let invite = null;
+    if (!baseCheck.allowed && stateRow.ref_token) {
+        try { invite = await getValidInvite(stateRow.ref_token); } catch (e) { invite = null; }
+    }
+    if (!baseCheck.allowed && !invite) {
         try {
             const rt = await createRecruitSession(robloxUserId, robloxUsername);
             res.redirect(`${APP_ORIGIN}/#/recruit?rt=${encodeURIComponent(rt)}`);
