@@ -211,18 +211,58 @@ app.get('/ping', (req, res) => {
     res.status(200).json({ ok: true, time: new Date().toISOString() });
 });
 
+// Avatar headshots barely change, so cache them in memory for an hour. The staff page used to ask
+// Roblox for every avatar again on every keystroke in its search box; with the batch endpoint below
+// it asks once per page load, and repeat visits are served from this cache.
+const AVATAR_TTL_MS = 60 * 60 * 1000;
+const avatarCache = new Map(); // userId -> { url, at }
+
+async function getAvatarUrls(userIds) {
+    const ids = [...new Set((userIds || []).map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0))];
+    const result = {};
+    const missing = [];
+    const now = Date.now();
+    ids.forEach(id => {
+        const hit = avatarCache.get(id);
+        if (hit && now - hit.at < AVATAR_TTL_MS) result[id] = hit.url;
+        else missing.push(id);
+    });
+    for (let i = 0; i < missing.length; i += 100) {
+        const batch = missing.slice(i, i + 100);
+        try {
+            const r = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${batch.join(',')}&size=150x150&format=Png`);
+            const json = await r.json().catch(() => null);
+            (json && json.data || []).forEach(t => {
+                if (t && t.targetId && t.imageUrl) {
+                    avatarCache.set(Number(t.targetId), { url: t.imageUrl, at: now });
+                    result[t.targetId] = t.imageUrl;
+                }
+            });
+        } catch (e) {
+            console.error('getAvatarUrls: batch failed:', e.message);
+        }
+    }
+    return result;
+}
+
 app.get("/api/roblox/avatar/:userId", async (req, res) => {
     try {
-        const response = await fetch(
-            `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${req.params.userId}&size=150x150&format=Png`
-        );
-
-        const data = await response.json();
-
-        res.json(data);
+        const id = Number(req.params.userId);
+        const urls = await getAvatarUrls([id]);
+        res.json({ data: urls[id] ? [{ targetId: id, imageUrl: urls[id] }] : [] });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Failed to fetch avatar" });
+    }
+});
+
+// ?ids=1,2,3 -> { ok, data: { "1": "https://...", ... } }
+app.get('/api/roblox/avatars', async (req, res) => {
+    const ids = String(req.query.ids || '').split(',').slice(0, 1000);
+    try {
+        res.json({ ok: true, data: await getAvatarUrls(ids) });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: 'avatar_lookup_failed' });
     }
 });
 
@@ -1739,9 +1779,62 @@ async function getUserTeamAssignments(robloxUserId) {
     }));
 }
 
+// A ban row with an expires_at in the past is a finished temporary ban - clear it the first time
+// anyone looks, so the person can sign in again without a moderator having to remember to lift it.
+function isBanExpired(ban) {
+    return !!(ban && ban.expires_at && new Date(ban.expires_at).getTime() <= Date.now());
+}
+
+async function getActiveBan(robloxUserId) {
+    const { data } = await supabase.from('banned_users').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
+    if (!data) return null;
+    if (isBanExpired(data)) {
+        await supabase.from('banned_users').delete().eq('roblox_user_id', robloxUserId);
+        logAudit(null, {
+            category: 'moderation', action: 'ban_expired',
+            targetUserId: robloxUserId, targetUsername: data.roblox_username,
+            details: { actor: 'System', reason: data.reason }
+        });
+        return null;
+    }
+    return data;
+}
+
 async function isUserBanned(robloxUserId) {
-    const { data } = await supabase.from('banned_users').select('roblox_user_id').eq('roblox_user_id', robloxUserId).maybeSingle();
-    return !!data;
+    return !!(await getActiveBan(robloxUserId));
+}
+
+// Writes a ban. durationHours > 0 makes it temporary. If the banned_users table doesn't have the
+// expires_at column yet (see MIGRATION.sql), the ban is still saved - just as a permanent one - and
+// the caller is told so it can say that to the moderator instead of silently dropping the duration.
+async function writeBan({ robloxUserId, robloxUsername, reason, bannedBy, durationHours }) {
+    const row = {
+        roblox_user_id: robloxUserId,
+        roblox_username: robloxUsername,
+        reason,
+        banned_by: bannedBy,
+        banned_at: new Date().toISOString()
+    };
+    const hours = Number(durationHours) || 0;
+    if (hours > 0) row.expires_at = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    else row.expires_at = null;
+    let { error } = await supabase.from('banned_users').upsert(row, { onConflict: 'roblox_user_id' });
+    let temporaryUnsupported = false;
+    if (error && /expires_at/.test(error.message || '')) {
+        delete row.expires_at;
+        temporaryUnsupported = hours > 0;
+        ({ error } = await supabase.from('banned_users').upsert(row, { onConflict: 'roblox_user_id' }));
+    }
+    if (error) throw new Error(error.message);
+    await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+    return { expiresAt: temporaryUnsupported ? null : (row.expires_at || null), temporaryUnsupported };
+}
+
+async function notifyModeratedUser(robloxUserId, text) {
+    const discordUserId = await getLinkedDiscordUserId(robloxUserId);
+    if (!discordUserId) return false;
+    await sendDiscordDM(discordUserId, text);
+    return true;
 }
 
 async function getWarnCount(robloxUserId) {
@@ -2504,6 +2597,8 @@ app.delete('/hr-session', async (req, res) => {
     res.json({ ok: true });
 });
 
+const listRequestsSweepState = { paymentsAt: 0, usernamesAt: 0 };
+
 app.post('/hr-data', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false, error: 'not_authenticated' }); return; }
@@ -2585,9 +2680,24 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
-        await enforceUsdMinimumThreshold();
-        await runPaymentMethodConversionSweep();
-        await refreshPaymentRequestUsernames();
+        // These sweeps touch every pending request (and the username one calls Roblox), so running
+        // all three on every dashboard load made the page slow for everyone. They now run at most
+        // once a minute (username refresh: every 10 minutes, in the background after the first
+        // run), and the dashboard's Refresh button passes force to run them straight away.
+        const now = Date.now();
+        const force = payload.force === true;
+        if (force || now - listRequestsSweepState.paymentsAt > 60 * 1000) {
+            listRequestsSweepState.paymentsAt = now;
+            await enforceUsdMinimumThreshold();
+            await runPaymentMethodConversionSweep();
+        }
+        if (listRequestsSweepState.usernamesAt === 0) {
+            listRequestsSweepState.usernamesAt = now;
+            await refreshPaymentRequestUsernames();
+        } else if (force || now - listRequestsSweepState.usernamesAt > 10 * 60 * 1000) {
+            listRequestsSweepState.usernamesAt = now;
+            refreshPaymentRequestUsernames();
+        }
         const { data, error } = await supabase
             .from('payment_requests')
             .select('*')
@@ -3496,7 +3606,7 @@ app.post('/hr-data', async (req, res) => {
                 supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id'),
                 supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id'),
                 supabase.from('staff_warnings').select('roblox_user_id'),
-                supabase.from('banned_users').select('roblox_user_id'),
+                supabase.from('banned_users').select('*'),
                 supabase.from('roles').select('id, name, hierarchy')
             ]);
             if (sessionsRes.error) throw sessionsRes.error;
@@ -3618,7 +3728,7 @@ app.post('/hr-data', async (req, res) => {
                     warnCountByUser[w.roblox_user_id] = (warnCountByUser[w.roblox_user_id] || 0) + 1;
                 }
             });
-            const bannedSet = new Set((bansRes.data || []).map(b => b.roblox_user_id));
+            const bannedSet = new Set((bansRes.data || []).filter(b => !isBanExpired(b)).map(b => b.roblox_user_id));
             byKey.forEach((row) => {
                 if (row.robloxUserId != null) {
                     row.warnCount = warnCountByUser[row.robloxUserId] || 0;
@@ -4208,7 +4318,7 @@ app.post('/hr-data', async (req, res) => {
             .eq('roblox_user_id', robloxUserId)
             .order('created_at', { ascending: false });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        const { data: ban } = await supabase.from('banned_users').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
+        const ban = await getActiveBan(robloxUserId);
         res.json({ ok: true, data: data || [], banned: ban || null, warnCount: (data || []).length });
         return;
     }
@@ -4354,16 +4464,99 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    // Everything the person panel needs in one round trip: warnings, current ban, every moderation
+    // event on record (including notes, which previously only lived in the audit log and were
+    // invisible to moderators without audit access), and whether the viewer outranks them.
+    if (action === 'get_user_moderation') {
+        if (!hasPermission(session, 'staff.moderate') && !hasPermission(session, 'staff.view_database')) {
+            res.status(403).json({ ok: false, error: 'missing_permission' });
+            return;
+        }
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        const [warningsRes, ban, historyRes, sessionRes, targetHierarchy, discordUserId] = await Promise.all([
+            supabase.from('staff_warnings').select('*').eq('roblox_user_id', robloxUserId).order('created_at', { ascending: false }),
+            getActiveBan(robloxUserId),
+            supabase.from('audit_logs').select('id, action, actor_username, actor_user_id, details, created_at, reverted')
+                .eq('target_user_id', robloxUserId).eq('category', 'moderation')
+                .order('created_at', { ascending: false }).limit(50),
+            supabase.from('hr_sessions').select('roles, last_synced_at').eq('roblox_user_id', robloxUserId)
+                .order('last_synced_at', { ascending: false }).limit(1),
+            getUserHierarchy(robloxUserId),
+            getLinkedDiscordUserId(robloxUserId)
+        ]);
+        const sessionRow = (sessionRes.data || [])[0] || null;
+        res.json({
+            ok: true,
+            data: {
+                warnings: warningsRes.data || [],
+                ban: ban || null,
+                history: historyRes.data || [],
+                roles: sessionRow ? (sessionRow.roles || []) : [],
+                lastActive: sessionRow ? sessionRow.last_synced_at : null,
+                discordLinked: !!discordUserId,
+                canAct: (Number(session.max_hierarchy) || 0) > (Number(targetHierarchy) || 0)
+            }
+        });
+        return;
+    }
+
+    if (action === 'moderation_overview') {
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const [bansRes, warningsRes, recentRes] = await Promise.all([
+            supabase.from('banned_users').select('*').order('banned_at', { ascending: false }),
+            supabase.from('staff_warnings').select('roblox_user_id, roblox_username, reason, warned_by, created_at').order('created_at', { ascending: false }),
+            supabase.from('audit_logs').select('id, action, actor_username, actor_user_id, target_user_id, target_username, details, created_at, reverted')
+                .eq('category', 'moderation').order('created_at', { ascending: false }).limit(60)
+        ]);
+        const bans = [];
+        for (const b of (bansRes.data || [])) {
+            if (isBanExpired(b)) { await getActiveBan(b.roblox_user_id); continue; }
+            bans.push(b);
+        }
+        const bannedIds = new Set(bans.map(b => String(b.roblox_user_id)));
+        const warnedMap = new Map();
+        (warningsRes.data || []).forEach(w => {
+            const key = String(w.roblox_user_id);
+            if (bannedIds.has(key)) return;
+            if (!warnedMap.has(key)) {
+                warnedMap.set(key, { robloxUserId: w.roblox_user_id, robloxUsername: w.roblox_username, count: 0, lastReason: w.reason, lastAt: w.created_at, lastBy: w.warned_by });
+            }
+            warnedMap.get(key).count += 1;
+        });
+        res.json({
+            ok: true,
+            data: {
+                bans,
+                warned: Array.from(warnedMap.values()).sort((a, b) => b.count - a.count || new Date(b.lastAt) - new Date(a.lastAt)),
+                recent: recentRes.data || []
+            }
+        });
+        return;
+    }
+
     if (action === 'quick_moderate') {
         if (!requirePermission(res, session, 'staff.moderate')) return;
         const robloxUserId = Number(payload.robloxUserId);
-        const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        let robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
         const type = payload.type;
         const reason = payload.reason ? String(payload.reason).trim() : '';
+        const notify = payload.notify === true;
+        const durationHours = Math.max(0, Math.min(24 * 365, Number(payload.durationHours) || 0));
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
         if (!['warn', 'ban', 'unban', 'note'].includes(type)) { res.status(400).json({ ok: false, error: 'invalid_type' }); return; }
+        if (robloxUserId === Number(session.roblox_user_id) && type !== 'note') {
+            res.status(400).json({ ok: false, error: 'cannot_moderate_self' });
+            return;
+        }
         const targetHierarchy = await getUserHierarchy(robloxUserId);
         if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
+        if (!robloxUsername) {
+            try {
+                const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
+                if (lookupRes.ok) robloxUsername = (await lookupRes.json()).name;
+            } catch (e) { }
+        }
 
         if (type === 'note') {
             if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
@@ -4378,6 +4571,7 @@ app.post('/hr-data', async (req, res) => {
 
         if (type === 'warn') {
             if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
+            if (await isUserBanned(robloxUserId)) { res.status(400).json({ ok: false, error: 'already_banned' }); return; }
             const { data: insertedWarning, error } = await supabase.from('staff_warnings').insert({
                 roblox_user_id: robloxUserId,
                 roblox_username: robloxUsername,
@@ -4389,13 +4583,14 @@ app.post('/hr-data', async (req, res) => {
             const count = await getWarnCount(robloxUserId);
             let banned = false;
             if (count >= 3) {
-                await supabase.from('banned_users').upsert({
-                    roblox_user_id: robloxUserId, roblox_username: robloxUsername,
-                    reason: 'Reached 3 warnings', banned_by: session.roblox_username,
-                    banned_at: new Date().toISOString()
-                }, { onConflict: 'roblox_user_id' });
-                await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+                await writeBan({ robloxUserId, robloxUsername, reason: 'Reached 3 warnings', bannedBy: session.roblox_username });
                 banned = true;
+                await logAudit(session, {
+                    category: 'moderation', action: 'auto_ban',
+                    targetUserId: robloxUserId, targetUsername: robloxUsername,
+                    details: { reason: 'Reached 3 warnings' },
+                    revert: { type: 'unban_user', robloxUserId }
+                });
             }
             await logAudit(session, {
                 category: 'moderation', action: 'quick_warn',
@@ -4403,24 +4598,37 @@ app.post('/hr-data', async (req, res) => {
                 details: { reason, warnCount: count },
                 revert: insertedWarning ? { type: 'remove_warning', warningId: insertedWarning.id } : null
             });
-            res.json({ ok: true, warnCount: count, banned });
+            let notified = false;
+            if (notify) {
+                notified = await notifyModeratedUser(robloxUserId, banned
+                    ? `You've received a warning on PlayVerse (${count}/3), which means your access has been removed.\nReason: ${reason}`
+                    : `You've received a warning on PlayVerse (${count}/3). Three warnings removes your access.\nReason: ${reason}`);
+            }
+            res.json({ ok: true, warnCount: count, banned, notified });
             return;
         }
 
         if (type === 'ban') {
-            await supabase.from('banned_users').upsert({
-                roblox_user_id: robloxUserId, roblox_username: robloxUsername,
-                reason: reason || 'Quick moderation action', banned_by: session.roblox_username,
-                banned_at: new Date().toISOString()
-            }, { onConflict: 'roblox_user_id' });
-            await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+            let result;
+            try {
+                result = await writeBan({ robloxUserId, robloxUsername, reason: reason || 'No reason given', bannedBy: session.roblox_username, durationHours });
+            } catch (e) {
+                res.status(500).json({ ok: false, error: e.message });
+                return;
+            }
             await logAudit(session, {
                 category: 'moderation', action: 'quick_ban',
                 targetUserId: robloxUserId, targetUsername: robloxUsername,
-                details: { reason },
+                details: { reason, durationHours: result.expiresAt ? durationHours : null, expiresAt: result.expiresAt },
                 revert: { type: 'unban_user', robloxUserId }
             });
-            res.json({ ok: true });
+            let notified = false;
+            if (notify) {
+                notified = await notifyModeratedUser(robloxUserId, result.expiresAt
+                    ? `Your PlayVerse access has been suspended until ${new Date(result.expiresAt).toUTCString()}.${reason ? `\nReason: ${reason}` : ''}`
+                    : `Your PlayVerse access has been removed.${reason ? `\nReason: ${reason}` : ''}`);
+            }
+            res.json({ ok: true, expiresAt: result.expiresAt, temporaryUnsupported: result.temporaryUnsupported, notified });
             return;
         }
 
@@ -4433,7 +4641,9 @@ app.post('/hr-data', async (req, res) => {
                 details: { reason },
                 revert: banRow ? { type: 'reban_user', row: banRow } : null
             });
-            res.json({ ok: true });
+            let notified = false;
+            if (notify) notified = await notifyModeratedUser(robloxUserId, `Your PlayVerse access has been restored. You can sign in again.`);
+            res.json({ ok: true, notified });
             return;
         }
     }

@@ -2671,6 +2671,747 @@
       margin-bottom: 24px;
       flex: 0 0 auto;
     }
+
+    /* ---------- Navigation ---------- */
+    .topbar {
+      padding: 12px 32px;
+    }
+
+    .topbar-search {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 240px;
+      padding: 8px 10px 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--input-bg);
+      color: var(--muted);
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .topbar-search:hover {
+      border-color: var(--accent);
+      color: var(--ink-soft);
+    }
+
+    .topbar-search span {
+      flex: 1;
+    }
+
+    kbd {
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-soft);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: 5px;
+      padding: 1px 6px;
+    }
+
+    .app-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .app-header .topbar {
+      position: static;
+    }
+
+    .navstrip {
+      display: flex;
+      align-items: stretch;
+      gap: 2px;
+      padding: 0 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .navstrip::-webkit-scrollbar {
+      display: none;
+    }
+
+    .navstrip a {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 11px 10px 10px;
+      color: var(--ink-soft);
+      text-decoration: none;
+      font-size: 13.5px;
+      font-weight: 500;
+      white-space: nowrap;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+
+    .navstrip a:hover {
+      color: var(--ink);
+    }
+
+    .navstrip a.active {
+      color: var(--ink);
+      font-weight: 600;
+      border-bottom-color: var(--accent);
+    }
+
+    .navstrip .nav-sep {
+      width: 1px;
+      background: var(--line);
+      margin: 10px 8px;
+      flex-shrink: 0;
+    }
+
+    .nav-count {
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--accent-soft-strong);
+      color: var(--accent);
+      border-radius: 999px;
+      padding: 1px 7px;
+    }
+
+    @media (max-width:640px) {
+      .topbar-search {
+        min-width: 0;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        justify-content: center;
+      }
+
+      .topbar-search span,
+      .topbar-search kbd {
+        display: none;
+      }
+
+      .topbar {
+        flex-wrap: nowrap;
+      }
+
+      .topbar-right {
+        width: auto;
+        flex-wrap: nowrap;
+      }
+
+      .navstrip {
+        padding: 0 8px;
+      }
+    }
+
+    /* ---------- Command palette ---------- */
+    .cmdk-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 22, 28, .45);
+      z-index: 10000;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 12vh 16px 16px;
+    }
+
+    .cmdk {
+      width: 100%;
+      max-width: 560px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .25);
+      overflow: hidden;
+    }
+
+    .cmdk input {
+      width: 100%;
+      border: none;
+      border-bottom: 1px solid var(--line);
+      padding: 16px 18px;
+      font: inherit;
+      font-size: 15px;
+      background: transparent;
+      color: var(--ink);
+      outline: none;
+    }
+
+    .cmdk-list {
+      max-height: 52vh;
+      overflow-y: auto;
+      padding: 6px;
+    }
+
+    .cmdk-group {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--muted);
+      padding: 10px 12px 4px;
+    }
+
+    .cmdk-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 9px 12px;
+      border: none;
+      border-radius: 8px;
+      background: none;
+      color: var(--ink);
+      font: inherit;
+      font-size: 14px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .cmdk-item img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+    }
+
+    .cmdk-item .cmdk-meta {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .cmdk-item.sel {
+      background: var(--accent-soft);
+    }
+
+    .cmdk-empty {
+      padding: 22px 14px;
+      color: var(--ink-soft);
+      font-size: 13.5px;
+      text-align: center;
+    }
+
+    .cmdk-foot {
+      display: flex;
+      gap: 14px;
+      padding: 8px 14px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    /* ---------- Toasts ---------- */
+    #toastRoot {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10001;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: var(--btn-primary-bg);
+      color: var(--btn-primary-text);
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 13.5px;
+      font-weight: 500;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .2);
+      max-width: min(480px, 90vw);
+      animation: toastIn .18s ease;
+    }
+
+    .toast.err {
+      background: var(--err-text);
+      color: #fff;
+    }
+
+    @keyframes toastIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+    }
+
+    /* ---------- Person panel ---------- */
+    .pp-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 22, 28, .4);
+      z-index: 9999;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .pp {
+      width: 100%;
+      max-width: 460px;
+      height: 100%;
+      background: var(--surface);
+      border-left: 1px solid var(--line);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      animation: ppIn .18s ease;
+    }
+
+    @keyframes ppIn {
+      from {
+        transform: translateX(24px);
+        opacity: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .pp,
+      .toast {
+        animation: none;
+      }
+    }
+
+    .pp-head {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      padding: 22px 22px 18px;
+      border-bottom: 1px solid var(--line);
+      position: relative;
+    }
+
+    .pp-head img {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      flex-shrink: 0;
+    }
+
+    .pp-head h2 {
+      margin: 0 0 2px;
+      font-size: 18px;
+    }
+
+    .pp-sub {
+      color: var(--ink-soft);
+      font-size: 12.5px;
+    }
+
+    .pp-sub button {
+      background: none;
+      border: none;
+      color: inherit;
+      font: inherit;
+      padding: 0;
+      cursor: pointer;
+      text-decoration: underline dotted;
+    }
+
+    .pp-body {
+      padding: 18px 22px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .pp-section h3 {
+      font-size: 13px;
+      margin: 0 0 10px;
+      color: var(--ink);
+    }
+
+    .pp-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .pp-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--ink-soft);
+    }
+
+    .pp-state.warn {
+      background: var(--warn-bg);
+      border-color: var(--warn-line);
+      color: var(--warn-text);
+    }
+
+    .pp-state.ban {
+      background: var(--err-bg);
+      border-color: var(--err-line);
+      color: var(--err-text);
+    }
+
+    .pp-state.ok {
+      background: var(--ok-bg);
+      border-color: var(--ok-line);
+      color: var(--ok-text);
+    }
+
+    .pp-banner {
+      border: 1px solid var(--err-line);
+      background: var(--err-bg);
+      color: var(--err-text);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13.5px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .pp-banner.neutral {
+      border-color: var(--line);
+      background: var(--row-alt);
+      color: var(--ink-soft);
+    }
+
+    .seg {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 3px;
+      gap: 3px;
+      margin-bottom: 12px;
+    }
+
+    .seg button {
+      border: none;
+      background: none;
+      padding: 7px 8px;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-soft);
+      cursor: pointer;
+    }
+
+    .seg button.on {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .seg button.on[data-mode="ban"] {
+      background: var(--err-bg);
+      color: var(--err-text);
+    }
+
+    .reason-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: -2px 0 12px;
+    }
+
+    .reason-chips button {
+      border: 1px dashed var(--line);
+      background: none;
+      color: var(--ink-soft);
+      font: inherit;
+      font-size: 12px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      cursor: pointer;
+    }
+
+    .reason-chips button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .pp-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .pp-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin: 4px 0 14px;
+    }
+
+    .pp-strikes {
+      display: flex;
+      gap: 4px;
+    }
+
+    .pp-strikes i {
+      width: 22px;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--line);
+    }
+
+    .pp-strikes i.on {
+      background: var(--warn-text);
+    }
+
+    .pp-strikes.full i.on {
+      background: var(--err-text);
+    }
+
+    .timeline {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      border-left: 2px solid var(--line);
+      margin-left: 5px;
+    }
+
+    .timeline li {
+      position: relative;
+      padding: 0 0 16px 16px;
+    }
+
+    .timeline li::before {
+      content: '';
+      position: absolute;
+      left: -6px;
+      top: 4px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 2px solid var(--muted);
+    }
+
+    .timeline li.t-warn::before {
+      border-color: var(--warn-text);
+    }
+
+    .timeline li.t-ban::before {
+      border-color: var(--err-text);
+      background: var(--err-text);
+    }
+
+    .timeline li.t-good::before {
+      border-color: var(--ok-text);
+    }
+
+    .timeline li.t-note::before {
+      border-color: var(--accent);
+    }
+
+    .timeline .t-title {
+      font-size: 13.5px;
+      font-weight: 600;
+    }
+
+    .timeline .t-meta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .timeline .t-text {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-top: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .timeline .reverted {
+      text-decoration: line-through;
+      opacity: .6;
+    }
+
+    .pp-foot {
+      margin-top: auto;
+      padding: 14px 22px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width:640px) {
+      .pp {
+        max-width: none;
+      }
+    }
+
+    /* ---------- Staff page ---------- */
+    .chip-filters {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .chip-filter {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink-soft);
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 6px 11px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .chip-filter b {
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .chip-filter.on {
+      background: var(--ink);
+      color: var(--surface);
+      border-color: var(--ink);
+    }
+
+    .chip-filter.on b {
+      color: inherit;
+      opacity: .7;
+    }
+
+    .staff-card .staff-card-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 12px;
+      width: 100%;
+    }
+
+    .staff-card .staff-card-actions .btn {
+      flex: 1 1 auto;
+      white-space: nowrap;
+      justify-content: center;
+    }
+
+    .staff-card .staff-card-actions {
+      flex-wrap: wrap;
+    }
+
+    .mod-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    @media (max-width:900px) {
+      .mod-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .mod-list-item {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 12px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .mod-list-item:first-of-type {
+      border-top: none;
+    }
+
+    .mod-list-item img {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      flex-shrink: 0;
+    }
+
+    .mod-list-item .grow {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .mod-list-item .why {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-top: 2px;
+      word-break: break-word;
+    }
+
+    .mod-list-item .when {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .filter-notice {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 13px;
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-line);
+      color: var(--warn-text);
+      padding: 6px 8px 6px 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .strip-card.clickable {
+      cursor: pointer;
+    }
+
+    .strip-card.clickable:hover {
+      border-color: var(--accent);
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .cmdk input:focus-visible {
+      outline: none;
+    }
+
+    .pp-strikes {
+      display: inline-flex !important;
+      vertical-align: middle;
+    }
+
+    .topbar-search svg {
+      flex-shrink: 0;
+    }
+
+    /* The request and audit tables squashed their columns on top of each other on phones.
+       Give them a sensible minimum width and let them scroll sideways instead. */
+    @media (max-width:900px) {
+      table.req-table {
+        min-width: 820px;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+    }
   </style>
 </head>
 
@@ -2790,6 +3531,7 @@
 
     let isHrAuthed = false;
     let hrUsername = '';
+    let hrUserId = null;
     let hrRoles = [];
     let hrPermissions = [];
     let hrMaxHierarchy = 0;
@@ -3008,6 +3750,7 @@
       return {
         id: row.id,
         requestedBy: row.requested_by || '',
+        requestedByUserId: row.requested_by_user_id != null ? row.requested_by_user_id : null,
         robloxUserId: row.roblox_user_id != null ? row.roblox_user_id : null,
         robloxUsername: row.roblox_username || '',
         taskName: row.task_name || '',
@@ -3146,6 +3889,7 @@
         if (res.ok && json.ok) {
           isHrAuthed = true;
           hrUsername = json.robloxUsername || '';
+          hrUserId = json.robloxUserId || null;
           hrRoles = json.roles || [];
           hrPermissions = json.permissions || [];
           hrMaxHierarchy = json.maxHierarchy || 0;
@@ -3195,13 +3939,42 @@
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) {
         if (res.status === 401) { clearToken(); isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; }
-        throw new Error((json && json.error) || 'That request failed.');
+        const code = (json && json.error) || '';
+        const err = new Error(friendlyError(code));
+        err.code = code;
+        throw err;
       }
       return json;
     }
 
-    async function loadAllRequests() {
-      const json = await callHrData('list_requests');
+    // Server errors come back as codes like "insufficient_hierarchy". Show people what happened and
+    // what to do instead. Codes that other screens check for by name are passed through untouched.
+    const ERROR_MESSAGES = {
+      missing_permission: "You don't have permission to do that. Ask someone with a higher role if you need it.",
+      insufficient_hierarchy: "Their role is at or above yours, so you can't change their account.",
+      not_authenticated: 'Your session ended. Sign in again to continue.',
+      session_expired: 'Your session ended. Sign in again to continue.',
+      missing_reason: 'Add a reason first.',
+      missing_user_id: "This person doesn't have a linked Roblox account, so this isn't available.",
+      cannot_moderate_self: "You can't warn or ban your own account.",
+      already_banned: 'This account is already banned. Lift the ban first if you want to issue a warning.',
+      already_reverted: 'That change was already reverted.',
+      not_revertible: "That change can't be reverted automatically.",
+      warning_not_found: 'That warning was already removed.',
+      invalid_fields: 'Some fields are missing or invalid. Check the form and try again.',
+      missing_fields: 'Some required fields are empty.',
+      roblox_user_not_found: "That Roblox username doesn't exist.",
+      discord_not_linked: "This person hasn't linked a Discord account yet.",
+      discord_not_in_server: "This person isn't in the Discord server.",
+      unknown_action: 'The server did not recognise that action. Refresh the page to load the latest version.'
+    };
+    function friendlyError(code) {
+      if (!code) return 'That request failed. Check your connection and try again.';
+      return ERROR_MESSAGES[code] || code;
+    }
+
+    async function loadAllRequests(force) {
+      const json = await callHrData('list_requests', force ? { force: true } : {});
       return (json.data || []).map(rowToClient);
     }
 
@@ -3743,18 +4516,235 @@
       return json;
     }
 
+    // ---------- Shared: toasts ----------
+    function toast(text, kind) {
+      let root = document.getElementById('toastRoot');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'toastRoot';
+        root.setAttribute('role', 'status');
+        root.setAttribute('aria-live', 'polite');
+        document.body.appendChild(root);
+      }
+      const el = document.createElement('div');
+      el.className = 'toast' + (kind === 'err' ? ' err' : '');
+      el.textContent = text;
+      root.appendChild(el);
+      setTimeout(() => el.remove(), kind === 'err' ? 6000 : 3500);
+    }
+
+    // ---------- Shared: avatars ----------
+    // One cache for the whole app, filled in batches. Images render with a placeholder straight
+    // away and swap to the real headshot when it arrives, so lists never wait on Roblox.
+    const avatarCache = new Map();
+    let avatarQueue = new Set();
+    let avatarTimer = null;
+    function avatarPlaceholder() {
+      const dark = getTheme() === 'dark';
+      return 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="${dark ? '#23222E' : '#EEEDFB'}"/><circle cx="20" cy="16" r="7" fill="${dark ? '#3A3850' : '#D6D3F5'}"/><rect x="8" y="26" width="24" height="14" rx="7" fill="${dark ? '#3A3850' : '#D6D3F5'}"/></svg>`);
+    }
+    function avatarSrc(userId) {
+      if (!userId) return avatarPlaceholder();
+      const hit = avatarCache.get(String(userId));
+      if (hit) return hit;
+      avatarQueue.add(String(userId));
+      if (!avatarTimer) avatarTimer = setTimeout(flushAvatars, 30);
+      return avatarPlaceholder();
+    }
+    function avatarImg(userId, alt, extra) {
+      return `<img src="${avatarSrc(userId)}" data-avatar-id="${esc(userId || '')}" alt="${esc(alt || '')}" loading="lazy" ${extra || ''}>`;
+    }
+    async function flushAvatars() {
+      avatarTimer = null;
+      const ids = Array.from(avatarQueue).filter(id => !avatarCache.has(id));
+      avatarQueue = new Set();
+      for (let i = 0; i < ids.length; i += 200) {
+        const batch = ids.slice(i, i + 200);
+        try {
+          const res = await fetch(`${EDGE_BASE}/api/roblox/avatars?ids=${batch.join(',')}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+          const json = await res.json();
+          Object.entries((json && json.data) || {}).forEach(([id, url]) => avatarCache.set(String(id), url));
+        } catch (e) { }
+        batch.forEach(id => {
+          const url = avatarCache.get(id);
+          if (!url) return;
+          document.querySelectorAll(`img[data-avatar-id="${id}"]`).forEach(img => { img.src = url; });
+        });
+      }
+    }
+
+    // ---------- Shared: people list (for search) ----------
+    let peopleCache = { at: 0, rows: [], promise: null };
+    function getPeople(force) {
+      if (!hasPermission('staff.view_database')) return Promise.resolve([]);
+      if (!force && peopleCache.rows.length && Date.now() - peopleCache.at < 2 * 60 * 1000) return Promise.resolve(peopleCache.rows);
+      if (peopleCache.promise) return peopleCache.promise;
+      peopleCache.promise = loadStaffDatabase().then(rows => {
+        peopleCache = { at: Date.now(), rows, promise: null };
+        return rows;
+      }).catch(() => { peopleCache.promise = null; return peopleCache.rows; });
+      return peopleCache.promise;
+    }
+    function rememberPeople(rows) { peopleCache = { at: Date.now(), rows, promise: null }; }
+
+    // ---------- Command palette ----------
+    let cmdkOpen = false;
+    let cmdkQuery = '';
+    let cmdkSel = 0;
+    let cmdkPeople = [];
+    let cmdkPeopleLoading = false;
+
+    function cmdkResults() {
+      const q = cmdkQuery.trim().toLowerCase();
+      const pages = navItems().map(i => ({ kind: 'page', label: i.label, href: i.href, hay: (i.label + ' ' + (i.keywords || '')).toLowerCase() }));
+      const actions = [
+        { kind: 'action', label: getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', run: toggleTheme, hay: 'theme dark light mode' },
+        { kind: 'action', label: 'Sign out', run: hrSignOut, hay: 'sign out log out logout' }
+      ];
+      const matchPages = (q ? pages.filter(p => p.hay.includes(q)) : pages.filter(p => !p.label.startsWith('Settings:') && !['Terms of Service', 'Acceptable Use Policy', 'My teams & skillsets'].includes(p.label))).slice(0, q ? 8 : 12);
+      const matchActions = q ? actions.filter(a => a.hay.includes(q) || a.label.toLowerCase().includes(q)) : [];
+      let matchPeople = [];
+      if (q) {
+        matchPeople = cmdkPeople.filter(p =>
+          (p.robloxUsername || '').toLowerCase().includes(q) ||
+          String(p.robloxUserId || '') === q ||
+          (p.roles || []).some(r => r.toLowerCase().includes(q)) ||
+          (p.team || '').toLowerCase().includes(q)
+        ).sort((a, b) => {
+          const an = (a.robloxUsername || '').toLowerCase(), bn = (b.robloxUsername || '').toLowerCase();
+          return (bn.startsWith(q) - an.startsWith(q)) || an.localeCompare(bn);
+        }).slice(0, 8).map(p => ({ kind: 'person', label: p.robloxUsername || ('ID ' + p.robloxUserId), person: p }));
+      }
+      return [...matchPeople, ...matchPages, ...matchActions];
+    }
+
+    function cmdkHtml() {
+      const results = cmdkResults();
+      if (cmdkSel >= results.length) cmdkSel = Math.max(0, results.length - 1);
+      let lastKind = null;
+      const groupLabel = { person: 'People', page: 'Go to', action: 'Actions' };
+      const body = results.map((r, i) => {
+        const head = r.kind !== lastKind ? `<div class="cmdk-group">${groupLabel[r.kind]}</div>` : '';
+        lastKind = r.kind;
+        let meta = '';
+        if (r.kind === 'person') {
+          const p = r.person;
+          meta = p.isBanned ? 'Banned' : (p.warnCount ? `${p.warnCount}/3 warnings` : ((p.roles || [])[0] || ''));
+        }
+        return `${head}<button type="button" class="cmdk-item ${i === cmdkSel ? 'sel' : ''}" data-cmdk-idx="${i}" role="option" aria-selected="${i === cmdkSel}">
+          ${r.kind === 'person' ? avatarImg(r.person.robloxUserId, '') : ''}
+          <span>${esc(r.label)}</span>${meta ? `<span class="cmdk-meta">${esc(meta)}</span>` : ''}
+        </button>`;
+      }).join('');
+      const empty = !results.length
+        ? `<div class="cmdk-empty">${cmdkPeopleLoading ? 'Loading people...' : `Nothing matches "${esc(cmdkQuery)}".${hasPermission('staff.view_database') ? ' Try a Roblox username, role, or team.' : ''}`}</div>`
+        : '';
+      return `
+        <div class="cmdk-scrim" id="cmdkScrim">
+          <div class="cmdk" role="dialog" aria-label="Search">
+            <input type="text" id="cmdkInput" placeholder="${hasPermission('staff.view_database') ? 'Search people, pages and settings' : 'Search pages'}" value="${esc(cmdkQuery)}" autocomplete="off" role="combobox" aria-expanded="true">
+            <div class="cmdk-list" role="listbox">${body}${empty}</div>
+            <div class="cmdk-foot"><span><kbd>&uarr;</kbd> <kbd>&darr;</kbd> to move</span><span><kbd>Enter</kbd> to open</span><span><kbd>Esc</kbd> to close</span></div>
+          </div>
+        </div>`;
+    }
+
+    function paintCmdk(keepFocus) {
+      let root = document.getElementById('cmdkRoot');
+      if (!root) { root = document.createElement('div'); root.id = 'cmdkRoot'; document.body.appendChild(root); }
+      if (!cmdkOpen) { root.innerHTML = ''; return; }
+      const input = document.getElementById('cmdkInput');
+      if (keepFocus && input) {
+        const list = root.querySelector('.cmdk-list');
+        const tmp = document.createElement('div');
+        tmp.innerHTML = cmdkHtml();
+        list.innerHTML = tmp.querySelector('.cmdk-list').innerHTML;
+      } else {
+        root.innerHTML = cmdkHtml();
+        const inp = document.getElementById('cmdkInput');
+        inp.focus();
+        inp.setSelectionRange(inp.value.length, inp.value.length);
+        inp.addEventListener('input', () => { cmdkQuery = inp.value; cmdkSel = 0; paintCmdk(true); });
+        inp.addEventListener('keydown', (e) => {
+          const n = cmdkResults().length;
+          if (e.key === 'ArrowDown') { e.preventDefault(); cmdkSel = Math.min(n - 1, cmdkSel + 1); paintCmdk(true); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkSel = Math.max(0, cmdkSel - 1); paintCmdk(true); }
+          else if (e.key === 'Enter') { e.preventDefault(); runCmdk(cmdkSel); }
+        });
+        document.getElementById('cmdkScrim').addEventListener('click', (e) => { if (e.target.id === 'cmdkScrim') closeCmdk(); });
+      }
+      root.querySelectorAll('[data-cmdk-idx]').forEach(el => el.addEventListener('click', () => runCmdk(Number(el.dataset.cmdkIdx))));
+      const sel = root.querySelector('.cmdk-item.sel');
+      if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+    }
+
+    function runCmdk(idx) {
+      const r = cmdkResults()[idx];
+      if (!r) return;
+      closeCmdk();
+      if (r.kind === 'page') {
+        if (window.location.hash === r.href) route(); else window.location.hash = r.href;
+      } else if (r.kind === 'person') {
+        openUserMenu(r.person.robloxUserId, r.person.robloxUsername);
+      } else if (r.kind === 'action') {
+        r.run();
+      }
+    }
+
+    function openCmdk() {
+      if (!isHrAuthed) return;
+      cmdkOpen = true; cmdkQuery = ''; cmdkSel = 0;
+      paintCmdk();
+      if (hasPermission('staff.view_database')) {
+        cmdkPeopleLoading = !peopleCache.rows.length;
+        cmdkPeople = peopleCache.rows;
+        getPeople().then(rows => {
+          cmdkPeople = rows; cmdkPeopleLoading = false;
+          if (cmdkOpen) paintCmdk(true);
+        });
+      }
+    }
+    function closeCmdk() { cmdkOpen = false; paintCmdk(); }
+
+    document.addEventListener('keydown', (e) => {
+      const typing = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '') || (e.target && e.target.isContentEditable);
+      if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        cmdkOpen ? closeCmdk() : openCmdk();
+      } else if (e.key === '/' && !typing && !cmdkOpen && !umTarget) {
+        e.preventDefault();
+        openCmdk();
+      } else if (e.key === 'Escape') {
+        if (cmdkOpen) closeCmdk();
+        else if (umTarget) closeUserMenu();
+      }
+    });
+
+    // ---------- Person panel ----------
+    // Opens from any username anywhere in the app (and from search). It is the one place to see
+    // someone's standing and act on it: notes, warnings, bans (permanent or timed), lifting bans,
+    // removing warnings - with the full history of what happened and who did it.
     let umTarget = null;
     let umLoading = false;
-    let umWarnings = [];
-    let umBanned = null;
+    let umData = null;
+    let umLoadError = null;
     let umBusy = false;
-    let umMsg = null;
     let umReason = '';
+    let umMode = 'note';
+    let umDuration = '168';
+    let umNotify = false;
+
+    const REASON_TEMPLATES = {
+      note: ['Checked in about workload', 'Missed a deadline', 'Good work flagged by lead'],
+      warn: ['Inflated or duplicate payment request', 'Missed deadline without notice', 'Disrespectful to other staff', 'Shared internal information'],
+      ban: ['Fraudulent payment requests', 'Harassment of staff', 'Leaked internal information', 'Alt account used to bypass a ban']
+    };
+    const BAN_DURATIONS = [['24', '1 day'], ['72', '3 days'], ['168', '7 days'], ['720', '30 days'], ['0', 'Permanently']];
 
     function openUserMenu(robloxUserId, robloxUsername) {
       if (!robloxUserId && !robloxUsername) return;
-      umTarget = { id: robloxUserId || null, username: robloxUsername || null };
-      umLoading = true; umWarnings = []; umBanned = null; umMsg = null; umReason = ''; umBusy = false;
+      umTarget = { id: robloxUserId ? String(robloxUserId) : null, username: robloxUsername || null };
+      umLoading = true; umData = null; umLoadError = null; umReason = ''; umBusy = false; umMode = 'note'; umDuration = '168'; umNotify = false;
       paintUserMenu();
       refreshUserMenuData();
     }
@@ -3766,117 +4756,260 @@
 
     async function refreshUserMenuData() {
       if (!umTarget || !umTarget.id) { umLoading = false; paintUserMenu(); return; }
+      const target = umTarget;
+      if (!hasPermission('staff.moderate') && !hasPermission('staff.view_database')) { umLoading = false; paintUserMenu(); return; }
       try {
-        const res = await listUserWarnings(umTarget.id);
-        umWarnings = res.data || [];
-        umBanned = res.banned || null;
+        const json = await callHrData('get_user_moderation', { robloxUserId: target.id });
+        if (umTarget !== target) return;
+        umData = json.data;
+        umLoadError = null;
       } catch (e) {
-        umWarnings = []; umBanned = null;
+        if (umTarget !== target) return;
+        umLoadError = e.message;
       }
       umLoading = false;
       paintUserMenu();
     }
 
+    function relTime(ts) {
+      const diff = new Date(ts).getTime() - Date.now();
+      const abs = Math.abs(diff);
+      const units = [[86400000 * 30, 'month'], [86400000, 'day'], [3600000, 'hour'], [60000, 'minute']];
+      for (const [ms, name] of units) {
+        if (abs >= ms) {
+          const n = Math.round(abs / ms);
+          return diff > 0 ? `in ${n} ${name}${n === 1 ? '' : 's'}` : `${n} ${name}${n === 1 ? '' : 's'} ago`;
+        }
+      }
+      return diff > 0 ? 'in under a minute' : 'just now';
+    }
+
+    const MOD_EVENT = {
+      note: ['Note', 't-note'],
+      quick_warn: ['Warning', 't-warn'],
+      add_user_warning: ['Warning', 't-warn'],
+      remove_user_warning: ['Warning removed', 't-good'],
+      auto_ban: ['Banned automatically at 3 warnings', 't-ban'],
+      quick_ban: ['Banned', 't-ban'],
+      quick_unban: ['Ban lifted', 't-good'],
+      unban_user: ['Ban lifted', 't-good'],
+      ban_expired: ['Temporary ban ended', 't-good'],
+      revert: ['Change reverted', '']
+    };
+
+    function modEventHtml(h) {
+      const [title, cls] = MOD_EVENT[h.action] || [String(h.action || '').replace(/_/g, ' '), ''];
+      const d = h.details || {};
+      let label = title;
+      if ((h.action === 'quick_warn' || h.action === 'add_user_warning') && d.warnCount) label = `Warning ${d.warnCount} of 3`;
+      if (h.action === 'quick_ban') label = d.expiresAt ? `Banned for ${BAN_DURATIONS.find(b => Number(b[0]) === Number(d.durationHours))?.[1] || (d.durationHours + ' hours')}` : 'Banned permanently';
+      if (h.action === 'revert' && d.original_action) label = `Reverted: ${(MOD_EVENT[d.original_action] || [d.original_action])[0].toLowerCase()}`;
+      return `<li class="${cls}">
+        <div class="t-title ${h.reverted ? 'reverted' : ''}">${esc(label)}${h.reverted ? ' (reverted)' : ''}</div>
+        <div class="t-meta">by ${esc(h.actor_username || 'System')} &middot; <span title="${esc(fmtDateTime(h.created_at))}">${esc(relTime(h.created_at))}</span></div>
+        ${d.reason ? `<div class="t-text">${esc(d.reason)}</div>` : ''}
+      </li>`;
+    }
+
+    function strikesHtml(n) {
+      return `<span class="pp-strikes ${n >= 3 ? 'full' : ''}" aria-label="${n} of 3 warnings">${[0, 1, 2].map(i => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
+    }
+
     function userMenuHtml() {
       if (!umTarget) return '';
+      const t = umTarget;
+      const d = umData;
       const canModerate = hasPermission('staff.moderate');
+      const isSelf = t.id && String(t.id) === String(hrUserId || '');
+      const warnCount = d ? d.warnings.length : 0;
+      const ban = d ? d.ban : null;
+      const canAct = !!(d && d.canAct && canModerate && t.id && !isSelf);
+
+      let state = '';
+      if (d) {
+        if (ban) state = `<span class="pp-state ban">${ban.expires_at ? `Banned until ${esc(fmtDate(ban.expires_at))}` : 'Banned'}</span>`;
+        else if (warnCount) state = `<span class="pp-state warn">${strikesHtml(warnCount)} ${warnCount} of 3 warnings</span>`;
+        else state = `<span class="pp-state ok">In good standing</span>`;
+      }
+
+      const mode = umMode;
+      const nextWarn = warnCount + 1;
+      const submitLabel = mode === 'note' ? 'Add note'
+        : mode === 'warn' ? (nextWarn >= 3 ? 'Issue 3rd warning and ban' : `Issue warning ${nextWarn} of 3`)
+          : (umDuration === '0' ? 'Ban permanently' : `Ban for ${BAN_DURATIONS.find(b => b[0] === umDuration)[1]}`);
+      const modeHelp = mode === 'note' ? 'Private to moderators. Nothing changes for them.'
+        : mode === 'warn' ? (nextWarn >= 3 ? 'This is their third warning, so they will be banned and signed out.' : `Three warnings bans the account. This will be warning ${nextWarn}.`)
+          : 'They are signed out straight away and cannot sign in until the ban ends or is lifted.';
+
+      const composer = canAct && !ban ? `
+        <div class="pp-section">
+          <h3>Take action</h3>
+          <div class="seg" role="tablist">
+            ${[['note', 'Note'], ['warn', 'Warning'], ['ban', 'Ban']].map(([m, l]) => `<button type="button" data-mode="${m}" class="${mode === m ? 'on' : ''}" role="tab" aria-selected="${mode === m}">${l}</button>`).join('')}
+          </div>
+          <p class="hint" style="margin:0 0 10px;">${esc(modeHelp)}</p>
+          <div class="field" style="margin-bottom:8px;">
+            <label for="umReasonInput">${mode === 'note' ? 'Note' : 'Reason'}${mode === 'ban' ? ' <span class="hint">(shown in their record)</span>' : ''}</label>
+            <textarea id="umReasonInput" rows="3" placeholder="${mode === 'note' ? 'What should other moderators know?' : 'What happened?'}">${esc(umReason)}</textarea>
+          </div>
+          <div class="reason-chips">${REASON_TEMPLATES[mode].map(r => `<button type="button" data-reason-chip="${esc(r)}">${esc(r)}</button>`).join('')}</div>
+          ${mode === 'ban' ? `
+          <div class="field">
+            <label for="umDurationSel">Length</label>
+            <select id="umDurationSel">${BAN_DURATIONS.map(([v, l]) => `<option value="${v}" ${umDuration === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          </div>` : ''}
+          ${mode !== 'note' ? `
+          <label class="pp-check"><input type="checkbox" id="umNotifyChk" ${umNotify && d.discordLinked ? 'checked' : ''} ${d.discordLinked ? '' : 'disabled'}> ${d.discordLinked ? 'Tell them on Discord (includes the reason)' : 'No Discord linked, so they won\'t be messaged'}</label>` : ''}
+          <button type="button" class="btn ${mode === 'ban' || (mode === 'warn' && nextWarn >= 3) ? 'btn-danger' : 'btn-primary'} btn-sm" id="umSubmitBtn" ${umBusy ? 'disabled' : ''} style="${mode === 'ban' || (mode === 'warn' && nextWarn >= 3) ? 'background:var(--err-text);color:#fff;border-color:var(--err-text);' : ''}">${umBusy ? 'Saving...' : esc(submitLabel)}</button>
+        </div>` : '';
+
+      const banBanner = ban ? `
+        <div class="pp-banner">
+          <strong>${ban.expires_at ? `Banned until ${esc(fmtDateTime(ban.expires_at))} (${esc(relTime(ban.expires_at))})` : 'Banned permanently'}</strong>
+          <span>${esc(ban.reason || 'No reason given')}${ban.banned_by ? ` &middot; by ${esc(ban.banned_by)}` : ''}${ban.banned_at ? `, ${esc(relTime(ban.banned_at))}` : ''}</span>
+          ${canAct ? `<div class="pp-row"><button type="button" class="btn btn-ghost btn-sm" id="umUnbanBtn" ${umBusy ? 'disabled' : ''}>${umBusy ? 'Saving...' : 'Lift ban'}</button>
+            ${d.discordLinked ? `<label class="pp-check" style="margin:0;"><input type="checkbox" id="umNotifyChk" ${umNotify ? 'checked' : ''}> Tell them on Discord</label>` : ''}</div>` : ''}
+        </div>` : '';
+
+      const cantActNote = d && canModerate && t.id && !canAct
+        ? `<div class="pp-banner neutral">${isSelf ? "This is your account. Someone else has to moderate it." : "Their role is at or above yours, so you can see their record but can't take action."}</div>` : '';
+
+      const activeWarnings = d && d.warnings.length ? `
+        <div class="pp-section">
+          <h3>Active warnings (${warnCount} of 3)</h3>
+          <ul class="timeline">
+            ${d.warnings.map(w => `<li class="t-warn">
+              <div class="t-title">${esc(w.reason || 'No reason given')}</div>
+              <div class="t-meta">by ${esc(w.warned_by || 'Unknown')} &middot; <span title="${esc(fmtDateTime(w.created_at))}">${esc(relTime(w.created_at))}</span>
+              ${canAct ? ` &middot; <button type="button" class="link-btn" data-remove-warning="${esc(w.id)}" style="background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font:inherit;">Remove</button>` : ''}</div>
+            </li>`).join('')}
+          </ul>
+        </div>` : '';
+
+      const history = d ? `
+        <div class="pp-section">
+          <h3>History</h3>
+          ${d.history.length ? `<ul class="timeline">${d.history.map(modEventHtml).join('')}</ul>` : `<p class="hint" style="margin:0;">Nothing on record. Notes, warnings and bans will show up here.</p>`}
+        </div>` : '';
+
       return `
-    <div class="um-scrim" id="umScrim">
-      <div class="modal-card">
-        <button type="button" class="modal-close" id="umClose">&times;</button>
-        <div class="modal-header">
-          <h2>${esc(umTarget.username || 'Unknown user')}</h2>
-          ${umTarget.id ? `<div class="modal-id mono">Roblox ID: ${esc(umTarget.id)}</div>` : ''}
-          ${umLoading ? '' : `
-          <div style="margin-top:8px;">
-            <span class="status-chip ${umBanned ? '' : 'pending'}" style="${umBanned ? 'background:var(--err-bg);color:var(--err-text);border-color:var(--err-line);' : ''}">
-              ${umBanned ? 'Banned' : `${umWarnings.length} / 3 warnings`}
-            </span>
-          </div>`}
-        </div>
-        <div class="modal-body">
-          ${umLoading ? `<div class="dash-loading">Loading user...</div>` : `
-          ${umMsg ? `<div class="${umMsg.ok ? 'confirm-box' : 'error-box'}" style="margin-bottom:12px;"><span>${esc(umMsg.text)}</span></div>` : ''}
-          ${!umTarget.id ? `<div class="empty-note" style="margin-bottom:12px;">This entry has no linked Roblox ID, so quick moderation isn't available here.</div>` : ''}
-          ${canModerate && umTarget.id ? `
-          <div class="modal-section">
-            <div class="modal-section-title">Quick moderation</div>
-            <div class="field">
-              <label>Reason (required for note / warning)</label>
-              <textarea id="umReasonInput" placeholder="Describe the issue" rows="2">${esc(umReason)}</textarea>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-              <button type="button" class="btn btn-ghost btn-sm" id="umNoteBtn" ${umBusy ? 'disabled' : ''}>Add note</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="umWarnBtn" ${umBusy || umBanned ? 'disabled' : ''}>Issue warning</button>
-              ${umBanned
-              ? `<button type="button" class="btn btn-primary btn-sm" id="umUnbanBtn" ${umBusy ? 'disabled' : ''}>Lift ban</button>`
-              : `<button type="button" class="btn btn-danger btn-sm" id="umBanBtn" ${umBusy ? 'disabled' : ''} style="background:var(--err-bg);color:var(--err-text);border:1px solid var(--err-line);">Ban user</button>`}
-            </div>
+    <div class="pp-scrim" id="umScrim">
+      <aside class="pp" role="dialog" aria-modal="true" aria-labelledby="ppName">
+        <div class="pp-head">
+          ${avatarImg(t.id, '')}
+          <div style="min-width:0;flex:1;">
+            <h2 id="ppName">${esc(t.username || 'Unknown user')}</h2>
+            <div class="pp-sub">${t.id ? `<button type="button" id="umCopyId" title="Copy Roblox ID">ID ${esc(t.id)}</button>` : 'No linked Roblox account'}${d && d.lastActive ? ` &middot; active ${esc(relTime(d.lastActive))}` : ''}</div>
+            ${d ? `<div class="pp-chips">${state}${(d.roles || []).map(r => `<span class="perm-chip">${esc(r)}</span>`).join('')}</div>` : ''}
           </div>
-          <div class="modal-section">
-            <div class="modal-section-title">Warning history</div>
-            ${umWarnings.length === 0 ? `<div class="hint">No warnings on record.</div>` : umWarnings.map(w => `
-              <div class="modal-info-row">
-                <span class="label">${esc(fmtDate(w.created_at))}${w.warned_by ? ' by ' + esc(w.warned_by) : ''}</span>
-                <span class="value" style="max-width:60%;text-align:right;">${esc(w.reason || '')}</span>
-              </div>
-            `).join('')}
-          </div>
-          ` : ''}
-          `}
+          <button type="button" class="modal-close" id="umClose" aria-label="Close">&times;</button>
         </div>
-      </div>
+        <div class="pp-body">
+          ${umLoading ? `<div class="dash-loading">Loading their record...</div>` : ''}
+          ${umLoadError ? `<div class="error-box"><span>${esc(umLoadError)}</span></div>` : ''}
+          ${!t.id ? `<div class="pp-banner neutral">This entry isn't linked to a Roblox account, so there's no record to show.</div>` : ''}
+          ${!umLoading && t.id && !d && !umLoadError ? `<div class="pp-banner neutral">You don't have access to staff records.</div>` : ''}
+          ${banBanner}
+          ${cantActNote}
+          ${composer}
+          ${activeWarnings}
+          ${history}
+        </div>
+        ${t.id && (hasPermission('staff.view_database') || hasPermission('audit.view')) ? `
+        <div class="pp-foot">
+          ${hasPermission('settings.manage_onboarding') ? `<a class="btn btn-ghost btn-sm" href="#/staff?user=${encodeURIComponent(t.id)}&open=config" data-pp-link>Teams &amp; roles</a>` : ''}
+          ${hasPermission('staff.moderate') ? `<a class="btn btn-ghost btn-sm" href="#/staff?user=${encodeURIComponent(t.id)}&open=payment" data-pp-link>Payout method</a>` : ''}
+          ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff?user=${encodeURIComponent(t.id)}" data-pp-link>Full profile</a>` : ''}
+          ${hasPermission('audit.view') ? `<a class="btn btn-ghost btn-sm" href="#/audit?search=${encodeURIComponent(t.username || t.id)}" data-pp-link>Audit trail</a>` : ''}
+          <a class="btn btn-ghost btn-sm" href="https://www.roblox.com/users/${encodeURIComponent(t.id)}/profile" target="_blank" rel="noopener">Roblox profile</a>
+        </div>` : ''}
+      </aside>
     </div>`;
     }
 
     function paintUserMenu() {
       const root = document.getElementById('globalUserMenuRoot');
       if (!root) return;
+      const hadFocus = document.activeElement && document.activeElement.id === 'umReasonInput';
       root.innerHTML = userMenuHtml();
       wireUserMenuEvents();
+      if (hadFocus) { const r = document.getElementById('umReasonInput'); if (r) { r.focus(); r.setSelectionRange(r.value.length, r.value.length); } }
     }
 
     function wireUserMenuEvents() {
       const scrim = document.getElementById('umScrim');
-      const closeBtn = document.getElementById('umClose');
       if (scrim) scrim.addEventListener('click', (e) => { if (e.target === scrim) closeUserMenu(); });
+      const closeBtn = document.getElementById('umClose');
       if (closeBtn) closeBtn.addEventListener('click', closeUserMenu);
+      document.querySelectorAll('#umScrim [data-pp-link]').forEach(a => a.addEventListener('click', () => { umTarget = null; paintUserMenu(); }));
+      const copyId = document.getElementById('umCopyId');
+      if (copyId) copyId.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(umTarget.id); toast('Roblox ID copied'); });
 
       const reasonInput = document.getElementById('umReasonInput');
       if (reasonInput) reasonInput.addEventListener('input', () => { umReason = reasonInput.value; });
+      document.querySelectorAll('#umScrim [data-mode]').forEach(b => b.addEventListener('click', () => { umMode = b.dataset.mode; paintUserMenu(); }));
+      document.querySelectorAll('#umScrim [data-reason-chip]').forEach(b => b.addEventListener('click', () => {
+        umReason = umReason.trim() ? `${umReason.trim()}. ${b.dataset.reasonChip}` : b.dataset.reasonChip;
+        paintUserMenu();
+        const r = document.getElementById('umReasonInput'); if (r) r.focus();
+      }));
+      const dur = document.getElementById('umDurationSel');
+      if (dur) dur.addEventListener('change', () => { umDuration = dur.value; paintUserMenu(); });
+      const notify = document.getElementById('umNotifyChk');
+      if (notify) notify.addEventListener('change', () => { umNotify = notify.checked; });
 
-      const noteBtn = document.getElementById('umNoteBtn');
-      if (noteBtn) noteBtn.addEventListener('click', () => runQuickModeration('note'));
-      const warnBtn = document.getElementById('umWarnBtn');
-      if (warnBtn) warnBtn.addEventListener('click', () => runQuickModeration('warn'));
-      const banBtn = document.getElementById('umBanBtn');
-      if (banBtn) banBtn.addEventListener('click', () => runQuickModeration('ban'));
-      const unbanBtn = document.getElementById('umUnbanBtn');
-      if (unbanBtn) unbanBtn.addEventListener('click', () => runQuickModeration('unban'));
+      const submit = document.getElementById('umSubmitBtn');
+      if (submit) submit.addEventListener('click', () => runQuickModeration(umMode));
+      const unban = document.getElementById('umUnbanBtn');
+      if (unban) unban.addEventListener('click', () => runQuickModeration('unban'));
+      document.querySelectorAll('#umScrim [data-remove-warning]').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('Remove this warning? It stays in the history as removed.')) return;
+        umBusy = true; paintUserMenu();
+        try {
+          await removeUserWarning(b.dataset.removeWarning);
+          toast('Warning removed');
+          await afterModeration();
+        } catch (e) { toast(e.message, 'err'); }
+        umBusy = false; paintUserMenu();
+      }));
+    }
+
+    async function afterModeration() {
+      await refreshUserMenuData();
+      if (umData && umTarget) {
+        const detail = { robloxUserId: umTarget.id, warnCount: umData.warnings.length, isBanned: !!umData.ban };
+        peopleCache.rows.forEach(p => { if (String(p.robloxUserId) === String(detail.robloxUserId)) { p.warnCount = detail.warnCount; p.isBanned = detail.isBanned; } });
+        window.dispatchEvent(new CustomEvent('pv:moderated', { detail }));
+      }
+      if (typeof window.__refreshCurrentAuditPage === 'function') window.__refreshCurrentAuditPage();
     }
 
     async function runQuickModeration(type) {
       if (!umTarget || !umTarget.id) return;
       const reason = umReason.trim();
-      if ((type === 'note' || type === 'warn') && !reason) {
-        umMsg = { ok: false, text: 'Enter a reason first.' };
-        paintUserMenu();
-        return;
-      }
-      if (type === 'ban' && !confirm(`Ban ${umTarget.username || 'this user'}? They will not be able to sign in again.`)) return;
-      umBusy = true; umMsg = null; paintUserMenu();
+      if ((type === 'note' || type === 'warn') && !reason) { toast(type === 'note' ? 'Write the note first.' : 'Add a reason for the warning.', 'err'); const r = document.getElementById('umReasonInput'); if (r) r.focus(); return; }
+      const name = umTarget.username || 'this person';
+      if (type === 'ban' && !confirm(umDuration === '0' ? `Ban ${name} permanently?` : `Ban ${name} for ${BAN_DURATIONS.find(b => b[0] === umDuration)[1]}?`)) return;
+      if (type === 'warn' && umData && umData.warnings.length >= 2 && !confirm(`This is ${name}'s third warning, so they will be banned. Continue?`)) return;
+      if (type === 'unban' && !confirm(`Lift the ban on ${name}? Their warnings stay on record.`)) return;
+      umBusy = true; paintUserMenu();
       try {
-        const res = await quickModerateUser(umTarget.id, umTarget.username, type, reason);
-        const labels = { note: 'Note added.', warn: `Warning issued.${res && res.banned ? ' User reached 3 warnings and was banned.' : ''}`, ban: 'User banned.', unban: 'Ban lifted.' };
-        umMsg = { ok: true, text: labels[type] || 'Done.' };
-        umReason = '';
-        await refreshUserMenuData();
+        const res = await callHrData('quick_moderate', {
+          robloxUserId: umTarget.id, robloxUsername: umTarget.username, type, reason,
+          durationHours: type === 'ban' ? Number(umDuration) : undefined,
+          notify: type !== 'note' && umNotify
+        });
+        let msg = { note: 'Note added', warn: res.banned ? 'Warning issued. They reached 3 and were banned' : `Warning ${res.warnCount} of 3 issued`, ban: 'Banned', unban: 'Ban lifted' }[type];
+        if (res.temporaryUnsupported) msg = 'Banned, but permanently: the database needs the expires_at column for timed bans (see MIGRATION.sql)';
+        if (res.notified) msg += '. They were messaged on Discord';
+        toast(msg + '.', res.temporaryUnsupported ? 'err' : undefined);
+        umReason = ''; umNotify = false; umMode = 'note';
+        await afterModeration();
       } catch (e) {
-        umMsg = { ok: false, text: e.message || 'That action failed.' };
+        toast(e.message || 'That action failed.', 'err');
       }
       umBusy = false;
       paintUserMenu();
-      if (typeof window.__refreshCurrentAuditPage === 'function') window.__refreshCurrentAuditPage();
     }
 
     document.addEventListener('click', (e) => {
@@ -4068,6 +5201,7 @@
     function route() {
       if (!authReady) return;
       renderGen++;
+      if (cmdkOpen) closeCmdk();
       const path = window.location.hash.split('?')[0];
       if (path === '#/auth-callback') { handleAuthCallback(); return; }
 
@@ -4186,22 +5320,64 @@
       return isHrAuthed && hasPermission('dashboard.view');
     }
 
+    function canSeeManage() {
+      return isHrAuthed && ['settings.manage_games', 'settings.manage_rate', 'settings.manage_groups', 'settings.manage_base_access', 'roles.manage', 'settings.manage_onboarding', 'broadcasts.manage'].some(hasPermission);
+    }
+
+    // One list of every destination, so the nav bar and the search palette always agree on what
+    // exists and who can see it.
+    function navItems() {
+      if (!isHrAuthed) return [];
+      return [
+        { group: 'you', label: 'My payments', href: '#/my', match: ['#/my', '#/', ''] },
+        { group: 'you', label: 'New request', href: '#/new', show: canSubmitRequests() },
+        { group: 'team', label: 'Payment requests', href: '#/dashboard', match: ['#/dashboard', '#/hr'], show: hasPermission('dashboard.view'), keywords: 'dashboard pay approve review' },
+        { group: 'team', label: 'Staff', href: '#/staff', show: hasPermission('staff.view_database'), keywords: 'people users members database profiles' },
+        { group: 'team', label: 'Moderation', href: '#/staff?tab=moderation', navHidden: true, show: hasPermission('staff.moderate'), keywords: 'bans warnings warn ban notes' },
+        { group: 'team', label: 'Recruitment', href: '#/recruitment', match: ['#/recruitment', '#/recruitment-analytics'], show: hasPermission('recruitment.view'), keywords: 'applications tickets applicants hiring' },
+        { group: 'admin', label: 'Analytics', href: '#/analytics', show: canSeeAnalytics(), keywords: 'stats charts spend' },
+        { group: 'admin', label: 'Recruitment analytics', href: '#/recruitment-analytics', navHidden: true, show: hasPermission('recruitment.analytics') },
+        { group: 'admin', label: 'Audit log', href: '#/audit', show: hasPermission('audit.view'), keywords: 'history revert logs' },
+        { group: 'admin', label: 'Backups', href: '#/audit?tab=backups', navHidden: true, show: hasPermission('backups.manage'), keywords: 'restore snapshot' },
+        { group: 'admin', label: 'Settings', href: '#/manage', show: canSeeManage(), keywords: 'manage configure' },
+        { group: 'admin', label: 'Settings: Access', href: '#/manage?tab=access', navHidden: true, show: hasPermission('settings.manage_base_access') || hasPermission('settings.manage_groups'), keywords: 'sign in groups eligibility discord servers' },
+        { group: 'admin', label: 'Settings: Games & rate', href: '#/manage?tab=games', navHidden: true, show: hasPermission('settings.manage_games') || hasPermission('settings.manage_rate'), keywords: 'devex usd minimum' },
+        { group: 'admin', label: 'Settings: Roles', href: '#/manage?tab=roles', navHidden: true, show: hasPermission('roles.manage'), keywords: 'permissions hierarchy' },
+        { group: 'admin', label: 'Settings: Teams, invites & hiring', href: '#/manage?tab=onboarding', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'onboarding skillsets positions invite links auto-hire sign-off' },
+        { group: 'admin', label: 'Settings: Broadcasts', href: '#/manage?tab=broadcasts', navHidden: true, show: hasPermission('broadcasts.manage'), keywords: 'announcements message' },
+        { group: 'you', label: 'My teams & skillsets', href: '#/my', navHidden: true },
+        { group: 'you', label: 'Terms of Service', href: '#/tos', navHidden: true },
+        { group: 'you', label: 'Acceptable Use Policy', href: '#/aup', navHidden: true }
+      ].filter(i => i.show !== false);
+    }
+
+    function currentPath() {
+      return (window.location.hash.split('?')[0] || '');
+    }
+
     function topbar() {
-      const canSeeDashboard = isHrAuthed && hasPermission('dashboard.view');
-      const canSeeManage = isHrAuthed && (hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding'));
-      const canSeeRecruitment = isHrAuthed && hasPermission('recruitment.view');
+      const path = currentPath();
+      const items = navItems().filter(i => !i.navHidden);
+      let lastGroup = null;
+      const nav = items.map(i => {
+        const sep = lastGroup && lastGroup !== i.group ? '<span class="nav-sep" aria-hidden="true"></span>' : '';
+        lastGroup = i.group;
+        const active = (i.match || [i.href]).includes(path);
+        return `${sep}<a href="${i.href}" class="${active ? 'active' : ''}" ${active ? 'aria-current="page"' : ''}>${esc(i.label)}</a>`;
+      }).join('');
+      const isMac = /Mac|iPhone|iPad/.test(navigator.platform || '');
       return `
+    <header class="app-header">
     <div class="topbar">
-      <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
+      <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Staff hub</small></a>
       <div class="topbar-right">
+        ${isHrAuthed ? `<button type="button" class="topbar-search" id="openCmdkBtn" aria-label="Search people and pages"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search people and pages</span><kbd>${isMac ? '&#8984;' : 'Ctrl'} K</kbd></button>` : ''}
         <button type="button" class="theme-toggle" id="themeToggleBtn" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${isHrAuthed
-          ? `<a class="hr-pill" href="#/my">My payments</a>${canSubmitRequests() ? `<a class="hr-pill" href="#/new">New request</a>` : ''}${canSeeDashboard ? `<a class="hr-pill" href="#/dashboard"><span class="dot-live"></span>Dashboard</a>` : ''}${canSeeRecruitment ? `<a class="hr-pill" href="#/recruitment">Recruitment</a>` : ''}${canSeeAnalytics() ? `<a class="hr-pill" href="#/analytics">Analytics</a>` : ''}${hasPermission('audit.view') ? `<a class="hr-pill" href="#/audit">Audit logs</a>` : ''}
-             <details class="acct-menu">
+          ? `<details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
-                 ${canSeeManage ? `<a href="#/manage">Manage</a><div class="acct-menu-divider"></div>` : ''}
-                 <a href="#/my">My teams &amp; skillsets</a>
+                 <a href="#/my">My payments, teams &amp; skillsets</a>
                  <a href="#/tos">Terms of Service</a>
                  <a href="#/aup">Acceptable Use Policy</a>
                  <a href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a>
@@ -4211,12 +5387,18 @@
              </details>`
           : `<a class="link" href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a><a class="hr-pill" href="#/hr">Sign in</a>`}
       </div>
-    </div>`;
+    </div>
+    ${isHrAuthed && items.length > 1 ? `<nav class="navstrip" aria-label="Main">${nav}</nav>` : ''}
+    </header>`;
     }
 
     function wireTopbarSignOut() {
       const btn = document.getElementById('signOutBtn');
       if (btn) btn.addEventListener('click', hrSignOut);
+      const cmdkBtn = document.getElementById('openCmdkBtn');
+      if (cmdkBtn) cmdkBtn.addEventListener('click', openCmdk);
+      const active = document.querySelector('.navstrip a.active');
+      if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       const themeBtn = document.getElementById('themeToggleBtn');
       if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     }
@@ -5508,11 +6690,12 @@
     }
 
     function renderDashboard() {
-      if (!hasPermission('dashboard.view')) { window.location.hash = hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding') ? '#/manage' : '#/'; return; }
+      if (!hasPermission('dashboard.view')) { window.location.hash = canSeeManage() ? '#/manage' : '#/'; return; }
       const myGen = renderGen;
       let allRequests = [];
       let filter = 'pending';
       let search = '';
+      let missingOnly = false;
       let roleFilter = 'all';
       let teamFilter = 'all';
       let skillsetFilter = 'all';
@@ -5545,6 +6728,7 @@
 
       function getRows() {
         let rows = allRequests.filter(r => filter === 'all' ? true : r.status === filter);
+        if (missingOnly) rows = rows.filter(r => r.status === 'pending' && !r.paymentMethod);
         if (roleFilter !== 'all') {
           rows = rows.filter(r => (r.requesterRoles || []).includes(roleFilter));
         }
@@ -5568,7 +6752,7 @@
         const rowHtml = `
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${esc(r.requestedBy || '-')}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell">
                 <div class="task-name">${esc(r.taskName || 'Untitled task')}</div>
                 ${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
@@ -5827,18 +7011,13 @@
     <div class="dash-shell">
       <div class="dash-head">
         <div>
-          <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Payment requests</h1>
-          <p class="sub">Everyone on the team sees the same list, updates save right away.</p>
+          <p class="sub">Shared with everyone who reviews payments. Changes save as you make them.</p>
         </div>
         <div class="dash-toolbar">
-          ${canSubmitRequests() ? `<a class="btn btn-ghost btn-sm" href="#/new">New request</a>` : ''}
-          ${canSeeAnalytics() ? `<a class="btn btn-ghost btn-sm" href="#/analytics">Analytics</a>` : ''}
-          ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
-          ${hasPermission('audit.view') ? `<a class="btn btn-ghost btn-sm" href="#/audit">Audit logs</a>` : ''}
-          ${(hasPermission('settings.manage_games') || hasPermission('settings.manage_rate') || hasPermission('settings.manage_groups') || hasPermission('settings.manage_base_access') || hasPermission('roles.manage') || hasPermission('settings.manage_onboarding')) ? `<a class="btn btn-ghost btn-sm" href="#/manage">Manage</a>` : ''}
           <button type="button" class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
-          ${canExport ? `<button type="button" class="btn btn-ghost btn-sm" id="copyAllBtn">Copy all as spreadsheet rows</button><button type="button" class="btn btn-ok btn-sm" id="exportXlsxBtn">Export as spreadsheet (.xlsx)</button>` : ''}
+          ${canExport ? `<button type="button" class="btn btn-ghost btn-sm" id="copyAllBtn" title="Copies the rows currently shown, ready to paste into a spreadsheet">Copy rows</button><button type="button" class="btn btn-ok btn-sm" id="exportXlsxBtn" title="Downloads the rows currently shown">Download .xlsx</button>` : ''}
+          ${canSubmitRequests() ? `<a class="btn btn-primary btn-sm" href="#/new">New request</a>` : ''}
         </div>
       </div>
 
@@ -5855,7 +7034,7 @@
           <div class="strip-label">Paid this month</div>
           <div class="strip-value" id="statPaidThisMonth">${paidThisMonth}</div>
         </div>
-        <div class="strip-card">
+        <div class="strip-card ${missingMethodCount ? 'clickable' : ''}" ${missingMethodCount ? 'id="missingMethodCard" role="button" tabindex="0" title="Show only these requests"' : ''}>
           <div class="strip-label">Missing payment method</div>
           <div class="strip-value" id="statMissingMethod" style="${missingMethodCount > 0 ? 'color:var(--warn-text);' : ''}">${missingMethodCount}</div>
         </div>
@@ -5890,8 +7069,8 @@
         </div>
       </div>
 
+      ${missingOnly ? `<div class="filter-notice">Showing pending requests with no payout method. Click a name, then Payout method, to add one.<button type="button" class="btn btn-ghost btn-sm" id="clearMissingBtn">Show all</button></div>` : ''}
       <div class="table-wrap" id="reqTableArea">${tableHtml()}</div>
-      <div class="footer-note">Data is stored in a database and shared across everyone using this tool.</div>
     </div>`;
 
         wireTopbarSignOut();
@@ -5899,6 +7078,7 @@
 
         document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
           filter = b.dataset.filter;
+          if (missingOnly) { missingOnly = false; paintShell(); return; }
           document.querySelectorAll('#dashFilterTabs .tab-btn').forEach(t => t.classList.toggle('active', t.dataset.filter === filter));
           paintTable();
         }));
@@ -5924,7 +7104,16 @@
         }
 
         const refreshBtn = document.getElementById('refreshBtn');
-        if (refreshBtn) refreshBtn.addEventListener('click', () => { load(); });
+        if (refreshBtn) refreshBtn.addEventListener('click', () => { load(true); });
+
+        const missingCard = document.getElementById('missingMethodCard');
+        const showMissing = () => { missingOnly = true; filter = 'pending'; paintShell(); };
+        if (missingCard) {
+          missingCard.addEventListener('click', showMissing);
+          missingCard.addEventListener('keydown', (e) => { if (e.key === 'Enter') showMissing(); });
+        }
+        const clearMissingBtn = document.getElementById('clearMissingBtn');
+        if (clearMissingBtn) clearMissingBtn.addEventListener('click', () => { missingOnly = false; paintShell(); });
 
         const copyAllBtn = document.getElementById('copyAllBtn');
         if (copyAllBtn) copyAllBtn.addEventListener('click', (e) => {
@@ -5949,10 +7138,10 @@
         });
       }
 
-      async function load() {
+      async function load(force) {
         loading = true; loadError = null; paintShell();
         try {
-          allRequests = await loadAllRequests();
+          allRequests = await loadAllRequests(force);
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Something went wrong while reading the shared request list.';
         }
@@ -6349,7 +7538,6 @@
     <div class="dash-shell">
       <div class="dash-head">
         <div>
-          <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Analytics</h1>
           <p class="sub">Payment activity, filterable and broken down any way you need.</p>
         </div>
@@ -6368,12 +7556,10 @@
     <div class="dash-shell">
       <div class="dash-head">
         <div>
-          <span class="eyebrow">HR dashboard</span>
           <h1 style="margin-bottom:4px;">Analytics</h1>
           <p class="sub">Payment activity, filterable and broken down any way you need.</p>
         </div>
         <div class="dash-toolbar">
-          <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
           <button type="button" class="btn btn-ghost btn-sm" id="refreshBtn">Refresh</button>
         </div>
       </div>
@@ -6556,7 +7742,16 @@
 
       function wireShellEvents() {
         const refreshBtn = document.getElementById('refreshBtn');
-        if (refreshBtn) refreshBtn.addEventListener('click', () => { load(); });
+        if (refreshBtn) refreshBtn.addEventListener('click', () => { load(true); });
+
+        const missingCard = document.getElementById('missingMethodCard');
+        const showMissing = () => { missingOnly = true; filter = 'pending'; paintShell(); };
+        if (missingCard) {
+          missingCard.addEventListener('click', showMissing);
+          missingCard.addEventListener('keydown', (e) => { if (e.key === 'Enter') showMissing(); });
+        }
+        const clearMissingBtn = document.getElementById('clearMissingBtn');
+        if (clearMissingBtn) clearMissingBtn.addEventListener('click', () => { missingOnly = false; paintShell(); });
 
         const searchInput = document.getElementById('searchInput');
         if (searchInput) searchInput.addEventListener('input', () => { search = searchInput.value; paintContent(); });
@@ -7084,7 +8279,8 @@
         { id: 'onboarding', label: 'Onboarding', enabled: canManageOnboarding },
         { id: 'broadcasts', label: 'Broadcasts', enabled: canManageBroadcasts }
       ].filter(t => t.enabled);
-      let manageTab = manageTabDefs.length ? manageTabDefs[0].id : null;
+      const requestedManageTab = parseHashQuery().get('tab');
+      let manageTab = manageTabDefs.some(t => t.id === requestedManageTab) ? requestedManageTab : (manageTabDefs.length ? manageTabDefs[0].id : null);
 
       let savingRate = false;
       let rateError = null;
@@ -7209,14 +8405,13 @@
     ${topbar()}
     <div class="shell">
       <div class="heading-block">
-        <span class="eyebrow">HR dashboard</span>
-        <h1>Manage</h1>
-        <p class="sub">Changes here save automatically and apply for everyone.</p>
+        <h1>Settings</h1>
+        <p class="sub">Changes apply to everyone as soon as they're saved.</p>
       </div>
 
       <div style="display:flex;gap:32px;align-items:flex-start;">
         ${manageTabDefs.length > 1 ? `
-        <div style="width:200px;flex-shrink:0;position:sticky;top:88px;display:flex;flex-direction:column;gap:2px;">
+        <div style="width:200px;flex-shrink:0;position:sticky;top:124px;display:flex;flex-direction:column;gap:2px;">
           ${manageTabDefs.map(t => `
             <button type="button" data-manage-tab="${t.id}" style="text-align:left;padding:9px 12px;border-radius:8px;border:none;background:${manageTab === t.id ? 'var(--accent-soft)' : 'transparent'};color:${manageTab === t.id ? 'var(--accent)' : 'var(--ink)'};font-weight:${manageTab === t.id ? '600' : '500'};font-size:13.5px;cursor:pointer;">${esc(t.label)}</button>
             ${manageTab === t.id && (subsectionsByTab[t.id] || []).length > 1 ? `
@@ -8780,7 +9975,16 @@
       let staff = [];
       let loading = true;
       let loadError = null;
+      const initialQuery = parseHashQuery();
       let search = '';
+      let staffTab = initialQuery.get('tab') === 'moderation' && hasPermission('staff.moderate') ? 'moderation' : 'people';
+      let chip = 'all';
+      let sortBy = 'active';
+      let pendingOpenUserId = initialQuery.get('user');
+      let pendingOpenMode = initialQuery.get('open');
+      let modOverview = null;
+      let modLoading = false;
+      let modError = null;
       let activeProfile = null;
       let modalMode = 'view';
       let teamsList = [];
@@ -8852,13 +10056,43 @@
   `);
       }
 
+      const CHIPS = [
+        { id: 'all', label: 'Everyone', test: () => true },
+        { id: 'pending', label: 'Waiting on payment', test: s => s.pendingCount > 0 },
+        { id: 'onboarding', label: 'Onboarding unfinished', test: s => s.onboardingRequired && s.onboardingCompleted < s.onboardingRequired },
+        { id: 'noteam', label: 'No team', test: s => !s.team },
+        { id: 'warned', label: 'Has warnings', test: s => s.warnCount > 0 && !s.isBanned },
+        { id: 'banned', label: 'Banned', test: s => s.isBanned }
+      ];
+      const SORTS = {
+        active: { label: 'Recently active', fn: (a, b) => new Date(b.lastActive || 0) - new Date(a.lastActive || 0) },
+        requests: { label: 'Most requests', fn: (a, b) => (b.requestCount || 0) - (a.requestCount || 0) },
+        pending: { label: 'Most pending', fn: (a, b) => (b.pendingCount || 0) - (a.pendingCount || 0) },
+        warnings: { label: 'Most warnings', fn: (a, b) => (b.isBanned - a.isBanned) || (b.warnCount || 0) - (a.warnCount || 0) },
+        name: { label: 'Name (A-Z)', fn: (a, b) => (a.robloxUsername || '').localeCompare(b.robloxUsername || '') }
+      };
+
+      function matchesSearch(s) {
+        const q = search.trim().toLowerCase();
+        if (!q) return true;
+        return (s.robloxUsername || '').toLowerCase().includes(q) ||
+          String(s.robloxUserId || '') === q ||
+          (s.roles || []).some(r => r.toLowerCase().includes(q)) ||
+          (s.team || '').toLowerCase().includes(q) ||
+          (s.skillset || '').toLowerCase().includes(q);
+      }
+
       function getRows() {
-        let rows = staff;
-        if (search.trim()) {
-          const q = search.trim().toLowerCase();
-          rows = rows.filter(s => (s.robloxUsername || '').toLowerCase().includes(q) || (s.roles || []).some(r => r.toLowerCase().includes(q)));
-        }
-        return [...rows].sort((a, b) => (b.requestCount || 0) - (a.requestCount || 0));
+        const c = CHIPS.find(x => x.id === chip) || CHIPS[0];
+        return staff.filter(s => matchesSearch(s) && c.test(s)).sort(SORTS[sortBy].fn);
+      }
+
+      function chipsHtml() {
+        const base = staff.filter(matchesSearch);
+        return CHIPS.filter(c => c.id !== 'banned' || staff.some(s => s.isBanned)).map(c => {
+          const n = base.filter(c.test).length;
+          return `<button type="button" class="chip-filter ${chip === c.id ? 'on' : ''}" data-chip="${c.id}" aria-pressed="${chip === c.id}">${esc(c.label)} <b>${n}</b></button>`;
+        }).join('');
       }
 
       function paidTotalsHtml(s, stacked) {
@@ -8871,8 +10105,8 @@
 
       async function cardsHtml() {
         const rows = getRows();
-        if (loading) {
-          return `<div class="dash-loading">Loading staff database...</div>`;
+        if (loading && !staff.length) {
+          return `<div class="dash-loading">Loading staff...</div>`;
         }
         if (loadError) {
           return `
@@ -8886,18 +10120,19 @@
         if (rows.length === 0) {
           return `
       <div class="dash-empty">
-        <h3>Nothing here</h3>
-        <p>No matching staff found.</p>
+        <h3>No one matches</h3>
+        <p>${search.trim() ? `Nobody matches "${esc(search.trim())}"${chip !== 'all' ? ' with this filter' : ''}.` : 'Nobody fits this filter right now.'}</p>
+        ${chip !== 'all' || search ? `<button type="button" class="btn btn-ghost btn-sm" id="clearStaffFilters">Show everyone</button>` : ''}
       </div>
     `;
         }
-        const cards = await Promise.all(rows.map(async (s, i) => {
-          const avatar = await avatarUrl(s);
+        const cards = rows.map((s, i) => {
+          const avatar = avatarSrc(s.robloxUserId);
           return `
       <div class="staff-card" data-staff-idx="${i}">
         ${s.isBanned ? `<span class="pending-badge" style="background:var(--err-bg);border-color:var(--err-line);color:var(--err-text);">Banned</span>` : (s.warnCount ? `<span class="pending-badge">${esc(s.warnCount)}/3 warns</span>` : (s.pendingCount ? `<span class="pending-badge">${esc(s.pendingCount)} pending</span>` : ''))}
         <div class="avatar-wrap">
-          <img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}" loading="lazy">
+          <img src="${avatar}" data-avatar-id="${esc(s.robloxUserId || '')}" alt="${esc(s.robloxUsername || 'Unknown')}" loading="lazy">
         </div>
         <div class="staff-name">${esc(s.robloxUsername || 'Unknown')}</div>
         ${s.robloxUserId ? `<div class="staff-id mono">ID ${esc(s.robloxUserId)}</div>` : ''}
@@ -8921,9 +10156,14 @@
             <span>Active</span>
           </div>
         </div>
+        ${s.robloxUserId && (canModerate || canAssign) ? `
+        <div class="staff-card-actions">
+          ${canAssign ? `<button type="button" class="btn btn-ghost btn-sm" data-staff-config="${i}">Teams &amp; roles</button>` : ''}
+          ${canModerate ? `<button type="button" class="btn btn-ghost btn-sm" data-staff-mod="${i}">${(Number(s.maxHierarchy) || 0) >= hrMaxHierarchy ? 'View record' : (s.isBanned ? 'Review ban' : 'Moderate')}</button>` : ''}
+        </div>` : ''}
       </div>
     `;
-        }));
+        });
         return `
     <div class="staff-grid">
       ${cards.join('')}
@@ -8934,7 +10174,7 @@
       async function modalHtml() {
         if (!activeProfile) return '';
         const s = activeProfile;
-        const avatar = await avatarUrl(s);
+        const avatar = avatarSrc(s.robloxUserId);
         const pct = s.onboardingRequired
           ? Math.round((s.onboardingCompleted / s.onboardingRequired) * 100)
           : 0;
@@ -8947,7 +10187,7 @@
       <div class="modal-card">
         <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
-          <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
+          <div class="avatar-wrap"><img src="${avatar}" data-avatar-id="${esc(s.robloxUserId || '')}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
           <h2>Configure ${esc(s.robloxUsername || 'Unknown')}</h2>
           ${s.robloxUserId ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>` : ''}
         </div>
@@ -9056,7 +10296,7 @@
       <div class="modal-card">
         <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
-          <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
+          <div class="avatar-wrap"><img src="${avatar}" data-avatar-id="${esc(s.robloxUserId || '')}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
           <h2>Payment method</h2>
           <div class="modal-id">${esc(s.robloxUsername || 'Unknown')}${s.robloxUserId ? ' · ID ' + esc(s.robloxUserId) : ''}</div>
         </div>
@@ -9097,7 +10337,7 @@
       <div class="modal-card">
         <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
-          <div class="avatar-wrap"><img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
+          <div class="avatar-wrap"><img src="${avatar}" data-avatar-id="${esc(s.robloxUserId || '')}" alt="${esc(s.robloxUsername || 'Unknown')}"></div>
           <h2>Moderation</h2>
           <div class="modal-id">${esc(s.robloxUsername || 'Unknown')}${s.robloxUserId ? ' · ID ' + esc(s.robloxUserId) : ''}</div>
           <div style="margin-top:8px;">
@@ -9151,7 +10391,7 @@
         <button type="button" class="modal-close" id="staffModalClose">&times;</button>
         <div class="modal-header">
           <div class="avatar-wrap">
-            <img src="${avatar}" alt="${esc(s.robloxUsername || 'Unknown')}">
+            <img src="${avatar}" data-avatar-id="${esc(s.robloxUserId || '')}" alt="${esc(s.robloxUsername || 'Unknown')}">
           </div>
           <h2>${esc(s.robloxUsername || 'Unknown')}</h2>
           ${s.robloxUserId ? `<div class="modal-id mono">Roblox ID: ${esc(s.robloxUserId)}</div>` : ''}
@@ -9165,8 +10405,8 @@
         </div>
         <div class="modal-body">
           <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-            ${canAssign && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openConfigBtn">Configure</button>` : ''}
-            ${canModerate && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openModBtn">Moderation</button>` : ''}
+            ${canAssign && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openConfigBtn">Teams &amp; roles</button>` : ''}
+            ${canModerate && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openModBtn">${s.isBanned ? 'Review ban' : 'Moderate'}</button>` : ''}
             ${canModerate && s.robloxUserId ? `<button type="button" class="btn btn-ghost btn-sm" id="openPaymentBtn">Payment method</button>` : ''}
           </div>
           <div class="modal-section">
@@ -9226,7 +10466,11 @@
 
       function openProfile(idx) {
         const rows = getRows();
-        activeProfile = rows[idx] || null;
+        openProfileFor(rows[idx] || null);
+      }
+
+      function openProfileFor(profile) {
+        activeProfile = profile;
         modalMode = 'view';
         configMsg = null;
         warnError = null;
@@ -9369,7 +10613,7 @@
         const openConfigBtn = document.getElementById('openConfigBtn');
         if (openConfigBtn) openConfigBtn.addEventListener('click', openConfig);
         const openModBtn = document.getElementById('openModBtn');
-        if (openModBtn) openModBtn.addEventListener('click', openModerate);
+        if (openModBtn) openModBtn.addEventListener('click', () => { const p = activeProfile; closeProfile(); openUserMenu(p.robloxUserId, p.robloxUsername); });
         const openPaymentBtn = document.getElementById('openPaymentBtn');
         if (openPaymentBtn) openPaymentBtn.addEventListener('click', openPayment);
 
@@ -9610,42 +10854,134 @@
       function wireTableEvents() {
         const retryBtn = document.getElementById('retryStaffBtn');
         if (retryBtn) retryBtn.addEventListener('click', load);
-        document.querySelectorAll('[data-staff-idx]').forEach(el => {
-          el.addEventListener('click', () => openProfile(Number(el.dataset.staffIdx)));
+        const clearBtn = document.getElementById('clearStaffFilters');
+        if (clearBtn) clearBtn.addEventListener('click', () => {
+          chip = 'all'; search = '';
+          const si = document.getElementById('staffSearchInput'); if (si) si.value = '';
+          paintTable();
         });
+        document.querySelectorAll('[data-staff-idx]').forEach(el => {
+          el.setAttribute('tabindex', '0');
+          el.setAttribute('role', 'button');
+          el.addEventListener('click', (e) => { if (e.target.closest('button')) return; openProfile(Number(el.dataset.staffIdx)); });
+          el.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === el) openProfile(Number(el.dataset.staffIdx)); });
+        });
+        document.querySelectorAll('[data-staff-mod]').forEach(el => el.addEventListener('click', () => {
+          const p = getRows()[Number(el.dataset.staffMod)];
+          if (p) openUserMenu(p.robloxUserId, p.robloxUsername);
+        }));
+        document.querySelectorAll('[data-staff-config]').forEach(el => el.addEventListener('click', () => {
+          const p = getRows()[Number(el.dataset.staffConfig)];
+          if (p) { openProfileFor(p); openConfig(); }
+        }));
+        document.querySelectorAll('[data-chip]').forEach(el => el.addEventListener('click', () => { chip = el.dataset.chip; paintTable(); }));
       }
 
       async function paintTable() {
+        if (staffTab !== 'people') return;
         const area = document.getElementById('staffTableArea');
         if (area) area.innerHTML = await cardsHtml();
+        const chipsEl = document.getElementById('staffChips');
+        if (chipsEl) chipsEl.innerHTML = loading ? '' : chipsHtml();
         const countEl = document.getElementById('staffTotalCount');
-        if (countEl) countEl.textContent = loading ? 'Loading total users...' : (loadError ? 'Total users: unavailable' : `Total users: ${staff.length}`);
+        if (countEl) countEl.textContent = loading ? 'Loading...' : (loadError ? '' : `${staff.length} people`);
         wireTableEvents();
       }
 
+      // ---- Moderation tab ----
+      async function loadModeration() {
+        modLoading = true; modError = null; paintModeration();
+        try {
+          const json = await callHrData('moderation_overview');
+          modOverview = json.data;
+        } catch (e) {
+          modError = e.message;
+        }
+        modLoading = false;
+        if (myGen === renderGen) paintModeration();
+      }
+
+      function modPersonRow(id, name, bodyHtml, actionHtml) {
+        return `<div class="mod-list-item">
+          ${avatarImg(id, '')}
+          <div class="grow">
+            <div>${userLink(id, name)}</div>
+            ${bodyHtml}
+          </div>
+          ${actionHtml || ''}
+        </div>`;
+      }
+
+      function paintModeration() {
+        if (staffTab !== 'moderation') return;
+        const area = document.getElementById('staffTableArea');
+        if (!area) return;
+        if (modLoading && !modOverview) { area.innerHTML = `<div class="dash-loading">Loading moderation overview...</div>`; return; }
+        if (modError) { area.innerHTML = `<div class="dash-empty"><h3>Could not load moderation</h3><p>${esc(modError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryModBtn">Try again</button></div>`; const r = document.getElementById('retryModBtn'); if (r) r.addEventListener('click', loadModeration); return; }
+        const o = modOverview || { bans: [], warned: [], recent: [] };
+        area.innerHTML = `
+          <div class="mod-grid">
+            <div style="display:flex;flex-direction:column;gap:20px;">
+              <div class="panel">
+                <h3 style="margin:0 0 4px;font-size:15px;">Banned (${o.bans.length})</h3>
+                <p class="hint" style="margin:0 0 8px;">Can't sign in. Timed bans end on their own.</p>
+                ${o.bans.length ? o.bans.map(b => modPersonRow(b.roblox_user_id, b.roblox_username,
+          `<div class="why">${esc(b.reason || 'No reason given')}</div>
+                   <div class="when">${b.expires_at ? `Ends ${esc(relTime(b.expires_at))}` : 'Permanent'} &middot; by ${esc(b.banned_by || 'unknown')} ${esc(relTime(b.banned_at))}</div>`,
+          `<button type="button" class="btn btn-ghost btn-sm" data-mod-open="${esc(b.roblox_user_id)}" data-mod-name="${esc(b.roblox_username || '')}">Review</button>`)).join('')
+            : `<p class="hint" style="margin:8px 0 0;">No one is banned.</p>`}
+              </div>
+              <div class="panel">
+                <h3 style="margin:0 0 4px;font-size:15px;">On warnings (${o.warned.length})</h3>
+                <p class="hint" style="margin:0 0 8px;">A third warning bans the account automatically.</p>
+                ${o.warned.length ? o.warned.map(w => modPersonRow(w.robloxUserId, w.robloxUsername,
+              `<div class="why">${strikesHtml(w.count)} <span style="margin-left:6px;">${esc(w.lastReason || '')}</span></div>
+                   <div class="when">Last warned ${esc(relTime(w.lastAt))}${w.lastBy ? ` by ${esc(w.lastBy)}` : ''}</div>`,
+              `<button type="button" class="btn btn-ghost btn-sm" data-mod-open="${esc(w.robloxUserId)}" data-mod-name="${esc(w.robloxUsername || '')}">Review</button>`)).join('')
+            : `<p class="hint" style="margin:8px 0 0;">No active warnings.</p>`}
+              </div>
+            </div>
+            <div class="panel">
+              <h3 style="margin:0 0 12px;font-size:15px;">Recent activity</h3>
+              ${o.recent.length ? `<ul class="timeline">${o.recent.map(h => {
+              const html = modEventHtml(h);
+              return html.replace('<div class="t-meta">', `<div class="t-meta">${h.target_user_id || h.target_username ? userLink(h.target_user_id, h.target_username) + ' &middot; ' : ''}`);
+            }).join('')}</ul>` : `<p class="hint" style="margin:0;">No moderation actions yet. Open anyone's name to add a note, warning or ban.</p>`}
+            </div>
+          </div>`;
+        area.querySelectorAll('[data-mod-open]').forEach(el => el.addEventListener('click', () => openUserMenu(el.dataset.modOpen, el.dataset.modName)));
+      }
+
       function paintShell() {
+        const canModTab = hasPermission('staff.moderate');
         app.innerHTML = `
     ${topbar()}
     <div class="dash-shell">
       <div class="dash-head">
         <div>
-          <span class="eyebrow">HR dashboard</span>
-          <h1 style="margin-bottom:4px;">Staff database</h1>
-          <p class="sub" id="staffTotalCount">${loading ? 'Loading total users...' : `Total users: ${staff.length}`}</p>
-          <p class="sub">Everyone who has signed in, been assigned a role, or been paid, in one place. Click a profile to see full details.</p>
+          <h1 style="margin-bottom:4px;">Staff</h1>
+          <p class="sub"><span id="staffTotalCount">${loading ? 'Loading...' : `${staff.length} people`}</span>. Anyone who has signed in, been given a role, or been paid.</p>
         </div>
         <div class="dash-toolbar">
-          <a class="btn btn-ghost btn-sm" href="#/dashboard">Back to dashboard</a>
           <button type="button" class="btn btn-ghost btn-sm" id="refreshStaffBtn">Refresh</button>
         </div>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center;">
+      ${canModTab ? `
+      <div class="tabs" style="margin-bottom:16px;">
+        <button type="button" class="tab-btn ${staffTab === 'people' ? 'active' : ''}" data-staff-tab="people">People</button>
+        <button type="button" class="tab-btn ${staffTab === 'moderation' ? 'active' : ''}" data-staff-tab="moderation">Moderation</button>
+      </div>` : ''}
+      ${staffTab === 'people' ? `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
         <div class="search-input-wrap">
-          <input type="text" id="staffSearchInput" placeholder="Search by username or role" value="${esc(search)}">
+          <input type="text" id="staffSearchInput" placeholder="Search name, ID, role or team" value="${esc(search)}" aria-label="Search staff">
         </div>
+        <select id="staffSortSelect" class="filter-select" aria-label="Sort by">
+          ${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${sortBy === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}
+        </select>
       </div>
-      <div class="table-wrap" id="staffTableArea"></div>
-      <div class="footer-note">Combines sign-ins, role assignments, and payment history for everyone the system has seen.</div>
+      <div class="chip-filters" id="staffChips" style="margin-bottom:16px;">${loading ? '' : chipsHtml()}</div>` : ''}
+      <div class="${staffTab === 'people' ? 'table-wrap' : ''}" id="staffTableArea"></div>
     </div>
     <div id="staffModalSlot"></div>`;
 
@@ -9653,26 +10989,67 @@
         wireTableEvents();
         wireModalEvents();
 
+        document.querySelectorAll('[data-staff-tab]').forEach(el => el.addEventListener('click', () => {
+          staffTab = el.dataset.staffTab;
+          history.replaceState(null, '', staffTab === 'moderation' ? '#/staff?tab=moderation' : '#/staff');
+          paintShell();
+          if (staffTab === 'moderation') { if (!modOverview) loadModeration(); else paintModeration(); }
+          else paintTable();
+        }));
         const searchInput = document.getElementById('staffSearchInput');
         if (searchInput) {
-          searchInput.addEventListener('input', () => { search = searchInput.value; paintTable(); });
+          searchInput.addEventListener('input', debounce(() => { search = searchInput.value; paintTable(); }, 120));
         }
+        const sortSel = document.getElementById('staffSortSelect');
+        if (sortSel) sortSel.addEventListener('change', () => { sortBy = sortSel.value; paintTable(); });
         const refreshBtn = document.getElementById('refreshStaffBtn');
-        if (refreshBtn) refreshBtn.addEventListener('click', load);
+        if (refreshBtn) refreshBtn.addEventListener('click', () => { if (staffTab === 'moderation') loadModeration(); load(); });
       }
 
+      const onModerated = (e) => {
+        if (myGen !== renderGen) { window.removeEventListener('pv:moderated', onModerated); return; }
+        const d = e.detail || {};
+        const row = staff.find(x => String(x.robloxUserId) === String(d.robloxUserId));
+        if (row) { row.warnCount = d.warnCount; row.isBanned = d.isBanned; }
+        paintTable();
+        if (staffTab === 'moderation') loadModeration();
+      };
+      window.addEventListener('pv:moderated', onModerated);
+
       async function load() {
-        loading = true; loadError = null; paintShell();
+        loadError = null;
+        if (!staff.length) { loading = true; paintTable(); }
+        const btn = document.getElementById('refreshStaffBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
         try {
           staff = await loadStaffDatabase();
+          rememberPeople(staff);
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Could not load the staff database.';
         }
         if (myGen !== renderGen) return;
         loading = false;
+        const btn2 = document.getElementById('refreshStaffBtn');
+        if (btn2) { btn2.disabled = false; btn2.textContent = 'Refresh'; }
         paintTable();
+        if (pendingOpenUserId) {
+          const p = staff.find(x => String(x.robloxUserId) === String(pendingOpenUserId));
+          pendingOpenUserId = null;
+          history.replaceState(null, '', '#/staff');
+          if (p) {
+            openProfileFor(p);
+            if (pendingOpenMode === 'payment' && canModerate) openPayment();
+            else if (pendingOpenMode === 'config' && canAssign) openConfig();
+          }
+          pendingOpenMode = null;
+        }
       }
 
+      // Show whatever we already know instantly, then refresh in the background.
+      if (peopleCache.rows.length) { staff = peopleCache.rows; loading = false; }
+      paintShell();
+      if (staffTab === 'moderation') loadModeration();
+      paintTable();
       load();
     }
 
@@ -9682,13 +11059,14 @@
       const canRevert = hasPermission('audit.revert');
       const canBackup = hasPermission('backups.manage');
 
-      let tab = 'logs';
+      const auditQuery = parseHashQuery();
+      let tab = auditQuery.get('tab') === 'backups' && canBackup ? 'backups' : 'logs';
 
       let logs = [];
       let logsLoading = true;
       let logsError = null;
       let category = 'all';
-      let search = '';
+      let search = auditQuery.get('search') || '';
       let revertBusyId = null;
 
       let backups = [];
@@ -9700,8 +11078,17 @@
 
       window.__refreshCurrentAuditPage = () => { if (renderGen === myGen && tab === 'logs') loadLogs(); };
 
+      const ACTION_LABELS = {
+        quick_warn: 'Warned', add_user_warning: 'Warned', quick_ban: 'Banned', auto_ban: 'Banned (3 warnings)',
+        quick_unban: 'Lifted ban', unban_user: 'Lifted ban', ban_expired: 'Timed ban ended', remove_user_warning: 'Removed warning',
+        note: 'Added note', submit_request: 'Submitted payment request', mark_paid: 'Marked paid', reject_request: 'Rejected request',
+        reopen_request: 'Reopened request', delete_request: 'Deleted request', revert: 'Reverted a change',
+        auto_downgrade_payment_method: 'Payment method switched to Robux (below USD minimum)'
+      };
       function actionLabel(a) {
-        return String(a || '').replace(/_/g, ' ');
+        if (ACTION_LABELS[a]) return ACTION_LABELS[a];
+        const t = String(a || '').replace(/_/g, ' ');
+        return t.charAt(0).toUpperCase() + t.slice(1);
       }
 
       function detailsSummary(row) {
@@ -9779,13 +11166,10 @@
     <div class="dash-shell">
       <div class="dash-head">
         <div>
-          <span class="eyebrow">HR dashboard</span>
-          <h1 style="margin-bottom:4px;">Audit logs</h1>
+          <h1 style="margin-bottom:4px;">Audit log</h1>
           <p class="sub">Every payment, moderation, and backup action taken in the tool, with who did it and who it was done to.</p>
         </div>
         <div class="dash-toolbar">
-          ${hasPermission('dashboard.view') ? `<a class="btn btn-ghost btn-sm" href="#/dashboard">Dashboard</a>` : ''}
-          ${hasPermission('staff.view_database') ? `<a class="btn btn-ghost btn-sm" href="#/staff">Staff database</a>` : ''}
           <button type="button" class="btn btn-ghost btn-sm" id="refreshAuditBtn">Refresh</button>
         </div>
       </div>
@@ -9931,6 +11315,7 @@
       }
 
       loadLogs();
+      if (tab === 'backups') loadBackups();
     }
 
     function renderCreateView() {
