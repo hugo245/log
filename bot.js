@@ -76,13 +76,6 @@ async function getOnboardingGroupConfig() {
     };
 }
 
-// Ranks someone in the Roblox group via the official Open Cloud v2 API, authenticated with a
-// static, user-owned API key (group-owned keys are deprecated - create this under your own
-// account in the Creator Dashboard and authorize it for the target group with group read/write
-// access) instead of a session cookie or an OAuth token that needs refreshing.
-// Checks someone's current role in a group via Roblox's public (unauthenticated) groups API - used
-// to skip re-sending a rank change that's already in effect, since Roblox rejects a redundant
-// "set to the role you're already at" PATCH as an invalid request rather than a no-op.
 async function getCurrentGroupRoleId(groupId, targetUserId) {
     try {
         const res = await fetch(`https://groups.roblox.com/v1/users/${targetUserId}/groups/roles`);
@@ -115,12 +108,6 @@ async function setRobloxGroupRank(groupId, targetUserId, roleId) {
     }
 }
 
-// Team groups are invite-only, so joining doesn't grant membership right away - it just files a
-// join request that someone with permission has to approve. This looks for a pending request from
-// that user and accepts it via Open Cloud v2, so the bot can do that step instead of a human.
-// Returns false (not an error) if there's genuinely no pending request yet. Logs every step - a
-// silently-swallowed 404 from a wrong endpoint shape looks identical to "they haven't joined yet"
-// otherwise, which is exactly the kind of thing that needs to show up in the logs to debug.
 async function acceptGroupJoinRequest(groupId, targetUserId) {
     if (!ROBLOX_GROUP_API_KEY) throw new Error('roblox_group_api_key_not_configured');
 
@@ -128,9 +115,6 @@ async function acceptGroupJoinRequest(groupId, targetUserId) {
     const listRes = await fetch(listUrl, { headers: { 'x-api-key': ROBLOX_GROUP_API_KEY } });
     const listBody = await listRes.text().catch(() => '');
     console.log(`acceptGroupJoinRequest: list lookup for group ${groupId}, user ${targetUserId} -> status ${listRes.status}, body: ${listBody.slice(0, 500)}`);
-    // Roblox returns a plain 404 here (not a 200 with an empty list) when there's simply no join
-    // request from this user yet - that's the normal "they haven't asked to join" case, not a
-    // real failure.
     if (listRes.status === 404) return false;
     if (!listRes.ok) {
         throw new Error(`roblox_join_request_list_failed_${listRes.status}: ${listBody}`);
@@ -210,9 +194,6 @@ async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skil
     return { ok: true, mode: 'inserted' };
 }
 
-// Grants the actual Tool access (team/skillset assignment, plus role if the link had one) for an
-// invite/onboarding-link flow, once they've made it through the Discord-gated group-join steps
-// below. Mirrors what server.js used to do instantly on claim, but deferred until now.
 async function grantInviteLinkAccess(flow) {
     if (!flow.link_token) return;
 
@@ -267,11 +248,8 @@ async function grantInviteLinkAccess(flow) {
 
 const RECONCILE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let nextReconcileAt = null;
-const TICKET_AUTO_DELETE_DELAY_MS = 12 * 60 * 60 * 1000; // 12 hours
+const TICKET_AUTO_DELETE_DELAY_MS = 12 * 60 * 60 * 1000;
 
-// Marks a ticket "finalised" once it's been placed on a team AND actually roled in (in
-// user_assignments) - the very end of the recruitment pipeline. Posts a heads-up in the ticket's
-// Discord channel that it'll be auto-deleted in 12 hours; server.js schedules that deletion.
 async function finalizeAfterRoling(ticket) {
     if (!ticket || ticket.status === 'finalised') return;
     const nowIso = new Date().toISOString();
@@ -294,12 +272,6 @@ async function finalizeAfterRoling(ticket) {
     }
 }
 
-// This used to also auto-promote "signed_off" tickets straight into finalised/roled-in on a timer,
-// which defeated the entire point of requiring a producer to click Finalise - after 6 hours it
-// would happen automatically no matter what. Now this only re-applies the team/skillset assignment
-// for tickets that are ALREADY finalised (a producer really did click Finalise) but somehow ended
-// up missing from user_assignments - a pure drift/safety-net check, never a substitute for the
-// producer's approval.
 async function reconcilePlacements() {
     nextReconcileAt = Date.now() + RECONCILE_INTERVAL_MS;
 
@@ -427,16 +399,8 @@ client.on(Events.InteractionCreate, async interaction => {
                 await interaction.update({ content: 'One second...', components: [] });
 
                 try {
-                    // Fetched unconditionally (not just on the first pass) because we also need
-                    // config.groupId below, to detect whether the team's own group IS the main
-                    // group - in which case there's no separate group to join/request, and the
-                    // team's configured role should be applied directly instead of the main one.
                     const config = await getOnboardingGroupConfig();
 
-                    // Look up the team (if any) up front so we know, before ranking anyone,
-                    // whether the team's group is actually the same group as the main one.
-                    // team_id lives directly on the flow row for both ticket-based flows and
-                    // invite-link-based flows - fall back to the ticket lookup only for older rows.
                     let team = null;
                     let teamId = flow.team_id;
                     if (teamId == null && flow.ticket_id) {
@@ -449,13 +413,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
                     const sameAsMainGroup = !!team && config.groupId != null && Number(team.roblox_group_id) === Number(config.groupId);
 
-                    // The main group step only ever needs to run once - retrying a rank change to
-                    // the same role Roblox already has them at gets rejected as invalid, so once
-                    // this succeeds we skip straight to the team-group step on any later click.
-                    //
-                    // When the team's group IS the main group, skip the plain main-group rank
-                    // entirely and go straight to the team's configured role below - there's no
-                    // point ranking them to the default main role first just to override it.
                     if (flow.step !== 'main_ranked_awaiting_team' && !sameAsMainGroup) {
                         if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
 
@@ -468,15 +425,6 @@ client.on(Events.InteractionCreate, async interaction => {
                         await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
                     }
 
-                    // Also get them into their specific team's own Roblox group, if that team has
-                    // one configured with a default role - being in the main group doesn't imply
-                    // membership in each team's separate community. Team groups are invite-only,
-                    // so joining just files a request - accept it here, then rank them, retrying
-                    // the accept step is safe (a no-op) if it was already accepted.
-                    //
-                    // Exception: if the team's configured group IS the main onboarding group,
-                    // there's no separate group to join a request for, and they were already ranked
-                    // straight onto the team's role above - nothing further to do here.
                     let teamGroupNote = null;
                     if (team && !sameAsMainGroup) {
                         try {
@@ -495,9 +443,6 @@ client.on(Events.InteractionCreate, async interaction => {
                     const stepAfter = teamGroupNote ? 'main_ranked_awaiting_team' : 'done';
                     await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
 
-                    // Invite-link flows (as opposed to recruitment-ticket flows, where Tool access
-                    // was already granted back when the ticket was finalised) only get their actual
-                    // team/skillset/role granted here, once both group-join steps are fully done.
                     let doneMessage = `You're all set, ${flow.roblox_username}. Welcome to the team.`;
                     if (stepAfter === 'done' && flow.link_token) {
                         try {
@@ -622,10 +567,6 @@ http.createServer((req, res) => res.end('bot is alive')).listen(4000);
     try {
         await registerCommands();
     } catch (e) {
-        // Don't let a failed command registration (e.g. Discord's global rate limit, or a
-        // transient network error) take down the whole bot process. Slash commands can be
-        // registered again on a later boot - what matters is that the bot still logs in and
-        // keeps handling tickets/buttons in the meantime.
         console.error('registerCommands failed, continuing without re-registering slash commands:', e.message);
     }
     try {

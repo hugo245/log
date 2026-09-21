@@ -26,9 +26,7 @@ const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID;
 const DISCORD_LEAD_CHANNEL_ID = process.env.DISCORD_LEAD_CHANNEL_ID;
 const DISCORD_LEAD_ROLE_ID = process.env.DISCORD_LEAD_ROLE_ID || '1539922527013572668';
-// Category new per-applicant ticket channels are created under, and the HR role(s) allowed into them.
 const DISCORD_TICKET_CATEGORY_ID = process.env.DISCORD_TICKET_CATEGORY_ID || '1540256971096072295';
-// Comma-separated list supported via DISCORD_HR_ROLE_IDS, or a single id via DISCORD_HR_ROLE_ID.
 const DISCORD_HR_ROLE_IDS = (process.env.DISCORD_HR_ROLE_IDS || process.env.DISCORD_HR_ROLE_ID || '')
     .split(',').map(s => s.trim()).filter(Boolean);
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
@@ -211,18 +209,54 @@ app.get('/ping', (req, res) => {
     res.status(200).json({ ok: true, time: new Date().toISOString() });
 });
 
+const AVATAR_TTL_MS = 60 * 60 * 1000;
+const avatarCache = new Map();
+
+async function getAvatarUrls(userIds) {
+    const ids = [...new Set((userIds || []).map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0))];
+    const result = {};
+    const missing = [];
+    const now = Date.now();
+    ids.forEach(id => {
+        const hit = avatarCache.get(id);
+        if (hit && now - hit.at < AVATAR_TTL_MS) result[id] = hit.url;
+        else missing.push(id);
+    });
+    for (let i = 0; i < missing.length; i += 100) {
+        const batch = missing.slice(i, i + 100);
+        try {
+            const r = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${batch.join(',')}&size=150x150&format=Png`);
+            const json = await r.json().catch(() => null);
+            (json && json.data || []).forEach(t => {
+                if (t && t.targetId && t.imageUrl) {
+                    avatarCache.set(Number(t.targetId), { url: t.imageUrl, at: now });
+                    result[t.targetId] = t.imageUrl;
+                }
+            });
+        } catch (e) {
+            console.error('getAvatarUrls: batch failed:', e.message);
+        }
+    }
+    return result;
+}
+
 app.get("/api/roblox/avatar/:userId", async (req, res) => {
     try {
-        const response = await fetch(
-            `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${req.params.userId}&size=150x150&format=Png`
-        );
-
-        const data = await response.json();
-
-        res.json(data);
+        const id = Number(req.params.userId);
+        const urls = await getAvatarUrls([id]);
+        res.json({ data: urls[id] ? [{ targetId: id, imageUrl: urls[id] }] : [] });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: "Failed to fetch avatar" });
+    }
+});
+
+app.get('/api/roblox/avatars', async (req, res) => {
+    const ids = String(req.query.ids || '').split(',').slice(0, 1000);
+    try {
+        res.json({ ok: true, data: await getAvatarUrls(ids) });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: 'avatar_lookup_failed' });
     }
 });
 
@@ -268,9 +302,6 @@ async function createRecruitSession(robloxUserId, robloxUsername) {
     const token = randomToken(24);
     const expiresAt = new Date(Date.now() + RECRUIT_SESSION_LIFETIME_MS).toISOString();
 
-    // If this person already linked a Discord account before (from a previous application attempt,
-    // or as staff), carry it over onto the new session so they land straight back on their existing
-    // ticket status instead of being asked to "link Discord" again every time they sign back in.
     const { data: existingLink } = await supabase
         .from('discord_links')
         .select('discord_user_id, discord_username, discord_avatar')
@@ -405,7 +436,6 @@ async function ticketEmbedPayload(ticket) {
     };
 }
 
-// True if the given Discord user is currently a member of the configured guild.
 async function isDiscordGuildMember(discordUserId, guildId = DISCORD_GUILD_ID) {
     if (!DISCORD_BOT_TOKEN || !guildId || !discordUserId) return false;
     try {
@@ -425,8 +455,6 @@ async function isDiscordGuildMember(discordUserId, guildId = DISCORD_GUILD_ID) {
     }
 }
 
-// Checks membership across several Discord servers at once, e.g. a main studio server plus a
-// separate testers-only server, returning true on the first match.
 async function isMemberOfAnyGuild(discordUserId, guildIds) {
     if (!discordUserId || !guildIds || !guildIds.length) return false;
     for (const guildId of guildIds) {
@@ -435,10 +463,6 @@ async function isMemberOfAnyGuild(discordUserId, guildIds) {
     return false;
 }
 
-// Creates a private per-applicant ticket channel under DISCORD_TICKET_CATEGORY_ID, visible only to the
-// applicant and the HR role(s), with a status panel embed (no buttons - manage the application from the
-// website dashboard). This is where all communication with the applicant now happens instead of the old
-// website chat.
 async function createDiscordTicketChannel(ticket, positionRoleId) {
     if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) {
         console.error('createDiscordTicketChannel: skipped - DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not configured.');
@@ -449,15 +473,14 @@ async function createDiscordTicketChannel(ticket, positionRoleId) {
         const VIEW_CHANNEL = 1024, SEND_MESSAGES = 2048, READ_MESSAGE_HISTORY = 65536, ATTACH_FILES = 32768, EMBED_LINKS = 16384;
         const memberAllow = String(VIEW_CHANNEL + SEND_MESSAGES + READ_MESSAGE_HISTORY + ATTACH_FILES + EMBED_LINKS);
         const overwrites = [
-            { id: DISCORD_GUILD_ID, type: 0, deny: String(VIEW_CHANNEL) }, // @everyone can't see it
-            { id: ticket.discord_user_id, type: 1, allow: memberAllow } // the applicant
+            { id: DISCORD_GUILD_ID, type: 0, deny: String(VIEW_CHANNEL) },
+            { id: ticket.discord_user_id, type: 1, allow: memberAllow }
         ];
         const rolesWithAccess = new Set(DISCORD_HR_ROLE_IDS);
         if (positionRoleId) rolesWithAccess.add(positionRoleId);
         for (const roleId of rolesWithAccess) {
             overwrites.push({ id: roleId, type: 0, allow: memberAllow });
         }
-        // The bot's own user id matches its application (client) id - make sure it can always see the channel.
         if (DISCORD_CLIENT_ID) overwrites.push({ id: DISCORD_CLIENT_ID, type: 1, allow: memberAllow });
 
         const safeName = `ticket-${(ticket.roblox_username || 'applicant').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || ticket.id}`;
@@ -477,9 +500,6 @@ async function createDiscordTicketChannel(ticket, positionRoleId) {
         }
         console.log(`createDiscordTicketChannel: created channel ${channel.id} for ticket ${ticket.id}`);
 
-        // Ping the role configured for this specific position if there is one, instead of the
-        // general HR role(s) - keeps the noise down to whichever team actually owns that position.
-        // Falls back to the general HR role(s) when the position has no role configured.
         const pingRoleIds = positionRoleId ? [positionRoleId] : DISCORD_HR_ROLE_IDS;
         const embed = await ticketEmbedPayload(ticket);
         const message = await discordApi(`/channels/${channel.id}/messages`, {
@@ -498,17 +518,11 @@ async function createDiscordTicketChannel(ticket, positionRoleId) {
 
         return channel.id;
     } catch (e) {
-        // discordApi() throws with the raw Discord error body baked into the message (e.g. invalid
-        // parent_id/category, bad role/user snowflake in permission_overwrites, missing Manage Channels
-        // permission, etc) - log it in full so the real cause shows up instead of failing silently.
         console.error(`createDiscordTicketChannel failed for ticket ${ticket.id}:`, e.message);
         return null;
     }
 }
 
-// Opens (or reuses) a DM channel with a Discord user and sends them a message via the bot's REST
-// token. Silently no-ops if they have DMs closed to the bot, aren't found, etc - a failed DM
-// should never block the underlying status change from saving.
 async function sendDiscordDM(discordUserId, content) {
     if (!DISCORD_BOT_TOKEN || !discordUserId) return;
     try {
@@ -526,9 +540,6 @@ async function sendDiscordDM(discordUserId, content) {
     }
 }
 
-// One message per possible ticket status - kept in one place so every status change (however it
-// happens - website, auto-accept, etc.) DMs the applicant the same way, instead of only some paths
-// remembering to do it.
 const STATUS_DM_MESSAGES = {
     in_review: () => `Your PlayVerse application is now in review. Someone is actively looking at it.`,
     accepted: () => `Your PlayVerse application has been accepted. Someone from the team will reach out here shortly.`,
@@ -651,8 +662,6 @@ async function notifyDiscordAssignment(ticket, assigneeUserId, assigneeUsername,
     }
 }
 
-// Edits the ticket's pinned panel embed in place so it always reflects the latest status/assignee/
-// position/etc, regardless of whether the change came from the website or (for status) from Discord.
 async function refreshDiscordTicketPanel(ticket) {
     if (!DISCORD_BOT_TOKEN || !ticket.discord_channel_id || !ticket.ticket_message_id) return;
     try {
@@ -666,8 +675,6 @@ async function refreshDiscordTicketPanel(ticket) {
     }
 }
 
-// Adds a configured Discord role to a member via the bot's REST token. Safe to call even if the
-// member already has the role (Discord treats it as a no-op).
 async function addDiscordRoleToMember(discordUserId, roleId) {
     if (!discordUserId || !roleId || !DISCORD_GUILD_ID) return false;
     try {
@@ -679,8 +686,6 @@ async function addDiscordRoleToMember(discordUserId, roleId) {
     }
 }
 
-// Grants the configured in-app tool role to a freshly-hired user. Ignores the unique-constraint
-// error if they somehow already have it.
 async function grantAutoHireRole(ticket, roleId) {
     if (!roleId || !ticket.roblox_user_id) return false;
     const { error } = await supabase.from('user_role_assignments').insert({
@@ -692,7 +697,6 @@ async function grantAutoHireRole(ticket, roleId) {
     return true;
 }
 
-// Logs a 1,000 Robux payment request from "System" (not a real staff member) for referral/review bonuses.
 async function logSystemPaymentRequest({ robloxUserId, robloxUsername, taskName, note }) {
     if (!robloxUserId || !robloxUsername) return null;
     const id = generateRequestId();
@@ -716,10 +720,6 @@ async function logSystemPaymentRequest({ robloxUserId, robloxUsername, taskName,
     return id;
 }
 
-// Runs exactly once per ticket the moment it becomes "accepted" (whether by HR or auto-accept):
-// grants the configured tool/Discord roles, and auto-logs 1,000 Robux payment requests (from
-// "System") to the referrer and the reviewer who accepted them. Idempotency flags on the ticket
-// keep this from double-granting roles or double-paying if the status is touched again later.
 async function processHire(ticket, { reviewerUserId, reviewerUsername }) {
     try {
         const config = await getRecruitmentConfig();
@@ -777,9 +777,6 @@ async function processHire(ticket, { reviewerUserId, reviewerUsername }) {
 
 const RECRUITMENT_AUTO_ACCEPT_INTERVAL_MS = 15 * 60 * 1000;
 
-// Sweeps pending/in_review tickets that have sat longer than the configured grace period with no
-// HR response, and auto-accepts them as "System" - same role grants and referral/reviewer payouts
-// as a normal accept, minus the reviewer payout (nobody actually reviewed it).
 async function runRecruitmentAutoAccept() {
     try {
         const config = await getRecruitmentConfig();
@@ -837,11 +834,8 @@ async function runRecruitmentAutoAccept() {
     }
 }
 
-const TICKET_AUTO_DELETE_DELAY_MS = 12 * 60 * 60 * 1000; // 12 hours
+const TICKET_AUTO_DELETE_DELAY_MS = 12 * 60 * 60 * 1000;
 
-// Marks a ticket "finalised" once it's been placed on a team AND actually roled in (in
-// user_assignments) - the very end of the recruitment pipeline. Posts a heads-up in the ticket's
-// Discord channel that it'll be auto-deleted in 12 hours, and schedules that deletion.
 async function finalizeAfterRoling(ticket, byUsername) {
     if (!ticket || ticket.status === 'finalised') return;
     const nowIso = new Date().toISOString();
@@ -881,9 +875,6 @@ async function finalizeAfterRoling(ticket, byUsername) {
 
 const TICKET_CHANNEL_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
 
-// Deletes ticket channels whose 12-hour post-finalise window has passed. If the channel's already
-// gone (404), we still mark it deleted rather than retrying forever; any other error is retried
-// on the next sweep.
 async function runTicketChannelCleanup() {
     try {
         const nowIso = new Date().toISOString();
@@ -902,7 +893,6 @@ async function runTicketChannelCleanup() {
                     await discordApi(`/channels/${ticket.discord_channel_id}`, { method: 'DELETE' });
                 } catch (e) {
                     if (String(e.message).startsWith('discord_api_404')) {
-                        // channel's already gone - nothing left to clean up
                     } else {
                         console.error(`runTicketChannelCleanup: failed to delete channel ${ticket.discord_channel_id} for ticket ${ticket.id}:`, e.message);
                         done = false;
@@ -960,10 +950,6 @@ async function resolveRobloxUserId(username) {
     return match ? match.id : null;
 }
 
-// Roblox usernames can change at any time - identity is always tracked by roblox_user_id, so
-// renaming never breaks anyone's access, but every table that also caches a display username
-// needs to catch up or it'll keep showing the stale name. Runs on every sign-in; each update is a
-// no-op if the name already matches, so this is cheap to call unconditionally.
 async function syncRobloxUsername(robloxUserId, newUsername) {
     if (!robloxUserId || !newUsername) return;
     try {
@@ -1024,8 +1010,6 @@ async function getDevexRate() {
     return data && data.devex_rate != null ? Number(data.devex_rate) : 0;
 }
 
-// Configurable recruitment auto-hire settings: the in-app tool role and Discord role given
-// automatically on acceptance, and how long HR has to respond before an application auto-accepts.
 async function getRecruitmentConfig() {
     const { data, error } = await supabase
         .from('app_settings')
@@ -1083,15 +1067,6 @@ async function getOnboardingGroupConfig() {
     };
 }
 
-// Kicks off the post-finalise Discord onboarding flow: DMs the new hire a "join the Roblox group"
-// message with a Continue button that starts out disabled. The scheduled sweep below enables it
-// once they've actually joined; bot.js handles the button clicks themselves (Continue, then Get
-// Ranked) since those need a live gateway connection to respond to.
-//
-// Generalized so it can be kicked off either from a finalised recruitment ticket, or from someone
-// claiming an invite/onboarding link - both cases end with the same "join main group, request to
-// join team group" Discord DM flow. Exactly one of ticketId/linkToken should be set so bot.js and
-// runOnboardingJoinCheck know which record to look at and (for links) what to grant once done.
 async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discordUserId, ticketId = null, linkToken = null, teamId = null, skillsetId = null, roleId = null }) {
     try {
         const config = await getOnboardingGroupConfig();
@@ -1122,9 +1097,6 @@ async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discord
         let teamJoinRow = null;
         if (teamId) {
             const { data: team } = await supabase.from('teams').select('name, roblox_group_id').eq('id', teamId).maybeSingle();
-            // If the team's own group IS the main onboarding group, there's nothing separate to
-            // join or request - joining the main group covers it, and bot.js's continue handler
-            // ranks them straight onto the team's configured role instead of the default main rank.
             if (team && team.roblox_group_id && Number(team.roblox_group_id) !== Number(config.groupId)) {
                 teamGroupLine = ` You also need to request to join your team's group (${team.name}) below - it's invite-only, so the bot will accept your request and rank you automatically once you've asked to join.`;
                 teamJoinRow = {
@@ -1163,8 +1135,6 @@ async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discord
     }
 }
 
-// Thin wrapper kept for the recruitment-ticket call site: pulls the team id straight off the
-// finalised ticket and hands off to the generalized flow starter above.
 async function startOnboardingFlow(ticket) {
     return startAccessOnboardingFlow({
         robloxUserId: ticket.roblox_user_id,
@@ -1175,9 +1145,6 @@ async function startOnboardingFlow(ticket) {
     });
 }
 
-// Checks whether someone has either already joined a group, or at least filed a join request for
-// it (invite-only groups) - either counts as "they've done their part" for the purposes of the
-// onboarding checklist. Read-only, never accepts anything.
 async function hasJoinedOrRequestedGroup(groupId, robloxUserId) {
     try {
         const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
@@ -1199,10 +1166,6 @@ async function hasJoinedOrRequestedGroup(groupId, robloxUserId) {
 
 const ONBOARDING_JOIN_CHECK_INTERVAL_MS = 3 * 1000;
 
-// Every 3 seconds, checks anyone still on "awaiting_group_join" against both the main group and
-// (if their team has one) the team group, and only enables Continue once both are satisfied.
-// Edits the message to reflect whichever one is still outstanding, but only when that actually
-// changes - not on every tick - so it doesn't spam Discord's edit rate limit for no reason.
 async function runOnboardingJoinCheck() {
     try {
         const config = await getOnboardingGroupConfig();
@@ -1219,9 +1182,6 @@ async function runOnboardingJoinCheck() {
             const mainJoined = groupRoles.some(gr => gr.group && gr.group.id === config.groupId);
 
             let team = null;
-            // team_id is stored directly on the flow row for both ticket-based and invite-link-based
-            // flows now - fall back to looking it up via the ticket for older rows created before
-            // that column existed.
             let teamId = flow.team_id;
             if (teamId == null && flow.ticket_id) {
                 const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
@@ -1229,9 +1189,6 @@ async function runOnboardingJoinCheck() {
             }
             if (teamId) {
                 const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', teamId).maybeSingle();
-                // Skip treating this as a separate group to wait on when it's the same group
-                // as the main one - joining the main group already satisfies it, and there's
-                // no separate join-request step for bot.js to accept later.
                 if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id && Number(teamRow.roblox_group_id) !== Number(config.groupId)) team = teamRow;
             }
             const teamRequested = team ? await hasJoinedOrRequestedGroup(team.roblox_group_id, flow.roblox_user_id) : true;
@@ -1258,10 +1215,6 @@ async function runOnboardingJoinCheck() {
                 });
             }
 
-            // team is only ever non-null here when there's an actual separate group to wait on
-            // (see above) - every branch below that references team.name is guarded by `team`
-            // so it can't fire when there's no separate team group (or the team's group IS the
-            // main group), since teamRequested defaults to true in that case.
             if (mainJoined && teamRequested) {
                 updates.step = 'group_joined';
                 content = `You've joined both groups. Click Continue to finish setting up your access.`;
@@ -1377,8 +1330,6 @@ async function enforceUsdMinimumThreshold(filter) {
     }
 }
 
-// Bulk-resolves current Roblox usernames for a list of user ids via Roblox's users-by-id endpoint,
-// batching in groups of 200 (its limit). Returns a { userId: currentUsername } map.
 async function resolveCurrentRobloxUsernames(userIds) {
     const ids = [...new Set((userIds || []).filter(id => id != null))];
     const result = {};
@@ -1401,12 +1352,6 @@ async function resolveCurrentRobloxUsernames(userIds) {
     return result;
 }
 
-// Someone can rename their Roblox account at any time. syncRobloxUsername() catches this for
-// whoever's actually signing in, but a payment request just sits there referencing whatever name
-// was current when it was created - the issuer, the recipient, or both might have renamed since,
-// and neither necessarily needs to log in again before that request gets paid. This sweeps every
-// pending request and corrects both the issuer and recipient names to whatever's current on
-// Roblox right now, independent of anyone logging in.
 async function refreshPaymentRequestUsernames() {
     try {
         const { data: rows, error } = await supabase
@@ -1499,9 +1444,6 @@ async function runPaymentMethodConversionSweep(filter) {
     }
 }
 
-// Runs the conversion sweep for both possible identities of a user (matched by id, and separately
-// by username for older rows that only ever had a username stored) - used right after something
-// happens for one specific person, so it converts immediately rather than waiting on the schedule.
 async function convertPendingForUser(robloxUserId, robloxUsername) {
     if (robloxUserId != null) await enforceUsdMinimumThreshold({ robloxUserId });
     await Promise.all([
@@ -1512,11 +1454,6 @@ async function convertPendingForUser(robloxUserId, robloxUsername) {
 
 const PAYMENT_CONVERSION_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 
-// Sign-in access is granted if the Roblox account belongs to at least one of the configured
-// Roblox groups (at that group's minimum rank, if set) OR their linked Discord account belongs to
-// at least one of the configured Discord servers - so a separate "tester" group/server can be
-// added alongside the main one without anyone needing to be in both. If neither list has any
-// entries, sign-in is unrestricted (matches the old "leave the group ID blank" behavior).
 async function checkBaseAccess(robloxUserId) {
     const [groups, discordServers] = await Promise.all([getBaseAccessGroups(), getBaseAccessDiscordServers()]);
 
@@ -1707,12 +1644,6 @@ async function upsertUserAssignmentRecord({ robloxUserId, robloxUsername, teamId
     return { ok: true, mode: 'inserted' };
 }
 
-// NOTE: invite/onboarding links used to be granted instantly here on claim. That's now handled by
-// the generalized Discord-gated group-join flow (see startAccessOnboardingFlow, the
-// claim_onboarding_link action, and bot.js's onboarding_continue handler / grantInviteLinkAccess),
-// which only grants the team/skillset/role once the person has linked Discord, is in the server,
-// and has joined (or requested to join) the relevant Roblox group(s) - matching how recruitment
-// finalisation already worked.
 
 async function getUserTeamAssignments(robloxUserId) {
     const { data: rows, error } = await supabase
@@ -1739,9 +1670,57 @@ async function getUserTeamAssignments(robloxUserId) {
     }));
 }
 
+function isBanExpired(ban) {
+    return !!(ban && ban.expires_at && new Date(ban.expires_at).getTime() <= Date.now());
+}
+
+async function getActiveBan(robloxUserId) {
+    const { data } = await supabase.from('banned_users').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
+    if (!data) return null;
+    if (isBanExpired(data)) {
+        await supabase.from('banned_users').delete().eq('roblox_user_id', robloxUserId);
+        logAudit(null, {
+            category: 'moderation', action: 'ban_expired',
+            targetUserId: robloxUserId, targetUsername: data.roblox_username,
+            details: { actor: 'System', reason: data.reason }
+        });
+        return null;
+    }
+    return data;
+}
+
 async function isUserBanned(robloxUserId) {
-    const { data } = await supabase.from('banned_users').select('roblox_user_id').eq('roblox_user_id', robloxUserId).maybeSingle();
-    return !!data;
+    return !!(await getActiveBan(robloxUserId));
+}
+
+async function writeBan({ robloxUserId, robloxUsername, reason, bannedBy, durationHours }) {
+    const row = {
+        roblox_user_id: robloxUserId,
+        roblox_username: robloxUsername,
+        reason,
+        banned_by: bannedBy,
+        banned_at: new Date().toISOString()
+    };
+    const hours = Number(durationHours) || 0;
+    if (hours > 0) row.expires_at = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    else row.expires_at = null;
+    let { error } = await supabase.from('banned_users').upsert(row, { onConflict: 'roblox_user_id' });
+    let temporaryUnsupported = false;
+    if (error && /expires_at/.test(error.message || '')) {
+        delete row.expires_at;
+        temporaryUnsupported = hours > 0;
+        ({ error } = await supabase.from('banned_users').upsert(row, { onConflict: 'roblox_user_id' }));
+    }
+    if (error) throw new Error(error.message);
+    await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+    return { expiresAt: temporaryUnsupported ? null : (row.expires_at || null), temporaryUnsupported };
+}
+
+async function notifyModeratedUser(robloxUserId, text) {
+    const discordUserId = await getLinkedDiscordUserId(robloxUserId);
+    if (!discordUserId) return false;
+    await sendDiscordDM(discordUserId, text);
+    return true;
 }
 
 async function getWarnCount(robloxUserId) {
@@ -2088,10 +2067,6 @@ app.get('/roblox-auth-callback', async (req, res) => {
 
     if (sessionErr) { fail('session_create_failed'); return; }
 
-    // Note: invite/onboarding links are no longer auto-claimed here. Claiming now requires a
-    // linked, in-server Discord account and joining the relevant Roblox group(s) first (see the
-    // claim_onboarding_link action below), so the frontend sends people with a pending ref back to
-    // the #/join/<token> page after signing in rather than granting anything at this step.
 
     res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
 });
@@ -2148,8 +2123,6 @@ app.get('/discord-auth-start-staff', async (req, res) => {
     if (!hrSession) { res.redirect(`${APP_ORIGIN}/#/?error=session_expired`); return; }
 
     const state = randomToken(16);
-    // Lets callers (e.g. the invite-link flow) send the user back to wherever they started from
-    // instead of always landing on the dashboard - falls back to the dashboard if not provided.
     const returnHash = req.query.return ? String(req.query.return).slice(0, 200) : null;
     const { error } = await supabase.from('discord_oauth_states').insert({ state, rt: token, is_staff: true, return_hash: returnHash });
     if (error) { res.status(500).send('Could not start Discord sign-in.'); return; }
@@ -2280,8 +2253,6 @@ app.get('/discord-auth-callback', async (req, res) => {
     }).eq('token', recruitSession.token);
 
     if (linkErr) {
-        // Don't redirect as if this succeeded - discordLinked would still be false and the
-        // user would just land back on the "Link your Discord" screen with no explanation.
         console.error(`[discord-auth-callback] failed to save discord link for rt ${stateRow.rt}:`, linkErr.message);
         fail(stateRow.rt, 'link_save_failed');
         return;
@@ -2299,8 +2270,6 @@ app.post('/recruitment/apply', async (req, res) => {
         if (await isUserBanned(recruitSession.roblox_user_id)) { res.status(403).json({ ok: false, error: 'account_banned' }); return; }
     } catch (e) { }
 
-    // Auto-deny applications from accounts whose linked Discord user isn't actually in the server -
-    // we can't open a private ticket channel for them (or let HR reach them) otherwise.
     if (DISCORD_GUILD_ID) {
         const inServer = await isDiscordGuildMember(recruitSession.discord_user_id);
         if (!inServer) {
@@ -2330,9 +2299,6 @@ app.post('/recruitment/apply', async (req, res) => {
         }
     }
 
-    // Reject anything that isn't a genuine http(s) link. This is the field HR staff click
-    // on from the review dashboard, so it must never be able to carry a javascript:, data:,
-    // vbscript:, etc. URL through to their browser - that's a stored XSS -> session-theft path.
     if (portfolioUrl) {
         let parsed;
         try { parsed = new URL(portfolioUrl); } catch (e) { parsed = null; }
@@ -2408,9 +2374,6 @@ app.get('/recruitment/my-ticket', async (req, res) => {
     if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
     if (!ticket) { res.status(404).json({ ok: false, error: 'no_ticket' }); return; }
 
-    // Now that we know they already have a ticket, keep them signed in to their status page for
-    // the long "portal" lifetime instead of the short initial session window - so coming back
-    // later doesn't force another Roblox sign-in just to see where their application stands.
     const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
     if (new Date(recruitSession.expires_at).getTime() < new Date(portalExpiresAt).getTime()) {
         supabase.from('recruit_sessions').update({ expires_at: portalExpiresAt }).eq('token', recruitSession.token)
@@ -2504,6 +2467,8 @@ app.delete('/hr-session', async (req, res) => {
     res.json({ ok: true });
 });
 
+const listRequestsSweepState = { paymentsAt: 0, usernamesAt: 0 };
+
 app.post('/hr-data', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false, error: 'not_authenticated' }); return; }
@@ -2585,9 +2550,20 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
-        await enforceUsdMinimumThreshold();
-        await runPaymentMethodConversionSweep();
-        await refreshPaymentRequestUsernames();
+        const now = Date.now();
+        const force = payload.force === true;
+        if (force || now - listRequestsSweepState.paymentsAt > 60 * 1000) {
+            listRequestsSweepState.paymentsAt = now;
+            await enforceUsdMinimumThreshold();
+            await runPaymentMethodConversionSweep();
+        }
+        if (listRequestsSweepState.usernamesAt === 0) {
+            listRequestsSweepState.usernamesAt = now;
+            await refreshPaymentRequestUsernames();
+        } else if (force || now - listRequestsSweepState.usernamesAt > 10 * 60 * 1000) {
+            listRequestsSweepState.usernamesAt = now;
+            refreshPaymentRequestUsernames();
+        }
         const { data, error } = await supabase
             .from('payment_requests')
             .select('*')
@@ -3168,9 +3144,6 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-    // Lightweight version of the above for anyone who can see recruitment tickets, not just
-    // settings.manage_onboarding holders - just the role names (not the full role records), so the
-    // dashboard can grey out Sign off / Finalise for people who aren't eligible and say why.
     if (action === 'recruitment_get_approval_role_names') {
         if (!requirePermission(res, session, 'recruitment.view')) return;
         try {
@@ -3219,9 +3192,6 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
-    // Deliberately read-only: only exposes whether ROBLOX_GROUP_API_KEY is set, never its value,
-    // and there is no corresponding "save" action anywhere - the key can only ever be set as a
-    // server environment variable, never typed into or stored via the web UI.
     if (action === 'get_roblox_group_api_key_status') {
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         res.json({ ok: true, data: { configured: !!ROBLOX_GROUP_API_KEY } });
@@ -3364,12 +3334,6 @@ app.post('/hr-data', async (req, res) => {
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         if (!assignments || !assignments.length) { res.json({ ok: true, data: [] }); return; }
 
-        // Deliberately a second plain query instead of a PostgREST embed
-        // (user_role_assignments.select('..., roles(name, hierarchy)')) - the embed depends on
-        // PostgREST having detected the role_id foreign key, which can silently return nothing
-        // (not even an error, or a 500 that gets swallowed client-side) if the schema cache hasn't
-        // picked it up yet. That's exactly the kind of thing that looks like "no roles assigned"
-        // even when the row is right there in the table.
         const roleIds = [...new Set(assignments.map(a => a.role_id).filter(Boolean))];
         const { data: roleRows, error: rolesErr } = await supabase.from('roles').select('id, name, hierarchy').in('id', roleIds);
         if (rolesErr) { res.status(500).json({ ok: false, error: rolesErr.message }); return; }
@@ -3496,7 +3460,7 @@ app.post('/hr-data', async (req, res) => {
                 supabase.from('staff_onboarding_progress').select('roblox_user_id, step_id'),
                 supabase.from('user_assignments').select('roblox_user_id, team_id, skillset_id'),
                 supabase.from('staff_warnings').select('roblox_user_id'),
-                supabase.from('banned_users').select('roblox_user_id'),
+                supabase.from('banned_users').select('*'),
                 supabase.from('roles').select('id, name, hierarchy')
             ]);
             if (sessionsRes.error) throw sessionsRes.error;
@@ -3572,11 +3536,6 @@ app.post('/hr-data', async (req, res) => {
             (assignmentsRes.data || []).forEach(a => {
                 const row = ensure(a.roblox_user_id, a.roblox_username);
                 if (!row) return;
-                // Deliberately looking this up in roleNameById rather than relying on a PostgREST
-                // embed (user_role_assignments.select('..., roles(name)')) here too - same fragile
-                // relationship-detection issue as list_role_assignments, and this is the query that
-                // feeds the main Staff Database table, so a silent failure here hides role badges
-                // for everyone, not just in one modal.
                 const roleName = roleNameById[a.role_id];
                 if (roleName && !row.roles.includes(roleName)) row.roles.push(roleName);
             });
@@ -3618,7 +3577,7 @@ app.post('/hr-data', async (req, res) => {
                     warnCountByUser[w.roblox_user_id] = (warnCountByUser[w.roblox_user_id] || 0) + 1;
                 }
             });
-            const bannedSet = new Set((bansRes.data || []).map(b => b.roblox_user_id));
+            const bannedSet = new Set((bansRes.data || []).filter(b => !isBanExpired(b)).map(b => b.roblox_user_id));
             byKey.forEach((row) => {
                 if (row.robloxUserId != null) {
                     row.warnCount = warnCountByUser[row.robloxUserId] || 0;
@@ -3946,9 +3905,6 @@ app.post('/hr-data', async (req, res) => {
             if (linkErr) { res.status(500).json({ ok: false, error: linkErr.message }); return; }
             if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
 
-            // Same gate as recruitment: must have a linked Discord account, and that account must
-            // actually be in the Discord server, before we'll start the group-join flow at all -
-            // otherwise there's no way to DM them the join instructions or verify they've joined.
             const discordUserId = await getLinkedDiscordUserId(session.roblox_user_id);
             if (!discordUserId) { res.status(400).json({ ok: false, error: 'discord_not_linked' }); return; }
             if (DISCORD_GUILD_ID) {
@@ -3956,7 +3912,6 @@ app.post('/hr-data', async (req, res) => {
                 if (!inServer) { res.status(403).json({ ok: false, error: 'discord_not_in_server' }); return; }
             }
 
-            // Don't spin up a second DM/flow if they already started (or finished) this exact link.
             const { data: existingFlow } = await supabase
                 .from('recruit_onboarding_flows')
                 .select('id, step')
@@ -4121,13 +4076,6 @@ app.post('/hr-data', async (req, res) => {
         }
         if (!resolvedUserId) { res.json({ ok: true, data: [] }); return; }
 
-        // A person's "skillsets" are the union of two sources: skillsets deliberately assigned
-        // here (user_skillsets - the "General skillsets" list in Staff Database), and whatever
-        // skillset(s) they picked up through team assignment (user_assignments.skillset_id - set
-        // e.g. when they join through an onboarding invite link that has a skillset attached).
-        // Deliberately plain queries joined in JS instead of a PostgREST embed - the embed depends
-        // on PostgREST having detected the foreign key, which can silently return nothing (not
-        // even an error) if the schema cache hasn't picked it up yet.
         const [linksRes, assignmentsRes] = await Promise.all([
             supabase.from('user_skillsets').select('id, skillset_id').eq('roblox_user_id', resolvedUserId),
             supabase.from('user_assignments').select('skillset_id').eq('roblox_user_id', resolvedUserId).not('skillset_id', 'is', null)
@@ -4208,7 +4156,7 @@ app.post('/hr-data', async (req, res) => {
             .eq('roblox_user_id', robloxUserId)
             .order('created_at', { ascending: false });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        const { data: ban } = await supabase.from('banned_users').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
+        const ban = await getActiveBan(robloxUserId);
         res.json({ ok: true, data: data || [], banned: ban || null, warnCount: (data || []).length });
         return;
     }
@@ -4354,16 +4302,96 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'get_user_moderation') {
+        if (!hasPermission(session, 'staff.moderate') && !hasPermission(session, 'staff.view_database')) {
+            res.status(403).json({ ok: false, error: 'missing_permission' });
+            return;
+        }
+        const robloxUserId = Number(payload.robloxUserId);
+        if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
+        const [warningsRes, ban, historyRes, sessionRes, targetHierarchy, discordUserId] = await Promise.all([
+            supabase.from('staff_warnings').select('*').eq('roblox_user_id', robloxUserId).order('created_at', { ascending: false }),
+            getActiveBan(robloxUserId),
+            supabase.from('audit_logs').select('id, action, actor_username, actor_user_id, details, created_at, reverted')
+                .eq('target_user_id', robloxUserId).eq('category', 'moderation')
+                .order('created_at', { ascending: false }).limit(50),
+            supabase.from('hr_sessions').select('roles, last_synced_at').eq('roblox_user_id', robloxUserId)
+                .order('last_synced_at', { ascending: false }).limit(1),
+            getUserHierarchy(robloxUserId),
+            getLinkedDiscordUserId(robloxUserId)
+        ]);
+        const sessionRow = (sessionRes.data || [])[0] || null;
+        res.json({
+            ok: true,
+            data: {
+                warnings: warningsRes.data || [],
+                ban: ban || null,
+                history: historyRes.data || [],
+                roles: sessionRow ? (sessionRow.roles || []) : [],
+                lastActive: sessionRow ? sessionRow.last_synced_at : null,
+                discordLinked: !!discordUserId,
+                canAct: (Number(session.max_hierarchy) || 0) > (Number(targetHierarchy) || 0)
+            }
+        });
+        return;
+    }
+
+    if (action === 'moderation_overview') {
+        if (!requirePermission(res, session, 'staff.moderate')) return;
+        const [bansRes, warningsRes, recentRes] = await Promise.all([
+            supabase.from('banned_users').select('*').order('banned_at', { ascending: false }),
+            supabase.from('staff_warnings').select('roblox_user_id, roblox_username, reason, warned_by, created_at').order('created_at', { ascending: false }),
+            supabase.from('audit_logs').select('id, action, actor_username, actor_user_id, target_user_id, target_username, details, created_at, reverted')
+                .eq('category', 'moderation').order('created_at', { ascending: false }).limit(60)
+        ]);
+        const bans = [];
+        for (const b of (bansRes.data || [])) {
+            if (isBanExpired(b)) { await getActiveBan(b.roblox_user_id); continue; }
+            bans.push(b);
+        }
+        const bannedIds = new Set(bans.map(b => String(b.roblox_user_id)));
+        const warnedMap = new Map();
+        (warningsRes.data || []).forEach(w => {
+            const key = String(w.roblox_user_id);
+            if (bannedIds.has(key)) return;
+            if (!warnedMap.has(key)) {
+                warnedMap.set(key, { robloxUserId: w.roblox_user_id, robloxUsername: w.roblox_username, count: 0, lastReason: w.reason, lastAt: w.created_at, lastBy: w.warned_by });
+            }
+            warnedMap.get(key).count += 1;
+        });
+        res.json({
+            ok: true,
+            data: {
+                bans,
+                warned: Array.from(warnedMap.values()).sort((a, b) => b.count - a.count || new Date(b.lastAt) - new Date(a.lastAt)),
+                recent: recentRes.data || []
+            }
+        });
+        return;
+    }
+
     if (action === 'quick_moderate') {
         if (!requirePermission(res, session, 'staff.moderate')) return;
         const robloxUserId = Number(payload.robloxUserId);
-        const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        let robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
         const type = payload.type;
         const reason = payload.reason ? String(payload.reason).trim() : '';
+        const notify = payload.notify === true;
+        const durationHours = Math.max(0, Math.min(24 * 365, Number(payload.durationHours) || 0));
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
         if (!['warn', 'ban', 'unban', 'note'].includes(type)) { res.status(400).json({ ok: false, error: 'invalid_type' }); return; }
+        if (robloxUserId === Number(session.roblox_user_id) && type !== 'note') {
+            res.status(400).json({ ok: false, error: 'cannot_moderate_self' });
+            return;
+        }
         const targetHierarchy = await getUserHierarchy(robloxUserId);
         if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
+        if (!robloxUsername) {
+            try {
+                const lookupRes = await fetch(`https://users.roblox.com/v1/users/${robloxUserId}`);
+                if (lookupRes.ok) robloxUsername = (await lookupRes.json()).name;
+            } catch (e) { }
+        }
 
         if (type === 'note') {
             if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
@@ -4378,6 +4406,7 @@ app.post('/hr-data', async (req, res) => {
 
         if (type === 'warn') {
             if (!reason) { res.status(400).json({ ok: false, error: 'missing_reason' }); return; }
+            if (await isUserBanned(robloxUserId)) { res.status(400).json({ ok: false, error: 'already_banned' }); return; }
             const { data: insertedWarning, error } = await supabase.from('staff_warnings').insert({
                 roblox_user_id: robloxUserId,
                 roblox_username: robloxUsername,
@@ -4389,13 +4418,14 @@ app.post('/hr-data', async (req, res) => {
             const count = await getWarnCount(robloxUserId);
             let banned = false;
             if (count >= 3) {
-                await supabase.from('banned_users').upsert({
-                    roblox_user_id: robloxUserId, roblox_username: robloxUsername,
-                    reason: 'Reached 3 warnings', banned_by: session.roblox_username,
-                    banned_at: new Date().toISOString()
-                }, { onConflict: 'roblox_user_id' });
-                await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+                await writeBan({ robloxUserId, robloxUsername, reason: 'Reached 3 warnings', bannedBy: session.roblox_username });
                 banned = true;
+                await logAudit(session, {
+                    category: 'moderation', action: 'auto_ban',
+                    targetUserId: robloxUserId, targetUsername: robloxUsername,
+                    details: { reason: 'Reached 3 warnings' },
+                    revert: { type: 'unban_user', robloxUserId }
+                });
             }
             await logAudit(session, {
                 category: 'moderation', action: 'quick_warn',
@@ -4403,24 +4433,37 @@ app.post('/hr-data', async (req, res) => {
                 details: { reason, warnCount: count },
                 revert: insertedWarning ? { type: 'remove_warning', warningId: insertedWarning.id } : null
             });
-            res.json({ ok: true, warnCount: count, banned });
+            let notified = false;
+            if (notify) {
+                notified = await notifyModeratedUser(robloxUserId, banned
+                    ? `You've received a warning on PlayVerse (${count}/3), which means your access has been removed.\nReason: ${reason}`
+                    : `You've received a warning on PlayVerse (${count}/3). Three warnings removes your access.\nReason: ${reason}`);
+            }
+            res.json({ ok: true, warnCount: count, banned, notified });
             return;
         }
 
         if (type === 'ban') {
-            await supabase.from('banned_users').upsert({
-                roblox_user_id: robloxUserId, roblox_username: robloxUsername,
-                reason: reason || 'Quick moderation action', banned_by: session.roblox_username,
-                banned_at: new Date().toISOString()
-            }, { onConflict: 'roblox_user_id' });
-            await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+            let result;
+            try {
+                result = await writeBan({ robloxUserId, robloxUsername, reason: reason || 'No reason given', bannedBy: session.roblox_username, durationHours });
+            } catch (e) {
+                res.status(500).json({ ok: false, error: e.message });
+                return;
+            }
             await logAudit(session, {
                 category: 'moderation', action: 'quick_ban',
                 targetUserId: robloxUserId, targetUsername: robloxUsername,
-                details: { reason },
+                details: { reason, durationHours: result.expiresAt ? durationHours : null, expiresAt: result.expiresAt },
                 revert: { type: 'unban_user', robloxUserId }
             });
-            res.json({ ok: true });
+            let notified = false;
+            if (notify) {
+                notified = await notifyModeratedUser(robloxUserId, result.expiresAt
+                    ? `Your PlayVerse access has been suspended until ${new Date(result.expiresAt).toUTCString()}.${reason ? `\nReason: ${reason}` : ''}`
+                    : `Your PlayVerse access has been removed.${reason ? `\nReason: ${reason}` : ''}`);
+            }
+            res.json({ ok: true, expiresAt: result.expiresAt, temporaryUnsupported: result.temporaryUnsupported, notified });
             return;
         }
 
@@ -4433,7 +4476,9 @@ app.post('/hr-data', async (req, res) => {
                 details: { reason },
                 revert: banRow ? { type: 'reban_user', row: banRow } : null
             });
-            res.json({ ok: true });
+            let notified = false;
+            if (notify) notified = await notifyModeratedUser(robloxUserId, `Your PlayVerse access has been restored. You can sign in again.`);
+            res.json({ ok: true, notified });
             return;
         }
     }
