@@ -6250,7 +6250,7 @@
         return;
       }
 
-      if (isHrAuthed && (needsOnboarding || (needsDiscordLink && !discordDeferred())) && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
+      if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
         window.location.hash = '#/onboarding';
         return;
       }
@@ -7670,8 +7670,9 @@
       let eligibilityCache = {};
       let eligibilityLoading = new Set();
 
-      const canMarkPaid = hasPermission('dashboard.mark_paid');
       const canExport = hasPermission('dashboard.export');
+      const discordLocked = needsDiscordLink;
+      const canMarkPaid = hasPermission('dashboard.mark_paid') && !discordLocked;
 
       function getAllRoles() {
         const roles = new Set();
@@ -7982,6 +7983,14 @@
           ${canSubmitRequests() ? `<a class="btn btn-primary btn-sm" href="#/new">New request</a>` : ''}
         </div>
       </div>
+
+      ${discordLocked ? `<div class="warn-box" style="padding:18px 20px;font-size:14px;align-items:flex-start;margin-bottom:20px;">
+        <div>
+          <strong style="display:block;font-size:15px;margin-bottom:4px;">Discord isn't linked yet</strong>
+          <span>You can look around, but you can't mark anything paid, reject, reopen or delete a request until Discord is linked. It's view only until then.</span>
+        </div>
+        <a class="btn btn-primary btn-sm" href="#/onboarding" style="flex-shrink:0;">Link Discord</a>
+      </div>` : ''}
 
       <div class="stat-strip">
         <div class="strip-card">
@@ -10770,9 +10779,6 @@
       load();
     }
 
-    const DISCORD_DEFER_KEY = 'pv_discord_deferred';
-    function discordDeferred() { try { return sessionStorage.getItem(DISCORD_DEFER_KEY) === '1'; } catch (e) { return false; } }
-    function deferDiscord() { try { sessionStorage.setItem(DISCORD_DEFER_KEY, '1'); } catch (e) { } }
     const INVITE_STORAGE_KEY = 'pv_pending_invite';
     function getPendingInvite() { try { return localStorage.getItem(INVITE_STORAGE_KEY) || null; } catch (e) { return null; } }
     function setPendingInvite(token) { try { localStorage.setItem(INVITE_STORAGE_KEY, token); } catch (e) { } }
@@ -10798,22 +10804,27 @@
       let invite = { info: null, invalid: false, started: false, done: false };
       let pollTimer = null;
 
+      function hasInviteTeam() { return !!(inviteToken && !invite.invalid && invite.info && invite.info.team); }
+
       function buildSteps() {
         const list = [];
         list.push({
           id: 'discord', title: 'Link Discord', blurb: 'So we can reach you and give you access.',
-          required: true, done: !needsDiscordLink, skipped: needsDiscordLink && discordDeferred()
+          required: true, done: !needsDiscordLink
         });
         if (inviteToken && !invite.invalid) {
           const teamName = invite.info && invite.info.team ? invite.info.team.name : null;
           list.push({
             id: 'invite', title: teamName ? `Join ${teamName}` : 'Join your team', blurb: 'Finish your invite in Discord.',
-            required: true, done: invite.done, skipped: !invite.done && needsDiscordLink && discordDeferred()
+            required: true, done: invite.done
           });
         }
-        serverSteps.forEach(s => list.push({
-          id: s.id, title: s.title, blurb: s.description, required: !!s.required || s.type === 'team_info', done: !!s.completedAt, server: s
-        }));
+        serverSteps.forEach(s => {
+          if (s.type === 'team_info' && hasInviteTeam()) return;
+          list.push({
+            id: s.id, title: s.title, blurb: s.description, required: !!s.required || s.type === 'team_info', done: !!s.completedAt, server: s
+          });
+        });
         list.push({
           id: 'payout', title: 'Add a payout method', blurb: 'Optional. You can do this later.',
           required: false, done: !!payoutMethod
@@ -10858,9 +10869,8 @@
             ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Discord is linked</strong><span>You can change this later from your account.</span></div></div>`
             : `<div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <a class="btn btn-primary" href="${linkUrl}">${errMsg ? 'Try again' : 'Link Discord'}</a>
-                ${(discordError === 'discord_blocked' || discordError === 'discord_rate_limited' || discordError === 'discord_unavailable' || discordDeferred()) && !discordDeferred() ? `<button type="button" class="btn btn-ghost" id="obSkipDiscord">Skip for now</button>` : ''}
               </div>
-              ${discordDeferred() ? `<p class="hint">You skipped this earlier. You'll be asked again next time you sign in.</p>` : (discordError === 'discord_blocked' ? `<p class="hint">You can skip this and carry on. You'll be asked again next time you sign in.${inviteToken ? ' Joining your team has to wait until Discord is linked.' : ''}</p>` : '')}`}`;
+              <p class="hint">You can't continue until Discord is linked${inviteToken ? ', and you have joined the Roblox groups for your team' : ''}.</p>`}`;
       }
 
       function inviteStepHtml(s) {
@@ -10975,8 +10985,6 @@
         if (join) join.addEventListener('click', acceptInvite);
         const check = document.getElementById('obInviteCheck');
         if (check) check.addEventListener('click', () => checkInvite(true));
-        const skipDiscord = document.getElementById('obSkipDiscord');
-        if (skipDiscord) skipDiscord.addEventListener('click', () => { deferDiscord(); viewing = null; history.replaceState(null, '', '#/onboarding'); paint(); });
         const finish = document.getElementById('obFinish');
         if (finish) finish.addEventListener('click', () => { viewing = null; window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my'; });
       }
@@ -11096,6 +11104,7 @@
       const query = parseHashQuery();
       const canAssign = hasPermission('settings.manage_onboarding') || hasPermission('roles.manage');
       const canModerate = hasPermission('staff.moderate');
+      const canInvite = hasPermission('settings.manage_onboarding');
       let staff = peopleCache.rows.length ? peopleCache.rows : [];
       let loading = !staff.length;
       let loadError = null;
@@ -11107,6 +11116,20 @@
       let modOverview = null;
       let modLoading = false;
       let modError = null;
+
+      let inviteModalOpen = false;
+      let inviteOptionsLoading = false;
+      let inviteOptionsError = null;
+      let inviteTeams = [];
+      let inviteSkillsets = [];
+      let inviteRoles = [];
+      let inviteTeamId = '';
+      let inviteSkillsetId = '';
+      let inviteRoleId = '';
+      let inviteLabel = '';
+      let inviteBusy = false;
+      let inviteError = null;
+      let inviteResultUrl = null;
 
       const CHIPS = [
         { id: 'all', label: 'Everyone', test: () => true },
@@ -11292,6 +11315,7 @@
           <p class="sub"><span id="staffTotalCount">${staff.length ? `${staff.length} people` : 'Loading...'}</span>. Click anyone to see and manage their teams, skills, roles, payout and record in one place.</p>
         </div>
         <div class="dash-toolbar">
+          ${canInvite ? `<button type="button" class="btn btn-primary btn-sm" id="openInviteBtn">Invite</button>` : ''}
           <button type="button" class="btn btn-ghost btn-sm" id="refreshStaffBtn">Refresh</button>
         </div>
       </div>
@@ -11311,7 +11335,8 @@
       </div>
       <div class="chip-filters" id="staffChips" style="margin-bottom:16px;"></div>` : ''}
       <div class="${staffTab === 'people' ? 'table-wrap' : ''}" id="staffTableArea"></div>
-    </div>`;
+    </div>
+    <div id="inviteModalContainer"></div>`;
 
         wireTopbarSignOut();
         document.querySelectorAll('[data-staff-tab]').forEach(el => el.addEventListener('click', () => {
@@ -11325,8 +11350,128 @@
         const sortSel = document.getElementById('staffSortSelect');
         if (sortSel) sortSel.addEventListener('change', () => { sortBy = sortSel.value; paintPeople(); });
         document.getElementById('refreshStaffBtn').addEventListener('click', () => { if (staffTab === 'moderation') loadModeration(); load(); });
+        const inviteBtn = document.getElementById('openInviteBtn');
+        if (inviteBtn) inviteBtn.addEventListener('click', openInviteModal);
         paintPeople();
         paintModeration();
+        paintInviteModal();
+      }
+
+      async function openInviteModal() {
+        inviteModalOpen = true;
+        inviteError = null;
+        inviteResultUrl = null;
+        paintInviteModal();
+        if (!inviteTeams.length && !inviteOptionsLoading) {
+          inviteOptionsLoading = true;
+          inviteOptionsError = null;
+          paintInviteModal();
+          try {
+            const [t, sk, r] = await Promise.all([listTeams(), listSkillsets(), listRoles()]);
+            inviteTeams = t || [];
+            inviteSkillsets = sk || [];
+            inviteRoles = r || [];
+          } catch (e) {
+            inviteOptionsError = (e && e.message) || 'Could not load teams and roles.';
+          }
+          inviteOptionsLoading = false;
+          if (myGen === renderGen) paintInviteModal();
+        }
+      }
+
+      function closeInviteModal() {
+        inviteModalOpen = false;
+        inviteError = null;
+        inviteResultUrl = null;
+        inviteTeamId = '';
+        inviteSkillsetId = '';
+        inviteRoleId = '';
+        inviteLabel = '';
+        paintInviteModal();
+      }
+
+      function renderInviteModal() {
+        return `
+    <div class="modal-scrim" id="inviteModalScrim">
+      <div class="modal-card" style="max-width:440px;">
+        <button type="button" class="modal-close" id="inviteModalClose">&times;</button>
+        <div class="modal-body" style="padding-top:8px;">
+          <h3 style="margin-top:0;">Invite someone</h3>
+          <p style="color:var(--ink-soft);font-size:13px;">Pick a team, skill and optional role, then send them the link. They sign in through it and the setup page walks them through the rest.</p>
+          ${inviteOptionsLoading ? `<div style="text-align:center;color:var(--muted);padding:16px 0;">Loading teams and roles...</div>` : `
+          ${inviteOptionsError ? `<div class="error-box"><span>${esc(inviteOptionsError)}</span></div>` : ''}
+          ${inviteError ? `<div class="error-box"><span>${esc(inviteError)}</span></div>` : ''}
+          ${inviteResultUrl ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Invite link ready</strong><span class="mono" style="word-break:break-all;">${esc(inviteResultUrl)}</span></div></div>` : ''}
+          <div class="field" style="text-align:left;">
+            <label>Team</label>
+            <select id="inviteTeamSelect" ${inviteBusy ? 'disabled' : ''}>
+              <option value="">No team</option>
+              ${inviteTeams.map(t => `<option value="${esc(t.id)}" ${String(inviteTeamId) === String(t.id) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="text-align:left;">
+            <label>Skillset</label>
+            <select id="inviteSkillsetSelect" ${inviteBusy ? 'disabled' : ''}>
+              <option value="">No skillset</option>
+              ${inviteSkillsets.map(s => `<option value="${esc(s.id)}" ${String(inviteSkillsetId) === String(s.id) ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="text-align:left;">
+            <label>Role <span class="hint">(optional)</span></label>
+            <select id="inviteRoleSelect" ${inviteBusy ? 'disabled' : ''}>
+              <option value="">No role</option>
+              ${inviteRoles.map(r => `<option value="${esc(r.id)}" ${String(inviteRoleId) === String(r.id) ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="text-align:left;">
+            <label>Label <span class="hint">(optional)</span></label>
+            <input type="text" id="inviteLabelInput" placeholder="e.g. Alex for design" value="${esc(inviteLabel)}" ${inviteBusy ? 'disabled' : ''}>
+          </div>
+          <div style="display:flex;gap:10px;justify-content:center;margin-top:6px;">
+            <button type="button" class="btn btn-primary" id="inviteCreateBtn" ${inviteBusy ? 'disabled' : ''}>${inviteBusy ? 'Creating...' : inviteResultUrl ? 'Create another' : 'Create invite'}</button>
+            <button type="button" class="btn btn-ghost" id="inviteCancelBtn">${inviteResultUrl ? 'Done' : 'Cancel'}</button>
+          </div>`}
+        </div>
+      </div>
+    </div>`;
+      }
+
+      function paintInviteModal() {
+        if (renderGen !== myGen) return;
+        const container = document.getElementById('inviteModalContainer');
+        if (!container) return;
+        container.innerHTML = inviteModalOpen ? renderInviteModal() : '';
+        wireInviteModal();
+      }
+
+      function wireInviteModal() {
+        const scrim = document.getElementById('inviteModalScrim');
+        if (scrim) scrim.addEventListener('click', (e) => { if (e.target === scrim) closeInviteModal(); });
+        const close = document.getElementById('inviteModalClose');
+        if (close) close.addEventListener('click', closeInviteModal);
+        const cancel = document.getElementById('inviteCancelBtn');
+        if (cancel) cancel.addEventListener('click', closeInviteModal);
+        const teamSel = document.getElementById('inviteTeamSelect');
+        if (teamSel) teamSel.addEventListener('change', () => { inviteTeamId = teamSel.value; });
+        const skillSel = document.getElementById('inviteSkillsetSelect');
+        if (skillSel) skillSel.addEventListener('change', () => { inviteSkillsetId = skillSel.value; });
+        const roleSel = document.getElementById('inviteRoleSelect');
+        if (roleSel) roleSel.addEventListener('change', () => { inviteRoleId = roleSel.value; });
+        const labelInput = document.getElementById('inviteLabelInput');
+        if (labelInput) labelInput.addEventListener('input', () => { inviteLabel = labelInput.value; });
+        const createBtn = document.getElementById('inviteCreateBtn');
+        if (createBtn) createBtn.addEventListener('click', async () => {
+          inviteBusy = true; inviteError = null; paintInviteModal();
+          try {
+            const result = await createOnboardingLink(inviteTeamId || null, inviteSkillsetId || null, inviteRoleId || null, inviteLabel.trim() || null);
+            inviteResultUrl = result && result.url ? result.url : null;
+            inviteTeamId = ''; inviteSkillsetId = ''; inviteRoleId = ''; inviteLabel = '';
+          } catch (e) {
+            inviteError = (e && e.message) || 'Could not create that invite.';
+          }
+          inviteBusy = false;
+          if (myGen === renderGen) paintInviteModal();
+        });
       }
 
       async function load() {

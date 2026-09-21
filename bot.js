@@ -441,18 +441,14 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
 
                     const stepAfter = teamGroupNote ? 'main_ranked_awaiting_team' : 'done';
-                    await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
 
                     let doneMessage = `You're all set, ${flow.roblox_username}. Welcome to the team.`;
                     if (stepAfter === 'done' && flow.link_token) {
-                        try {
-                            await grantInviteLinkAccess(flow);
-                            doneMessage = `You're all set, ${flow.roblox_username}. Your access to the Tool is now active - head back to the invite page and refresh if it's still showing "waiting".`;
-                        } catch (e) {
-                            console.error(`onboarding_continue: grantInviteLinkAccess failed for flow ${flowId}:`, e.message);
-                            doneMessage = `You're ranked up in both groups, but something went wrong granting your Tool access automatically. Please ping a lead or admin to finish this manually.`;
-                        }
+                        await grantInviteLinkAccess(flow);
+                        doneMessage = `You're all set, ${flow.roblox_username}. Your access to the Tool is now active - head back to the invite page and refresh if it's still showing "waiting".`;
                     }
+
+                    await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
 
                     await interaction.editReply({
                         content: teamGroupNote || doneMessage,
