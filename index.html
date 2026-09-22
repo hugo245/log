@@ -4160,6 +4160,257 @@
       color: var(--ink);
     }
 
+    .pp-add .btn,
+    #newTaskBtn,
+    #saveTaskBtn,
+    #cancelTaskBtn,
+    .task-row .btn,
+    .task-row .pp-icon-btn,
+    .game-card .btn {
+      width: auto;
+      flex: 0 0 auto;
+      align-self: flex-start;
+    }
+
+    .team-form-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    @media (max-width:720px) {
+      .team-form-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .team-detail-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    @media (max-width:720px) {
+      .team-detail-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    .team-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    .team-card {
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .team-card:hover {
+      border-color: var(--accent);
+    }
+
+    .team-card-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .team-card-head h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .team-card-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .team-card-stats b,
+    .team-card-foot b {
+      display: block;
+      font-size: 16px;
+    }
+
+    .team-card-stats span {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .team-card-stats b.danger,
+    .strip-value.danger,
+    .game-growth b.danger,
+    .task-meta b.danger {
+      color: var(--err-text);
+    }
+
+    .game-growth b.good {
+      color: var(--ok-text);
+    }
+
+    .team-card-foot {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 12.5px;
+      color: var(--ink-soft);
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+      margin-top: auto;
+    }
+
+    .game-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .game-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .game-card-head {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .game-card-head h4 {
+      margin: 0;
+      font-size: 15px;
+      overflow-wrap: anywhere;
+    }
+
+    .game-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .game-icon.placeholder {
+      background: var(--accent-soft);
+    }
+
+    .game-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .game-stats b {
+      display: block;
+      font-size: 16px;
+    }
+
+    .game-stats span {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .game-growth {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+
+    .game-growth>div {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+    }
+
+    .game-growth b {
+      font-weight: 600;
+    }
+
+    .game-spark {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+
+    .spark {
+      width: 100%;
+      height: 48px;
+      margin-top: 4px;
+    }
+
+    .spark-empty {
+      font-size: 12.5px;
+      color: var(--muted);
+      padding: 14px 0;
+    }
+
+    .task-list {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    .task-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 14px 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .task-row:first-child {
+      border-top: none;
+    }
+
+    .task-title {
+      font-size: 14.5px;
+      font-weight: 600;
+    }
+
+    .task-title.done {
+      text-decoration: line-through;
+      color: var(--muted);
+    }
+
+    .task-meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      font-size: 12.5px;
+      color: var(--ink-soft);
+      margin-top: 5px;
+    }
+
+    .task-details {
+      font-size: 13px;
+      color: var(--ink-soft);
+      margin-top: 6px;
+      white-space: pre-wrap;
+    }
+
     .sec-title {
       font-size: 19px;
       margin: 0 0 6px;
@@ -4270,7 +4521,9 @@
       'recruitment.manage': 'Manage recruitment tickets (accept, reject, assign, place teams)',
       'recruitment.signoff': 'Sign off recruitment placements as ready',
       'recruitment.finalise': 'Finalise recruitment placements (grant roles/access)',
-      'recruitment.analytics': 'View recruitment analytics'
+      'recruitment.analytics': 'View recruitment analytics',
+      'teams.view': 'View teams, their games and deadlines',
+      'teams.manage': 'Assign games to teams and manage team deadlines'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
 
@@ -6474,6 +6727,8 @@
         if (isHrAuthed && canSubmitRequests()) renderCreateView(); else if (isHrAuthed) renderMyPayments(); else renderHrGate();
       } else if (path === '#/onboarding') {
         if (isHrAuthed) renderOnboarding(); else renderHrGate();
+      } else if (path === '#/teams') {
+        if (isHrAuthed) renderTeams(); else renderHrGate();
       } else if (path === '#/staff') {
         if (isHrAuthed) renderStaffDatabase(); else renderHrGate();
       } else if (path === '#/audit') {
@@ -6537,6 +6792,7 @@
         { group: 'you', label: 'My payments', href: '#/my', match: ['#/my', '#/', ''] },
         { group: 'you', label: 'New request', href: '#/new', show: canSubmitRequests() },
         { group: 'team', label: 'Dashboard', href: '#/dashboard', match: ['#/dashboard', '#/hr'], show: hasPermission('dashboard.view'), keywords: 'dashboard pay approve review' },
+        { group: 'team', label: 'Teams', href: '#/teams', show: canSeeTeams(), keywords: 'team games deadlines analytics growth' },
         { group: 'team', label: 'Staff', href: '#/staff', show: hasPermission('staff.view_database'), keywords: 'people users members database profiles' },
         { group: 'team', label: 'Moderation', href: '#/staff?tab=moderation', navHidden: true, show: hasPermission('staff.moderate'), keywords: 'bans warnings warn ban notes' },
         { group: 'team', label: 'Recruitment', href: '#/recruitment', match: ['#/recruitment', '#/recruitment-analytics'], show: hasPermission('recruitment.view'), keywords: 'applications tickets applicants hiring' },
@@ -6588,7 +6844,7 @@
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
              </details>`
-            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeStaff ? pill('#/staff', 'Staff') : ''}${canSeeRecruitment ? pill('#/recruitment', 'Recruitment', ['#/recruitment', '#/recruitment-analytics']) : ''}${canSeeAnalytics() ? pill('#/analytics', 'Analytics') : ''}${hasPermission('audit.view') ? pill('#/audit', 'Audit logs') : ''}
+            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeStaff ? pill('#/staff', 'Staff') : ''}${canSeeTeams() ? pill('#/teams', 'Teams') : ''}${canSeeRecruitment ? pill('#/recruitment', 'Recruitment', ['#/recruitment', '#/recruitment-analytics']) : ''}${canSeeAnalytics() ? pill('#/analytics', 'Analytics') : ''}${hasPermission('audit.view') ? pill('#/audit', 'Audit logs') : ''}
              <details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
@@ -11529,6 +11785,401 @@
         if (invite.invalid && inviteToken) toast('That invite link is invalid or has expired.', 'err');
         paint();
         startPolling();
+      }
+
+      load();
+    }
+
+    function canSeeTeams() {
+      return isHrAuthed && (hasPermission('teams.view') || hasPermission('staff.view_database') || hasPermission('dashboard.view'));
+    }
+
+    function canManageTeams() {
+      return isHrAuthed && (hasPermission('teams.manage') || hasPermission('settings.manage_onboarding'));
+    }
+
+    function bigNum(n) {
+      const v = Number(n || 0);
+      if (v >= 1000000) return (v / 1000000).toFixed(v >= 10000000 ? 0 : 1) + 'M';
+      if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'K';
+      return String(v);
+    }
+
+    function signedNum(n) {
+      if (n == null) return null;
+      const v = Number(n);
+      return (v > 0 ? '+' : v < 0 ? '' : '') + bigNum(Math.abs(v) === 0 ? 0 : v < 0 ? -Math.abs(v) : v);
+    }
+
+    function sparkline(points, key) {
+      const vals = (points || []).map(p => Number(p[key] || 0));
+      if (vals.length < 2) return '<div class="spark-empty">Not enough history yet</div>';
+      const min = Math.min(...vals), max = Math.max(...vals);
+      const span = max - min || 1;
+      const w = 220, h = 48;
+      const d = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${h - ((v - min) / span) * (h - 6) - 3}`).join(' ');
+      const rising = vals[vals.length - 1] >= vals[0];
+      return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Trend">
+        <polyline points="${d}" fill="none" stroke="${rising ? 'var(--ok-text)' : 'var(--err-text)'}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      </svg>`;
+    }
+
+    function taskState(t) {
+      if (t.status === 'done') {
+        const late = t.due_at && t.completed_at && new Date(t.completed_at) > new Date(t.due_at);
+        return { cls: late ? 'warn' : 'ok', label: late ? 'Done late' : 'Done on time' };
+      }
+      if (t.status === 'cancelled') return { cls: '', label: 'Cancelled' };
+      if (!t.due_at) return { cls: '', label: 'No deadline' };
+      const diff = new Date(t.due_at).getTime() - Date.now();
+      if (diff < 0) return { cls: 'ban', label: 'Overdue ' + relTime(t.due_at) };
+      if (diff < 3 * 24 * 60 * 60 * 1000) return { cls: 'warn', label: 'Due ' + relTime(t.due_at) };
+      return { cls: '', label: 'Due ' + relTime(t.due_at) };
+    }
+
+    function renderTeams() {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+      if (!isHrAuthed) { renderHrGate(); return; }
+      if (!canSeeTeams()) { window.location.hash = '#/'; return; }
+
+      const myGen = renderGen;
+      const query = parseHashQuery();
+      let teamId = query.get('team') || null;
+      let tab = ['members', 'games', 'deadlines'].includes(query.get('tab')) ? query.get('tab') : 'members';
+      let overview = null;
+      let detail = null;
+      let loading = true;
+      let loadError = null;
+      let busy = false;
+      let taskDraft = null;
+      let linkingGameId = null;
+
+      function go(nextTeamId, nextTab) {
+        teamId = nextTeamId;
+        tab = nextTab || 'members';
+        const hash = teamId ? `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}` : '#/teams';
+        history.replaceState(null, '', hash);
+        load();
+      }
+
+      function overviewHtml() {
+        if (!overview || !overview.length) {
+          return `<div class="dash-empty"><h3>No teams yet</h3><p>Create teams in Manage, under Teams &amp; skills.</p></div>`;
+        }
+        return `<div class="team-grid">${overview.map(t => {
+          const s = t.tasks;
+          return `
+          <button type="button" class="team-card" data-open-team="${esc(t.id)}">
+            <div class="team-card-head">
+              <span class="pp-dot" style="background:${esc(t.color || 'var(--muted)')};"></span>
+              <h3>${esc(t.name)}</h3>
+            </div>
+            <div class="team-card-stats">
+              <div><b>${esc(t.memberCount)}</b><span>Members</span></div>
+              <div><b>${esc(t.games.length)}</b><span>Games</span></div>
+              <div><b>${s.onTimeRate == null ? '-' : esc(s.onTimeRate) + '%'}</b><span>On time</span></div>
+              <div><b class="${s.overdue ? 'danger' : ''}">${esc(s.overdue)}</b><span>Overdue</span></div>
+            </div>
+            <div class="team-card-foot">
+              ${t.stats.trackedGames
+              ? `<span>${esc(bigNum(t.stats.playing))} playing now</span><span>${esc(bigNum(t.stats.visits7d))} visits this week</span>`
+              : `<span class="hint">No games linked to Roblox yet</span>`}
+            </div>
+          </button>`;
+        }).join('')}</div>`;
+      }
+
+      function membersHtml() {
+        const members = detail.members.slice().sort((a, b) => (b.openTasks - a.openTasks) || (a.robloxUsername || '').localeCompare(b.robloxUsername || ''));
+        if (!members.length) return `<div class="dash-empty"><h3>Nobody on this team yet</h3><p>Add people from the Staff page, or send them an invite link.</p></div>`;
+        return `<div class="table-scroll"><table class="req-table">
+          <thead><tr><th>Member</th><th>Skill</th><th>Open tasks</th><th>Requests</th><th>Last active</th></tr></thead>
+          <tbody>
+            ${members.map(m => `
+            <tr>
+              <td class="name-cell" style="display:flex;gap:10px;align-items:center;">
+                ${avatarImg(m.robloxUserId, '', 'style="width:28px;height:28px;border-radius:50%;"')}
+                <span>${userLink(m.robloxUserId, m.robloxUsername)}
+                  ${m.warnCount ? `<span class="pending-badge" style="position:static;margin-left:6px;">${esc(m.warnCount)}/3</span>` : ''}
+                  <span style="display:block;color:var(--muted);font-size:12px;">${(m.roles || []).join(', ') || 'No roles'}</span>
+                </span>
+              </td>
+              <td>${m.skillset ? `<span class="pp-tag">${esc(m.skillset.name)}</span>` : '<span class="hint">Not set</span>'}</td>
+              <td>${m.openTasks ? esc(m.openTasks) : '<span class="hint">None</span>'}</td>
+              <td>${esc(m.requestCount)}${m.pendingCount ? ` <span class="hint">(${esc(m.pendingCount)} pending)</span>` : ''}</td>
+              <td style="white-space:nowrap;color:var(--ink-soft);">${m.lastActive ? esc(shortAgo(m.lastActive)) : '-'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`;
+      }
+
+      function gameCardHtml(g) {
+        const s = g.stats;
+        const linking = linkingGameId === g.id;
+        return `
+        <div class="game-card">
+          <div class="game-card-head">
+            ${g.iconUrl ? `<img src="${esc(g.iconUrl)}" alt="" class="game-icon">` : `<div class="game-icon placeholder" aria-hidden="true"></div>`}
+            <div style="flex:1;min-width:0;">
+              <h4>${esc(g.name)}</h4>
+              <div class="hint">${g.universeId ? `Universe ${esc(g.universeId)}` : 'Not linked to a Roblox game yet'}</div>
+            </div>
+            ${detail.canManage ? `<div style="display:flex;gap:6px;">
+              <button type="button" class="btn btn-ghost btn-sm" data-link-game="${esc(g.id)}">${g.universeId ? 'Change link' : 'Link to Roblox'}</button>
+              <button type="button" class="pp-icon-btn" data-remove-game="${esc(g.id)}" aria-label="Remove ${esc(g.name)} from this team">&times;</button>
+            </div>` : ''}
+          </div>
+          ${linking ? `
+          <div class="pp-add" style="margin:0 0 10px;">
+            <input type="text" id="gameLinkInput" class="pp-select" style="flex:1 1 220px;" placeholder="Roblox place ID or game link" value="${g.placeId ? esc(g.placeId) : ''}">
+            <button type="button" class="btn btn-primary btn-sm" id="gameLinkSave" ${busy ? 'disabled' : ''}>${busy ? 'Checking...' : 'Save'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="gameLinkCancel">Cancel</button>
+          </div>` : ''}
+          ${!g.universeId
+            ? `<p class="hint" style="margin:0;">Link it to see players, visits, likes and growth.</p>`
+            : !s
+              ? `<p class="hint" style="margin:0;">Waiting for the first reading from Roblox. Press Refresh stats.</p>`
+              : `
+          <div class="game-stats">
+            <div><b>${esc(bigNum(s.latest.playing))}</b><span>Playing now</span></div>
+            <div><b>${esc(bigNum(s.latest.visits))}</b><span>Visits</span></div>
+            <div><b>${esc(bigNum(s.latest.favorites))}</b><span>Favourites</span></div>
+            <div><b>${s.latest.likes + s.latest.dislikes ? Math.round(s.latest.likes / (s.latest.likes + s.latest.dislikes) * 100) + '%' : '-'}</b><span>Liked</span></div>
+          </div>
+          <div class="game-growth">
+            <div><span class="hint">Last 24 hours</span><b>${s.visitsLast24h == null ? 'Not enough history' : esc(bigNum(s.visitsLast24h)) + ' visits'}</b></div>
+            <div><span class="hint">Last 7 days</span><b>${s.visitsLast7d == null ? 'Not enough history' : esc(bigNum(s.visitsLast7d)) + ' visits'}</b></div>
+            <div><span class="hint">Players online vs a week ago</span><b class="${s.playingChange7d > 0 ? 'good' : s.playingChange7d < 0 ? 'danger' : ''}">${s.playingChange7d == null ? 'Not enough history' : esc(signedNum(s.playingChange7d))}</b></div>
+          </div>
+          <div class="game-spark">
+            <span class="hint">Players online, since ${esc(fmtDate(s.firstSeen))}</span>
+            ${sparkline(s.series, 'playing')}
+          </div>`}
+        </div>`;
+      }
+
+      function gamesHtml() {
+        return `
+          ${detail.canManage ? `
+          <div class="pp-add" style="margin:0 0 16px;">
+            <select id="addGameSelect" class="pp-select" aria-label="Game to assign" style="flex:1 1 220px;">
+              <option value="">Assign a game to this team...</option>
+              ${detail.availableGames.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-primary btn-sm" id="addGameBtn" ${busy ? 'disabled' : ''}>Assign</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="refreshStatsBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : 'Refresh stats'}</button>
+          </div>` : ''}
+          ${detail.games.length
+            ? `<div class="game-grid">${detail.games.map(gameCardHtml).join('')}</div>`
+            : `<div class="dash-empty"><h3>No games assigned</h3><p>${detail.canManage ? 'Assign one above, then link it to its Roblox place to track how it grows.' : 'Nobody has assigned a game to this team yet.'}</p></div>`}`;
+      }
+
+      function deadlinesHtml() {
+        const s = detail.taskSummary;
+        const open = detail.tasks.filter(t => t.status === 'open');
+        const closed = detail.tasks.filter(t => t.status !== 'open');
+        const row = (t) => {
+          const st = taskState(t);
+          const game = detail.games.find(g => String(g.id) === String(t.game_id));
+          return `
+          <div class="task-row">
+            <div style="flex:1;min-width:0;">
+              <div class="task-title ${t.status === 'done' ? 'done' : ''}">${esc(t.title)}</div>
+              <div class="task-meta">
+                <span class="pp-state ${st.cls}">${esc(st.label)}</span>
+                ${game ? `<span>${esc(game.name)}</span>` : ''}
+                ${t.assigned_to_user_id ? `<span>${userLink(t.assigned_to_user_id, t.assigned_to_username)}</span>` : '<span class="hint">Nobody assigned</span>'}
+                ${t.due_at ? `<span title="${esc(fmtDateTime(t.due_at))}">${esc(fmtDate(t.due_at))}</span>` : ''}
+              </div>
+              ${t.details ? `<div class="task-details">${esc(t.details)}</div>` : ''}
+            </div>
+            ${detail.canManage ? `
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-ghost btn-sm" data-task-toggle="${esc(t.id)}" data-status="${t.status === 'done' ? 'open' : 'done'}">${t.status === 'done' ? 'Reopen' : 'Mark done'}</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-task-edit="${esc(t.id)}">Edit</button>
+              <button type="button" class="pp-icon-btn" data-task-delete="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">&times;</button>
+            </div>` : ''}
+          </div>`;
+        };
+        const d = taskDraft;
+        return `
+          <div class="stat-strip team-detail-strip">
+            <div class="strip-card"><div class="strip-label">On time</div><div class="strip-value">${s.onTimeRate == null ? '-' : esc(s.onTimeRate) + '%'}</div><div class="hint">${esc(s.onTime)} of ${esc(s.done)} finished tasks</div></div>
+            <div class="strip-card"><div class="strip-label">Overdue</div><div class="strip-value ${s.overdue ? 'danger' : ''}">${esc(s.overdue)}</div></div>
+            <div class="strip-card"><div class="strip-label">Due within 3 days</div><div class="strip-value">${esc(s.dueSoon)}</div></div>
+            <div class="strip-card"><div class="strip-label">Open</div><div class="strip-value">${esc(s.open)}</div></div>
+          </div>
+          ${detail.canManage ? (d ? `
+          <div class="panel" style="margin:0 0 18px;">
+            <h3 style="margin:0 0 12px;font-size:15px;">${d.id ? 'Edit task' : 'New task'}</h3>
+            <div class="field"><label for="taskTitle">What needs doing</label><input type="text" id="taskTitle" value="${esc(d.title || '')}" placeholder="e.g. Ship the winter map update"></div>
+            <div class="team-form-row">
+              <div class="field"><label for="taskDue">Deadline</label><input type="date" id="taskDue" value="${d.due_at ? esc(String(d.due_at).slice(0, 10)) : ''}"></div>
+              <div class="field"><label for="taskGame">Game <span class="hint">(optional)</span></label>
+                <select id="taskGame"><option value="">No specific game</option>${detail.games.map(g => `<option value="${esc(g.id)}" ${String(d.game_id) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>
+              </div>
+              <div class="field"><label for="taskAssignee">Assign to <span class="hint">(optional)</span></label>
+                <select id="taskAssignee"><option value="">Nobody</option>${detail.members.map(m => `<option value="${esc(m.robloxUserId)}" ${String(d.assigned_to_user_id) === String(m.robloxUserId) ? 'selected' : ''}>${esc(m.robloxUsername)}</option>`).join('')}</select>
+              </div>
+            </div>
+            <div class="field"><label for="taskDetails">Notes <span class="hint">(optional)</span></label><textarea id="taskDetails" rows="2">${esc(d.details || '')}</textarea></div>
+            <div style="display:flex;gap:8px;">
+              <button type="button" class="btn btn-primary btn-sm" id="saveTaskBtn" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : d.id ? 'Save changes' : 'Add task'}</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="cancelTaskBtn">Cancel</button>
+            </div>
+          </div>` : `<button type="button" class="btn btn-primary btn-sm" id="newTaskBtn" style="margin-bottom:18px;">Add a task</button>`) : ''}
+          ${open.length ? `<div class="task-list">${open.map(row).join('')}</div>` : `<div class="dash-empty"><h3>Nothing open</h3><p>${detail.canManage ? 'Add a task to start tracking deadlines for this team.' : 'This team has no open tasks.'}</p></div>`}
+          ${closed.length ? `<h3 class="sec-title" style="margin:24px 0 8px;font-size:15px;">Finished (${closed.length})</h3><div class="task-list">${closed.map(row).join('')}</div>` : ''}`;
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        let body;
+        if (loading) body = `<div class="dash-loading">Loading teams...</div>`;
+        else if (loadError) body = `<div class="dash-empty"><h3>Could not load teams</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryTeamsBtn">Try again</button></div>`;
+        else if (!detail) body = overviewHtml();
+        else body = tab === 'games' ? gamesHtml() : tab === 'deadlines' ? deadlinesHtml() : membersHtml();
+
+        const head = detail
+          ? `<div>
+              <a class="pp-linkbtn" href="#/teams" id="backToTeams">Back to all teams</a>
+              <h1 style="margin:6px 0 4px;display:flex;align-items:center;gap:10px;"><span class="pp-dot" style="background:${esc(detail.team.color || 'var(--muted)')};width:14px;height:14px;"></span>${esc(detail.team.name)}</h1>
+              <p class="sub">${esc(detail.members.length)} members &middot; ${esc(detail.games.length)} games &middot; ${detail.taskSummary.open} open tasks${detail.taskSummary.overdue ? `, ${detail.taskSummary.overdue} overdue` : ''}</p>
+            </div>`
+          : `<div>
+              <h1 style="margin-bottom:4px;">Teams</h1>
+              <p class="sub">Who is on each team, which games they look after, and how they are doing against their deadlines.</p>
+            </div>`;
+
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        ${head}
+        <div class="dash-toolbar">
+          <button type="button" class="btn btn-ghost btn-sm" id="reloadTeamsBtn">Refresh</button>
+          ${detail && detail.canManage ? `<a class="btn btn-ghost btn-sm" href="#/manage?tab=teams">Team settings</a>` : ''}
+        </div>
+      </div>
+      ${detail ? `
+      <div class="tabs" style="margin-bottom:18px;" role="tablist">
+        ${[['members', 'Members'], ['games', 'Games'], ['deadlines', 'Deadlines']].map(([id, label]) =>
+          `<button type="button" role="tab" aria-selected="${tab === id}" class="tab-btn ${tab === id ? 'active' : ''}" data-team-tab="${id}">${label}</button>`).join('')}
+      </div>` : ''}
+      ${body}
+    </div>`;
+
+        wireTopbarSignOut();
+        const retry = document.getElementById('retryTeamsBtn');
+        if (retry) retry.addEventListener('click', load);
+        document.getElementById('reloadTeamsBtn').addEventListener('click', load);
+        const back = document.getElementById('backToTeams');
+        if (back) back.addEventListener('click', (e) => { e.preventDefault(); go(null); });
+        document.querySelectorAll('[data-open-team]').forEach(el => el.addEventListener('click', () => go(el.dataset.openTeam)));
+        document.querySelectorAll('[data-team-tab]').forEach(el => el.addEventListener('click', () => { tab = el.dataset.teamTab; history.replaceState(null, '', `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}`); paint(); }));
+
+        const addGameBtn = document.getElementById('addGameBtn');
+        if (addGameBtn) addGameBtn.addEventListener('click', async () => {
+          const sel = document.getElementById('addGameSelect');
+          if (!sel.value) { toast('Pick a game first.', 'err'); return; }
+          await run(() => callHrData('set_team_games', { teamId, gameId: sel.value, mode: 'add' }), 'Game assigned');
+        });
+        document.querySelectorAll('[data-remove-game]').forEach(el => el.addEventListener('click', async () => {
+          if (!confirm('Take this game off the team?')) return;
+          await run(() => callHrData('set_team_games', { teamId, gameId: el.dataset.removeGame, mode: 'remove' }), 'Game removed');
+        }));
+        const refreshStats = document.getElementById('refreshStatsBtn');
+        if (refreshStats) refreshStats.addEventListener('click', () => load(true));
+        document.querySelectorAll('[data-link-game]').forEach(el => el.addEventListener('click', () => { linkingGameId = linkingGameId === el.dataset.linkGame ? null : el.dataset.linkGame; paint(); const i = document.getElementById('gameLinkInput'); if (i) i.focus(); }));
+        const linkSave = document.getElementById('gameLinkSave');
+        if (linkSave) linkSave.addEventListener('click', async () => {
+          const val = document.getElementById('gameLinkInput').value.trim();
+          const gameId = linkingGameId;
+          busy = true; paint();
+          try {
+            const r = await callHrData('set_game_roblox_id', { gameId, placeId: val });
+            linkingGameId = null;
+            toast(r.robloxName ? `Linked to ${r.robloxName} on Roblox.` : 'Link saved.');
+            busy = false;
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.code === 'roblox_game_not_found' ? "Roblox doesn't have a game with that place ID." : (e.message || 'Could not link that game.'), 'err');
+            paint();
+          }
+        });
+        const linkCancel = document.getElementById('gameLinkCancel');
+        if (linkCancel) linkCancel.addEventListener('click', () => { linkingGameId = null; paint(); });
+
+        const newTask = document.getElementById('newTaskBtn');
+        if (newTask) newTask.addEventListener('click', () => { taskDraft = { title: '', details: '', due_at: '', game_id: '', assigned_to_user_id: '' }; paint(); document.getElementById('taskTitle').focus(); });
+        const cancelTask = document.getElementById('cancelTaskBtn');
+        if (cancelTask) cancelTask.addEventListener('click', () => { taskDraft = null; paint(); });
+        const saveTask = document.getElementById('saveTaskBtn');
+        if (saveTask) saveTask.addEventListener('click', async () => {
+          const title = document.getElementById('taskTitle').value.trim();
+          if (!title) { toast('Give the task a name.', 'err'); return; }
+          const due = document.getElementById('taskDue').value;
+          const assignee = document.getElementById('taskAssignee').value;
+          const member = detail.members.find(m => String(m.robloxUserId) === String(assignee));
+          await run(() => callHrData('save_team_task', {
+            id: taskDraft.id, teamId, title,
+            details: document.getElementById('taskDetails').value.trim(),
+            dueAt: due ? new Date(due + 'T23:59:59').toISOString() : null,
+            gameId: document.getElementById('taskGame').value || null,
+            assignedToUserId: assignee || null,
+            assignedToUsername: member ? member.robloxUsername : null
+          }), taskDraft.id ? 'Task updated' : 'Task added', () => { taskDraft = null; });
+        });
+        document.querySelectorAll('[data-task-edit]').forEach(el => el.addEventListener('click', () => {
+          taskDraft = detail.tasks.find(t => String(t.id) === String(el.dataset.taskEdit)) || null;
+          paint();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }));
+        document.querySelectorAll('[data-task-toggle]').forEach(el => el.addEventListener('click', async () => {
+          await run(() => callHrData('set_team_task_status', { id: el.dataset.taskToggle, status: el.dataset.status }), el.dataset.status === 'done' ? 'Marked done' : 'Reopened');
+        }));
+        document.querySelectorAll('[data-task-delete]').forEach(el => el.addEventListener('click', async () => {
+          if (!confirm('Delete this task? It disappears from the on-time figures too.')) return;
+          await run(() => callHrData('delete_team_task', { id: el.dataset.taskDelete }), 'Task deleted');
+        }));
+      }
+
+      async function run(fn, successText, after) {
+        busy = true; paint();
+        try {
+          await fn();
+          if (after) after();
+          toast(successText);
+          busy = false;
+          await load();
+        } catch (e) {
+          busy = false;
+          toast(e.message || 'That did not save.', 'err');
+          paint();
+        }
+      }
+
+      async function load(refreshStats) {
+        loading = !overview && !detail;
+        loadError = null;
+        paint();
+        try {
+          if (teamId) {
+            const json = await callHrData('team_detail', { teamId, refreshStats: !!refreshStats });
+            detail = json.data;
+          } else {
+            const json = await callHrData('teams_overview');
+            overview = json.data;
+            detail = null;
+          }
+        } catch (e) {
+          loadError = e.message || 'Could not load teams.';
+          if (e.code === 'team_not_found') { teamId = null; loadError = null; history.replaceState(null, '', '#/teams'); }
+        }
+        if (myGen !== renderGen) return;
+        loading = false;
+        paint();
       }
 
       load();

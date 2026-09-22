@@ -89,7 +89,9 @@ const PERMISSIONS = [
     'recruitment.manage',
     'recruitment.signoff',
     'recruitment.finalise',
-    'recruitment.analytics'
+    'recruitment.analytics',
+    'teams.view',
+    'teams.manage'
 ];
 
 const TOS_CONTENT = `Last updated: August 2026
@@ -1042,6 +1044,169 @@ const DISCORD_SYNC_REASONS = {
 async function getRoleForSync(roleId) {
     const { data } = await supabase.from('roles').select('id, name, hierarchy, discord_role_id').eq('id', roleId).maybeSingle();
     return data || null;
+}
+
+const GAME_STATS_CACHE_MS = 15 * 60 * 1000;
+
+function canViewTeams(session) {
+    return hasPermission(session, 'teams.view') || hasPermission(session, 'staff.view_database') || hasPermission(session, 'dashboard.view');
+}
+
+function canManageTeams(session) {
+    return hasPermission(session, 'teams.manage') || hasPermission(session, 'settings.manage_onboarding');
+}
+
+function requireTeamView(res, session) {
+    if (canViewTeams(session)) return true;
+    res.status(403).json({ ok: false, error: 'missing_permission' });
+    return false;
+}
+
+function requireTeamManage(res, session) {
+    if (canManageTeams(session)) return true;
+    res.status(403).json({ ok: false, error: 'missing_permission' });
+    return false;
+}
+
+async function resolveUniverseId(placeId) {
+    try {
+        const r = await fetch(`https://apis.roblox.com/universes/v1/places/${placeId}/universe`);
+        if (!r.ok) return null;
+        const j = await r.json();
+        return j && j.universeId ? Number(j.universeId) : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function fetchRobloxGameStats(universeIds) {
+    const ids = [...new Set((universeIds || []).map(Number).filter(Boolean))];
+    if (!ids.length) return {};
+    const out = {};
+    for (let i = 0; i < ids.length; i += 50) {
+        const batch = ids.slice(i, i + 50);
+        const idParam = batch.join(',');
+        const [infoRes, votesRes, iconRes] = await Promise.all([
+            fetch(`https://games.roblox.com/v1/games?universeIds=${idParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`https://games.roblox.com/v1/games/votes?universeIds=${idParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${idParam}&size=256x256&format=Png&isCircular=false`).then(r => r.ok ? r.json() : null).catch(() => null)
+        ]);
+        const votesById = {};
+        ((votesRes && votesRes.data) || []).forEach(v => { votesById[v.id] = v; });
+        const iconById = {};
+        ((iconRes && iconRes.data) || []).forEach(v => { if (v.state === 'Completed') iconById[v.targetId] = v.imageUrl; });
+        ((infoRes && infoRes.data) || []).forEach(g => {
+            const votes = votesById[g.id] || {};
+            out[g.id] = {
+                universeId: g.id,
+                name: g.name,
+                rootPlaceId: g.rootPlaceId,
+                playing: g.playing || 0,
+                visits: g.visits || 0,
+                favorites: g.favoritedCount || 0,
+                likes: votes.upVotes || 0,
+                dislikes: votes.downVotes || 0,
+                maxPlayers: g.maxPlayers || 0,
+                created: g.created || null,
+                updated: g.updated || null,
+                iconUrl: iconById[g.id] || null
+            };
+        });
+    }
+    return out;
+}
+
+async function captureGameSnapshots(games, force) {
+    const withUniverse = (games || []).filter(g => g.roblox_universe_id);
+    if (!withUniverse.length) return { stats: {}, captured: 0 };
+    const since = new Date(Date.now() - GAME_STATS_CACHE_MS).toISOString();
+    let toRefresh = withUniverse;
+    if (!force) {
+        const { data: recent } = await supabase
+            .from('game_stat_snapshots')
+            .select('universe_id, captured_at')
+            .gte('captured_at', since);
+        const fresh = new Set((recent || []).map(r => String(r.universe_id)));
+        toRefresh = withUniverse.filter(g => !fresh.has(String(g.roblox_universe_id)));
+    }
+    if (!toRefresh.length) return { stats: {}, captured: 0 };
+    const stats = await fetchRobloxGameStats(toRefresh.map(g => g.roblox_universe_id));
+    const rows = [];
+    const now = new Date().toISOString();
+    toRefresh.forEach(g => {
+        const st = stats[g.roblox_universe_id];
+        if (!st) return;
+        rows.push({
+            game_id: g.id,
+            universe_id: g.roblox_universe_id,
+            captured_at: now,
+            playing: st.playing,
+            visits: st.visits,
+            favorites: st.favorites,
+            likes: st.likes,
+            dislikes: st.dislikes
+        });
+    });
+    if (rows.length) {
+        const { error } = await supabase.from('game_stat_snapshots').insert(rows);
+        if (error) console.error('captureGameSnapshots: could not store snapshots:', error.message);
+        for (const g of toRefresh) {
+            const st = stats[g.roblox_universe_id];
+            if (!st) continue;
+            const patch = {};
+            if (st.iconUrl && st.iconUrl !== g.icon_url) patch.icon_url = st.iconUrl;
+            if (!g.roblox_place_id && st.rootPlaceId) patch.roblox_place_id = st.rootPlaceId;
+            if (Object.keys(patch).length) await supabase.from('games').update(patch).eq('id', g.id);
+        }
+    }
+    return { stats, captured: rows.length };
+}
+
+function summariseSnapshots(snapshots) {
+    const sorted = (snapshots || []).slice().sort((a, b) => new Date(a.captured_at) - new Date(b.captured_at));
+    if (!sorted.length) return null;
+    const latest = sorted[sorted.length - 1];
+    const dayMs = 24 * 60 * 60 * 1000;
+    const pick = (days) => {
+        const target = new Date(latest.captured_at).getTime() - days * dayMs;
+        let best = null;
+        sorted.forEach(s => {
+            const t = new Date(s.captured_at).getTime();
+            if (t <= target && (!best || t > new Date(best.captured_at).getTime())) best = s;
+        });
+        return best;
+    };
+    const weekAgo = pick(7);
+    const dayAgo = pick(1);
+    return {
+        latest,
+        visitsLast24h: dayAgo ? Math.max(0, (latest.visits || 0) - (dayAgo.visits || 0)) : null,
+        visitsLast7d: weekAgo ? Math.max(0, (latest.visits || 0) - (weekAgo.visits || 0)) : null,
+        favoritesLast7d: weekAgo ? (latest.favorites || 0) - (weekAgo.favorites || 0) : null,
+        playingChange7d: weekAgo ? (latest.playing || 0) - (weekAgo.playing || 0) : null,
+        series: sorted.map(s => ({ at: s.captured_at, playing: s.playing, visits: s.visits, favorites: s.favorites, likes: s.likes, dislikes: s.dislikes })),
+        firstSeen: sorted[0].captured_at
+    };
+}
+
+function summariseTasks(tasks) {
+    const list = tasks || [];
+    const now = Date.now();
+    const done = list.filter(t => t.status === 'done');
+    const onTime = done.filter(t => t.due_at && t.completed_at && new Date(t.completed_at) <= new Date(t.due_at));
+    const doneWithDue = done.filter(t => t.due_at);
+    const open = list.filter(t => t.status !== 'done' && t.status !== 'cancelled');
+    const overdue = open.filter(t => t.due_at && new Date(t.due_at).getTime() < now);
+    const dueSoon = open.filter(t => t.due_at && new Date(t.due_at).getTime() >= now && new Date(t.due_at).getTime() - now < 3 * 24 * 60 * 60 * 1000);
+    return {
+        total: list.length,
+        open: open.length,
+        overdue: overdue.length,
+        dueSoon: dueSoon.length,
+        done: done.length,
+        onTime: onTime.length,
+        onTimeRate: doneWithDue.length ? Math.round(onTime.length / doneWithDue.length * 100) : null
+    };
 }
 
 async function getLinkedDiscordUserId(robloxUserId) {
@@ -3871,6 +4036,251 @@ app.post('/hr-data', async (req, res) => {
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not load the staff database.' });
         }
+        return;
+    }
+
+    if (action === 'teams_overview') {
+        if (!requireTeamView(res, session)) return;
+        const [teamsRes, assignRes, teamGamesRes, gamesRes, tasksRes] = await Promise.all([
+            supabase.from('teams').select('*').order('name', { ascending: true }),
+            supabase.from('user_assignments').select('roblox_user_id, roblox_username, team_id, skillset_id'),
+            supabase.from('team_games').select('team_id, game_id'),
+            supabase.from('games').select('*'),
+            supabase.from('team_tasks').select('*')
+        ]);
+        const teams = teamsRes.data || [];
+        const games = gamesRes.data || [];
+        const gameById = {}; games.forEach(g => { gameById[g.id] = g; });
+        await captureGameSnapshots(games.filter(g => g.roblox_universe_id), false);
+        const { data: snaps } = await supabase
+            .from('game_stat_snapshots')
+            .select('*')
+            .gte('captured_at', new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString())
+            .order('captured_at', { ascending: true });
+        const snapsByGame = {};
+        (snaps || []).forEach(s => { (snapsByGame[s.game_id] = snapsByGame[s.game_id] || []).push(s); });
+
+        const data = teams.map(team => {
+            const members = (assignRes.data || []).filter(a => String(a.team_id) === String(team.id));
+            const teamGameIds = (teamGamesRes.data || []).filter(tg => String(tg.team_id) === String(team.id)).map(tg => tg.game_id);
+            const teamGames = teamGameIds.map(id => gameById[id]).filter(Boolean);
+            const tasks = (tasksRes.data || []).filter(t => String(t.team_id) === String(team.id));
+            let playing = 0, visits = 0, visits7d = 0, tracked = 0;
+            teamGames.forEach(g => {
+                const sum = summariseSnapshots(snapsByGame[g.id]);
+                if (!sum) return;
+                tracked += 1;
+                playing += sum.latest.playing || 0;
+                visits += sum.latest.visits || 0;
+                if (sum.visitsLast7d != null) visits7d += sum.visitsLast7d;
+            });
+            return {
+                id: team.id,
+                name: team.name,
+                color: team.color,
+                memberCount: members.length,
+                games: teamGames.map(g => ({ id: g.id, name: g.name, universeId: g.roblox_universe_id, iconUrl: g.icon_url })),
+                tasks: summariseTasks(tasks),
+                stats: { playing, visits, visits7d, trackedGames: tracked }
+            };
+        });
+        res.json({ ok: true, data, canManage: canManageTeams(session) });
+        return;
+    }
+
+    if (action === 'team_detail') {
+        if (!requireTeamView(res, session)) return;
+        const teamId = payload.teamId;
+        if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
+        const { data: team } = await supabase.from('teams').select('*').eq('id', teamId).maybeSingle();
+        if (!team) { res.status(404).json({ ok: false, error: 'team_not_found' }); return; }
+        const [assignRes, teamGamesRes, gamesRes, tasksRes, skillsetsRes] = await Promise.all([
+            supabase.from('user_assignments').select('*').eq('team_id', teamId),
+            supabase.from('team_games').select('*').eq('team_id', teamId),
+            supabase.from('games').select('*'),
+            supabase.from('team_tasks').select('*').eq('team_id', teamId).order('due_at', { ascending: true }),
+            supabase.from('skillsets').select('*')
+        ]);
+        const gameById = {}; (gamesRes.data || []).forEach(g => { gameById[g.id] = g; });
+        const skillsetById = {}; (skillsetsRes.data || []).forEach(k => { skillsetById[k.id] = k; });
+        const teamGames = (teamGamesRes.data || []).map(tg => gameById[tg.game_id]).filter(Boolean);
+        if (payload.refreshStats) await captureGameSnapshots(teamGames, true);
+        else await captureGameSnapshots(teamGames, false);
+        const universeGameIds = teamGames.map(g => g.id);
+        const { data: snaps } = universeGameIds.length
+            ? await supabase.from('game_stat_snapshots').select('*').in('game_id', universeGameIds)
+                .gte('captured_at', new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString())
+                .order('captured_at', { ascending: true })
+            : { data: [] };
+        const snapsByGame = {};
+        (snaps || []).forEach(s => { (snapsByGame[s.game_id] = snapsByGame[s.game_id] || []).push(s); });
+
+        const memberIds = (assignRes.data || []).map(a => a.roblox_user_id);
+        const [warnRes, sessionRes, requestRes] = await Promise.all([
+            memberIds.length ? supabase.from('staff_warnings').select('roblox_user_id').in('roblox_user_id', memberIds) : Promise.resolve({ data: [] }),
+            memberIds.length ? supabase.from('hr_sessions').select('roblox_user_id, roles, last_synced_at').in('roblox_user_id', memberIds) : Promise.resolve({ data: [] }),
+            memberIds.length ? supabase.from('payment_requests').select('roblox_user_id, status').in('roblox_user_id', memberIds) : Promise.resolve({ data: [] })
+        ]);
+        const warnCount = {};
+        (warnRes.data || []).forEach(w => { warnCount[w.roblox_user_id] = (warnCount[w.roblox_user_id] || 0) + 1; });
+        const sessionByUser = {};
+        (sessionRes.data || []).forEach(r => {
+            const cur = sessionByUser[r.roblox_user_id];
+            if (!cur || new Date(r.last_synced_at || 0) > new Date(cur.last_synced_at || 0)) sessionByUser[r.roblox_user_id] = r;
+        });
+        const requestCount = {};
+        (requestRes.data || []).forEach(r => {
+            const c = requestCount[r.roblox_user_id] || { total: 0, pending: 0 };
+            c.total += 1;
+            if (r.status === 'pending') c.pending += 1;
+            requestCount[r.roblox_user_id] = c;
+        });
+
+        const tasks = tasksRes.data || [];
+        res.json({
+            ok: true,
+            data: {
+                team,
+                canManage: canManageTeams(session),
+                members: (assignRes.data || []).map(a => ({
+                    robloxUserId: a.roblox_user_id,
+                    robloxUsername: a.roblox_username,
+                    skillset: a.skillset_id ? (skillsetById[a.skillset_id] || null) : null,
+                    assignedAt: a.assigned_at,
+                    roles: sessionByUser[a.roblox_user_id] ? (sessionByUser[a.roblox_user_id].roles || []) : [],
+                    lastActive: sessionByUser[a.roblox_user_id] ? sessionByUser[a.roblox_user_id].last_synced_at : null,
+                    warnCount: warnCount[a.roblox_user_id] || 0,
+                    requestCount: (requestCount[a.roblox_user_id] || {}).total || 0,
+                    pendingCount: (requestCount[a.roblox_user_id] || {}).pending || 0,
+                    openTasks: tasks.filter(t => t.status !== 'done' && String(t.assigned_to_user_id) === String(a.roblox_user_id)).length
+                })),
+                games: teamGames.map(g => ({
+                    id: g.id,
+                    name: g.name,
+                    universeId: g.roblox_universe_id,
+                    placeId: g.roblox_place_id,
+                    iconUrl: g.icon_url,
+                    stats: summariseSnapshots(snapsByGame[g.id])
+                })),
+                availableGames: (gamesRes.data || [])
+                    .filter(g => !teamGames.some(tg => String(tg.id) === String(g.id)))
+                    .map(g => ({ id: g.id, name: g.name, universeId: g.roblox_universe_id })),
+                tasks,
+                taskSummary: summariseTasks(tasks)
+            }
+        });
+        return;
+    }
+
+    if (action === 'set_team_games') {
+        if (!requireTeamManage(res, session)) return;
+        const teamId = payload.teamId;
+        const gameId = payload.gameId;
+        const mode = payload.mode === 'remove' ? 'remove' : 'add';
+        if (!teamId || !gameId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        if (mode === 'add') {
+            const { error } = await supabase.from('team_games').upsert({ team_id: teamId, game_id: gameId }, { onConflict: 'team_id,game_id' });
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        } else {
+            const { error } = await supabase.from('team_games').delete().eq('team_id', teamId).eq('game_id', gameId);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        }
+        await logAudit(session, {
+            category: 'teams', action: mode === 'add' ? 'assign_game' : 'unassign_game',
+            details: { teamId, gameId }
+        });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'set_game_roblox_id') {
+        if (!requireTeamManage(res, session) && !requirePermission(res, session, 'settings.manage_games')) return;
+        const gameId = payload.gameId;
+        const raw = String(payload.placeId || '').trim();
+        if (!gameId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        if (!raw) {
+            await supabase.from('games').update({ roblox_place_id: null, roblox_universe_id: null, icon_url: null }).eq('id', gameId);
+            res.json({ ok: true, cleared: true });
+            return;
+        }
+        const idFromUrl = raw.match(/games\/(\d+)/);
+        const placeId = Number(idFromUrl ? idFromUrl[1] : raw.replace(/\D/g, ''));
+        if (!placeId) { res.status(400).json({ ok: false, error: 'invalid_place_id' }); return; }
+        const universeId = await resolveUniverseId(placeId);
+        if (!universeId) { res.status(400).json({ ok: false, error: 'roblox_game_not_found' }); return; }
+        const stats = await fetchRobloxGameStats([universeId]);
+        const info = stats[universeId] || null;
+        const { error } = await supabase.from('games').update({
+            roblox_place_id: placeId,
+            roblox_universe_id: universeId,
+            icon_url: info ? info.iconUrl : null
+        }).eq('id', gameId);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const { data: gameRow } = await supabase.from('games').select('*').eq('id', gameId).maybeSingle();
+        if (gameRow) await captureGameSnapshots([gameRow], true);
+        await logAudit(session, { category: 'teams', action: 'link_game', details: { gameId, placeId, universeId, name: info ? info.name : null } });
+        res.json({ ok: true, universeId, placeId, robloxName: info ? info.name : null });
+        return;
+    }
+
+    if (action === 'save_team_task') {
+        if (!requireTeamManage(res, session)) return;
+        const teamId = payload.teamId;
+        const title = payload.title ? String(payload.title).trim() : '';
+        if (!teamId || !title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const row = {
+            team_id: teamId,
+            game_id: payload.gameId || null,
+            title,
+            details: payload.details ? String(payload.details).trim() : null,
+            assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
+            assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null,
+            due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null
+        };
+        if (payload.id) {
+            const { error } = await supabase.from('team_tasks').update(row).eq('id', payload.id);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            await logAudit(session, { category: 'teams', action: 'update_task', details: { teamId, title } });
+        } else {
+            row.status = 'open';
+            row.created_by = session.roblox_username;
+            row.created_at = new Date().toISOString();
+            const { error } = await supabase.from('team_tasks').insert(row);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            await logAudit(session, { category: 'teams', action: 'create_task', details: { teamId, title, dueAt: row.due_at } });
+        }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'set_team_task_status') {
+        if (!requireTeamManage(res, session)) return;
+        const id = payload.id;
+        const status = ['open', 'done', 'cancelled'].includes(payload.status) ? payload.status : null;
+        if (!id || !status) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const update = { status };
+        if (status === 'done') {
+            update.completed_at = new Date().toISOString();
+            update.completed_by = session.roblox_username;
+        } else {
+            update.completed_at = null;
+            update.completed_by = null;
+        }
+        const { error } = await supabase.from('team_tasks').update(update).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        await logAudit(session, { category: 'teams', action: 'task_' + status, details: { taskId: id } });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'delete_team_task') {
+        if (!requireTeamManage(res, session)) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('team_tasks').delete().eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        await logAudit(session, { category: 'teams', action: 'delete_task', details: { taskId: id } });
+        res.json({ ok: true });
         return;
     }
 
