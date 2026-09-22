@@ -4197,6 +4197,157 @@
       }
     }
 
+    .org-chart {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .org-tier {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .org-tier-label {
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .org-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+
+    .org-connector {
+      width: 2px;
+      height: 26px;
+      background: var(--line);
+    }
+
+    .org-teams {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 18px;
+      width: 100%;
+      position: relative;
+      padding-top: 18px;
+    }
+
+    .org-teams::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 12%;
+      right: 12%;
+      height: 2px;
+      background: var(--line);
+    }
+
+    .org-team {
+      border: 1px solid var(--line);
+      border-top: 3px solid var(--team-color);
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 14px;
+      position: relative;
+    }
+
+    .org-team::before {
+      content: '';
+      position: absolute;
+      top: -18px;
+      left: 50%;
+      width: 2px;
+      height: 15px;
+      background: var(--line);
+    }
+
+    .org-team-head {
+      margin-bottom: 10px;
+    }
+
+    .org-team-head h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+
+    .org-team-head span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .org-team-body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .org-person {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 7px 10px;
+      background: var(--bg);
+      cursor: pointer;
+      min-width: 170px;
+    }
+
+    .org-person:hover {
+      border-color: var(--accent);
+    }
+
+    .org-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--accent-soft);
+    }
+
+    .org-name {
+      font-size: 13.5px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .org-role {
+      font-size: 11.5px;
+      color: var(--muted);
+    }
+
+    .org-role b {
+      color: var(--accent);
+    }
+
+    @media print {
+
+      .topbar,
+      .dash-toolbar,
+      .tabs,
+      #toastRoot {
+        display: none !important;
+      }
+
+      .dash-shell {
+        padding: 0;
+      }
+
+      .org-team,
+      .org-person {
+        break-inside: avoid;
+      }
+    }
+
     .team-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -5860,7 +6011,16 @@
       try {
         const json = await callHrData('get_user_moderation', { robloxUserId: target.id });
         if (umTarget !== target) return;
-        umData = json.data;
+        const d = (json && json.data) || {};
+        umData = {
+          warnings: Array.isArray(d.warnings) ? d.warnings : [],
+          history: Array.isArray(d.history) ? d.history : [],
+          roles: Array.isArray(d.roles) ? d.roles : [],
+          ban: d.ban || null,
+          lastActive: d.lastActive || null,
+          discordLinked: !!d.discordLinked,
+          canAct: !!d.canAct
+        };
         umLoadError = null;
       } catch (e) {
         if (umTarget !== target) return;
@@ -11848,6 +12008,8 @@
       let tab = ['members', 'games', 'deadlines'].includes(query.get('tab')) ? query.get('tab') : 'members';
       let overview = null;
       let detail = null;
+      let org = null;
+      let view = query.get('view') === 'org' ? 'org' : 'teams';
       let loading = true;
       let loadError = null;
       let busy = false;
@@ -11860,6 +12022,56 @@
         const hash = teamId ? `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}` : '#/teams';
         history.replaceState(null, '', hash);
         load();
+      }
+
+      function orgPersonCard(p, tagline) {
+        return `
+          <div class="org-person" data-user-link data-user-id="${esc(p.robloxUserId)}" data-username="${esc(p.robloxUsername || '')}" role="button" tabindex="0">
+            ${avatarImg(p.robloxUserId, '', 'class="org-avatar"')}
+            <div style="min-width:0;">
+              <div class="org-name">${esc(p.robloxUsername || 'Unknown')}</div>
+              <div class="org-role">${tagline || esc((p.roles || [])[0] || 'No role')}</div>
+            </div>
+          </div>`;
+      }
+
+      function orgHtml() {
+        if (!org) return `<div class="dash-loading">Building the chart...</div>`;
+        const teamsWithPeople = org.teams.filter(t => t.members.length);
+        const emptyTeams = org.teams.filter(t => !t.members.length);
+        return `
+        <p class="sub" style="margin:-6px 0 18px;">Built from teams, skills and roles as they are right now. ${esc(org.totals.people)} people, ${esc(org.totals.onATeam)} of them on a team.</p>
+        <div class="org-chart">
+          ${org.leadership.length ? `
+          <div class="org-tier">
+            <div class="org-tier-label">Leadership</div>
+            <div class="org-row">${org.leadership.map(p => orgPersonCard(p)).join('')}</div>
+          </div>
+          <div class="org-connector" aria-hidden="true"></div>` : ''}
+          ${teamsWithPeople.length ? `
+          <div class="org-teams">
+            ${teamsWithPeople.map(t => `
+            <div class="org-team" style="--team-color:${esc(t.color || 'var(--muted)')};">
+              <div class="org-team-head">
+                <h3>${esc(t.name)}</h3>
+                <span>${esc(t.members.length)} ${t.members.length === 1 ? 'member' : 'members'}${t.games.length ? ` &middot; ${esc(t.games.join(', '))}` : ''}</span>
+              </div>
+              <div class="org-team-body">
+                ${t.members.map(m => orgPersonCard(m, [
+          String(m.robloxUserId) === String(t.lead) ? '<b>Lead</b>' : null,
+          m.skillset ? esc(m.skillset.name) : null,
+          esc((m.roles || [])[0] || '')
+        ].filter(Boolean).join(' &middot; '))).join('')}
+              </div>
+            </div>`).join('')}
+          </div>` : `<div class="dash-empty"><h3>Nobody is on a team yet</h3><p>Add people to teams from the Staff page and they will appear here.</p></div>`}
+          ${emptyTeams.length ? `<p class="hint" style="margin-top:14px;">Teams with nobody on them: ${emptyTeams.map(t => esc(t.name)).join(', ')}.</p>` : ''}
+          ${org.unassigned.length ? `
+          <div class="org-tier" style="margin-top:26px;">
+            <div class="org-tier-label">Not on a team (${esc(org.unassigned.length)})</div>
+            <div class="org-row">${org.unassigned.map(p => orgPersonCard(p)).join('')}</div>
+          </div>` : ''}
+        </div>`;
       }
 
       function overviewHtml() {
@@ -12037,7 +12249,7 @@
         let body;
         if (loading) body = `<div class="dash-loading">Loading teams...</div>`;
         else if (loadError) body = `<div class="dash-empty"><h3>Could not load teams</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryTeamsBtn">Try again</button></div>`;
-        else if (!detail) body = overviewHtml();
+        else if (!detail) body = view === 'org' ? orgHtml() : overviewHtml();
         else body = tab === 'games' ? gamesHtml() : tab === 'deadlines' ? deadlinesHtml() : membersHtml();
 
         const head = detail
@@ -12058,9 +12270,15 @@
         ${head}
         <div class="dash-toolbar">
           <button type="button" class="btn btn-ghost btn-sm" id="reloadTeamsBtn">Refresh</button>
+          ${!detail && view === 'org' ? `<button type="button" class="btn btn-ghost btn-sm" id="printOrgBtn">Print or save as PDF</button>` : ''}
           ${detail && detail.canManage ? `<a class="btn btn-ghost btn-sm" href="#/manage?tab=teams">Team settings</a>` : ''}
         </div>
       </div>
+      ${!detail ? `
+      <div class="tabs" style="margin-bottom:18px;" role="tablist">
+        <button type="button" role="tab" aria-selected="${view === 'teams'}" class="tab-btn ${view === 'teams' ? 'active' : ''}" data-teams-view="teams">Teams</button>
+        <button type="button" role="tab" aria-selected="${view === 'org'}" class="tab-btn ${view === 'org' ? 'active' : ''}" data-teams-view="org">Org chart</button>
+      </div>` : ''}
       ${detail ? `
       <div class="tabs" style="margin-bottom:18px;" role="tablist">
         ${[['members', 'Members'], ['games', 'Games'], ['deadlines', 'Deadlines']].map(([id, label]) =>
@@ -12076,6 +12294,16 @@
         const back = document.getElementById('backToTeams');
         if (back) back.addEventListener('click', (e) => { e.preventDefault(); go(null); });
         document.querySelectorAll('[data-open-team]').forEach(el => el.addEventListener('click', () => go(el.dataset.openTeam)));
+        document.querySelectorAll('[data-teams-view]').forEach(el => el.addEventListener('click', () => {
+          view = el.dataset.teamsView;
+          history.replaceState(null, '', view === 'org' ? '#/teams?view=org' : '#/teams');
+          if (view === 'org' && !org) load(); else paint();
+        }));
+        const printOrg = document.getElementById('printOrgBtn');
+        if (printOrg) printOrg.addEventListener('click', () => window.print());
+        document.querySelectorAll('.org-person').forEach(el => el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openUserMenu(el.dataset.userId, el.dataset.username); }
+        }));
         document.querySelectorAll('[data-team-tab]').forEach(el => el.addEventListener('click', () => { tab = el.dataset.teamTab; history.replaceState(null, '', `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}`); paint(); }));
 
         const addGameBtn = document.getElementById('addGameBtn');
@@ -12168,6 +12396,10 @@
           if (teamId) {
             const json = await callHrData('team_detail', { teamId, refreshStats: !!refreshStats });
             detail = json.data;
+          } else if (view === 'org') {
+            const json = await callHrData('org_chart');
+            org = json.data;
+            detail = null;
           } else {
             const json = await callHrData('teams_overview');
             overview = json.data;

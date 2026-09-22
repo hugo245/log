@@ -4039,6 +4039,110 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'org_chart') {
+        if (!requireTeamView(res, session)) return;
+        const [teamsRes, assignRes, skillsetsRes, rolesRes, sessionsRes, roleAssignRes, teamGamesRes, gamesRes] = await Promise.all([
+            supabase.from('teams').select('*').order('name', { ascending: true }),
+            supabase.from('user_assignments').select('*'),
+            supabase.from('skillsets').select('*'),
+            supabase.from('roles').select('id, name, hierarchy'),
+            supabase.from('hr_sessions').select('roblox_user_id, roblox_username, roles, last_synced_at'),
+            supabase.from('user_role_assignments').select('roblox_user_id, roblox_username, role_id'),
+            supabase.from('team_games').select('team_id, game_id'),
+            supabase.from('games').select('id, name')
+        ]);
+        const roles = rolesRes.data || [];
+        const roleByName = {}; roles.forEach(r => { roleByName[r.name] = r; });
+        const roleById = {}; roles.forEach(r => { roleById[r.id] = r; });
+        const skillsetById = {}; (skillsetsRes.data || []).forEach(k => { skillsetById[k.id] = k; });
+        const gameById = {}; (gamesRes.data || []).forEach(g => { gameById[g.id] = g; });
+
+        const people = {};
+        const touch = (userId, username) => {
+            const key = String(userId);
+            if (!people[key]) people[key] = { robloxUserId: Number(userId), robloxUsername: username || null, roles: [], hierarchy: 0, teams: [], lastActive: null };
+            if (username && !people[key].robloxUsername) people[key].robloxUsername = username;
+            return people[key];
+        };
+        const addRole = (person, roleName, hierarchy) => {
+            if (!roleName || person.roles.includes(roleName)) return;
+            person.roles.push(roleName);
+            person.hierarchy = Math.max(person.hierarchy, Number(hierarchy) || 0);
+        };
+
+        (sessionsRes.data || []).forEach(s => {
+            const p = touch(s.roblox_user_id, s.roblox_username);
+            (s.roles || []).forEach(name => addRole(p, name, roleByName[name] ? roleByName[name].hierarchy : 0));
+            if (!p.lastActive || new Date(s.last_synced_at || 0) > new Date(p.lastActive)) p.lastActive = s.last_synced_at;
+        });
+        (roleAssignRes.data || []).forEach(a => {
+            const role = roleById[a.role_id];
+            if (!role) return;
+            addRole(touch(a.roblox_user_id, a.roblox_username), role.name, role.hierarchy);
+        });
+        (assignRes.data || []).forEach(a => {
+            const p = touch(a.roblox_user_id, a.roblox_username);
+            if (a.team_id != null) p.teams.push({ teamId: a.team_id, skillset: a.skillset_id != null ? (skillsetById[a.skillset_id] || null) : null });
+        });
+
+        const everyone = Object.values(people);
+        const topLevel = everyone.reduce((max, p) => Math.max(max, p.hierarchy), 0);
+        const leadership = everyone.filter(p => p.hierarchy > 0 && p.hierarchy === topLevel);
+        const leadershipIds = new Set(leadership.map(p => String(p.robloxUserId)));
+
+        const teams = (teamsRes.data || []).map(team => {
+            const members = everyone
+                .filter(p => p.teams.some(t => String(t.teamId) === String(team.id)))
+                .map(p => ({
+                    robloxUserId: p.robloxUserId,
+                    robloxUsername: p.robloxUsername,
+                    roles: p.roles,
+                    hierarchy: p.hierarchy,
+                    lastActive: p.lastActive,
+                    skillset: (p.teams.find(t => String(t.teamId) === String(team.id)) || {}).skillset || null
+                }))
+                .sort((a, b) => b.hierarchy - a.hierarchy || (a.robloxUsername || '').localeCompare(b.robloxUsername || ''));
+            const lead = members.find(m => m.hierarchy > 0 && !leadershipIds.has(String(m.robloxUserId))) || null;
+            return {
+                id: team.id,
+                name: team.name,
+                color: team.color,
+                lead: lead ? lead.robloxUserId : null,
+                members,
+                games: (teamGamesRes.data || [])
+                    .filter(tg => String(tg.team_id) === String(team.id))
+                    .map(tg => gameById[tg.game_id])
+                    .filter(Boolean)
+                    .map(g => g.name)
+            };
+        });
+
+        const onATeam = new Set();
+        teams.forEach(t => t.members.forEach(m => onATeam.add(String(m.robloxUserId))));
+        const unassigned = everyone
+            .filter(p => !onATeam.has(String(p.robloxUserId)) && !leadershipIds.has(String(p.robloxUserId)))
+            .map(p => ({ robloxUserId: p.robloxUserId, robloxUsername: p.robloxUsername, roles: p.roles, hierarchy: p.hierarchy, lastActive: p.lastActive }))
+            .sort((a, b) => b.hierarchy - a.hierarchy || (a.robloxUsername || '').localeCompare(b.robloxUsername || ''));
+
+        res.json({
+            ok: true,
+            data: {
+                leadership: leadership
+                    .map(p => ({ robloxUserId: p.robloxUserId, robloxUsername: p.robloxUsername, roles: p.roles, hierarchy: p.hierarchy, lastActive: p.lastActive }))
+                    .sort((a, b) => (a.robloxUsername || '').localeCompare(b.robloxUsername || '')),
+                topLevel,
+                teams,
+                unassigned,
+                totals: {
+                    people: everyone.length,
+                    teams: teams.length,
+                    onATeam: onATeam.size
+                }
+            }
+        });
+        return;
+    }
+
     if (action === 'teams_overview') {
         if (!requireTeamView(res, session)) return;
         const [teamsRes, assignRes, teamGamesRes, gamesRes, tasksRes] = await Promise.all([
