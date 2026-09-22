@@ -4018,6 +4018,7 @@ app.post('/hr-data', async (req, res) => {
             teamName: l.team_id != null ? (teamNameById[l.team_id] || null) : null,
             skillsetName: l.skillset_id != null ? (skillsetNameById[l.skillset_id] || null) : null,
             roleName: l.role_id != null ? (roleNameById[l.role_id] || null) : null,
+            targetUsername: l.target_roblox_username || null,
             url: `${APP_ORIGIN}/#/join/${l.token}`
         }));
         res.json({ ok: true, data: out });
@@ -4029,7 +4030,21 @@ app.post('/hr-data', async (req, res) => {
         const teamId = payload.teamId ? Number(payload.teamId) : null;
         const skillsetId = payload.skillsetId ? Number(payload.skillsetId) : null;
         const roleId = payload.roleId ? Number(payload.roleId) : null;
-        const label = payload.label ? String(payload.label).trim() : null;
+        let label = payload.label ? String(payload.label).trim() : null;
+        const targetUsernameInput = payload.targetUsername ? String(payload.targetUsername).trim() : null;
+
+        let targetRobloxUserId = null;
+        let targetRobloxUsername = null;
+        if (targetUsernameInput) {
+            targetRobloxUserId = await resolveRobloxUserId(targetUsernameInput);
+            if (!targetRobloxUserId) {
+                res.status(404).json({ ok: false, error: `Could not find a Roblox account named "${targetUsernameInput}".` });
+                return;
+            }
+            targetRobloxUsername = targetUsernameInput;
+            if (!label) label = targetUsernameInput;
+        }
+
         const token = generateLinkToken();
         const { error } = await supabase.from('onboarding_links').insert({
             token,
@@ -4037,11 +4052,13 @@ app.post('/hr-data', async (req, res) => {
             skillset_id: skillsetId,
             role_id: roleId,
             label,
+            target_roblox_user_id: targetRobloxUserId,
+            target_roblox_username: targetRobloxUsername,
             created_by: session.roblox_username,
             uses: 0
         });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        res.json({ ok: true, token, url: `${APP_ORIGIN}/#/join/${token}` });
+        res.json({ ok: true, token, url: `${APP_ORIGIN}/#/join/${token}`, targetUsername: targetRobloxUsername });
         return;
     }
 
@@ -4065,7 +4082,7 @@ app.post('/hr-data', async (req, res) => {
         if (link.team_id) { const { data } = await supabase.from('teams').select('*').eq('id', link.team_id).maybeSingle(); team = data || null; }
         if (link.skillset_id) { const { data } = await supabase.from('skillsets').select('*').eq('id', link.skillset_id).maybeSingle(); skillset = data || null; }
         if (link.role_id) { const { data } = await supabase.from('roles').select('id,name').eq('id', link.role_id).maybeSingle(); role = data || null; }
-        res.json({ ok: true, data: { team, skillset, role, label: link.label } });
+        res.json({ ok: true, data: { team, skillset, role, label: link.label, targetUsername: link.target_roblox_username || null } });
         return;
     }
 
@@ -4076,6 +4093,11 @@ app.post('/hr-data', async (req, res) => {
             const { data: link, error: linkErr } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
             if (linkErr) { res.status(500).json({ ok: false, error: linkErr.message }); return; }
             if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
+
+            if (link.target_roblox_user_id != null && Number(link.target_roblox_user_id) !== Number(session.roblox_user_id)) {
+                res.status(403).json({ ok: false, error: `This invite is for ${link.target_roblox_username}. Sign in with that Roblox account to accept it.` });
+                return;
+            }
 
             const discordUserId = await getLinkedDiscordUserId(session.roblox_user_id);
             if (!discordUserId) { res.status(400).json({ ok: false, error: 'discord_not_linked' }); return; }

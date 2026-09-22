@@ -5202,8 +5202,8 @@
       const json = await callHrData('list_onboarding_links');
       return json.data || [];
     }
-    async function createOnboardingLink(teamId, skillsetId, roleId, label) {
-      const json = await callHrData('create_onboarding_link', { teamId, skillsetId, roleId, label });
+    async function createOnboardingLink(teamId, skillsetId, roleId, label, targetUsername) {
+      const json = await callHrData('create_onboarding_link', { teamId, skillsetId, roleId, label, targetUsername });
       return json;
     }
     async function assignUserTeamSkillset(robloxUserId, robloxUsername, teamId, skillsetId) {
@@ -10112,7 +10112,7 @@
             <div class="role-row-top">
               <div>
                 <strong>${esc(l.label || 'Untitled link')}</strong>
-                <div class="role-meta">${l.teamName ? esc(l.teamName) : 'No team'}${l.skillsetName ? ' &middot; ' + esc(l.skillsetName) : ''}${l.roleName ? ' &middot; role: ' + esc(l.roleName) : ''} &middot; used ${esc(l.uses || 0)} time${(l.uses || 0) === 1 ? '' : 's'}</div>
+                <div class="role-meta">${l.targetUsername ? '<strong style="color:var(--ink);">For ' + esc(l.targetUsername) + '</strong> &middot; ' : ''}${l.teamName ? esc(l.teamName) : 'No team'}${l.skillsetName ? ' &middot; ' + esc(l.skillsetName) : ''}${l.roleName ? ' &middot; role: ' + esc(l.roleName) : ''} &middot; used ${esc(l.uses || 0)} time${(l.uses || 0) === 1 ? '' : 's'}</div>
                 <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:4px;word-break:break-all;">${esc(l.url)}</div>
               </div>
               <div style="display:flex;gap:6px;">
@@ -11452,6 +11452,7 @@
       let inviteTeams = [];
       let inviteSkillsets = [];
       let inviteRoles = [];
+      let inviteTargetUsername = '';
       let inviteTeamId = '';
       let inviteSkillsetId = '';
       let inviteRoleId = '';
@@ -11459,6 +11460,7 @@
       let inviteBusy = false;
       let inviteError = null;
       let inviteResultUrl = null;
+      let inviteResultUsername = null;
 
       const CHIPS = [
         { id: 'all', label: 'Everyone', test: () => true },
@@ -11690,6 +11692,7 @@
         inviteModalOpen = true;
         inviteError = null;
         inviteResultUrl = null;
+        inviteResultUsername = null;
         paintInviteModal();
         if (!inviteTeams.length && !inviteOptionsLoading) {
           inviteOptionsLoading = true;
@@ -11712,6 +11715,8 @@
         inviteModalOpen = false;
         inviteError = null;
         inviteResultUrl = null;
+        inviteResultUsername = null;
+        inviteTargetUsername = '';
         inviteTeamId = '';
         inviteSkillsetId = '';
         inviteRoleId = '';
@@ -11726,11 +11731,15 @@
         <button type="button" class="modal-close" id="inviteModalClose">&times;</button>
         <div class="modal-body" style="padding-top:8px;">
           <h3 style="margin-top:0;">Invite someone</h3>
-          <p style="color:var(--ink-soft);font-size:13px;">Pick a team, skill and optional role, then send them the link. They sign in through it and the setup page walks them through the rest.</p>
+          <p style="color:var(--ink-soft);font-size:13px;">Enter their Roblox username, then pick a team, skill and optional role. Only that Roblox account can use the link, and it takes them straight through Discord linking and their team setup.</p>
           ${inviteOptionsLoading ? `<div style="text-align:center;color:var(--muted);padding:16px 0;">Loading teams and roles...</div>` : `
           ${inviteOptionsError ? `<div class="error-box"><span>${esc(inviteOptionsError)}</span></div>` : ''}
           ${inviteError ? `<div class="error-box"><span>${esc(inviteError)}</span></div>` : ''}
-          ${inviteResultUrl ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Invite link ready</strong><span class="mono" style="word-break:break-all;">${esc(inviteResultUrl)}</span></div></div>` : ''}
+          ${inviteResultUrl ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Invite ready for ${esc(inviteResultUsername)}</strong><div style="color:var(--ink-soft);font-size:13px;margin-bottom:6px;">Only their Roblox account can use this link.</div><span class="mono" style="word-break:break-all;">${esc(inviteResultUrl)}</span></div></div>` : ''}
+          <div class="field" style="text-align:left;">
+            <label>Roblox username</label>
+            <input type="text" id="inviteUsernameInput" placeholder="e.g. Builderman" value="${esc(inviteTargetUsername)}" ${inviteBusy ? 'disabled' : ''}>
+          </div>
           <div class="field" style="text-align:left;">
             <label>Team</label>
             <select id="inviteTeamSelect" ${inviteBusy ? 'disabled' : ''}>
@@ -11780,6 +11789,8 @@
         if (close) close.addEventListener('click', closeInviteModal);
         const cancel = document.getElementById('inviteCancelBtn');
         if (cancel) cancel.addEventListener('click', closeInviteModal);
+        const usernameInput = document.getElementById('inviteUsernameInput');
+        if (usernameInput) usernameInput.addEventListener('input', () => { inviteTargetUsername = usernameInput.value; });
         const teamSel = document.getElementById('inviteTeamSelect');
         if (teamSel) teamSel.addEventListener('change', () => { inviteTeamId = teamSel.value; });
         const skillSel = document.getElementById('inviteSkillsetSelect');
@@ -11790,11 +11801,14 @@
         if (labelInput) labelInput.addEventListener('input', () => { inviteLabel = labelInput.value; });
         const createBtn = document.getElementById('inviteCreateBtn');
         if (createBtn) createBtn.addEventListener('click', async () => {
+          const username = inviteTargetUsername.trim();
+          if (!username) { inviteError = 'Enter the Roblox username you\'re inviting.'; paintInviteModal(); return; }
           inviteBusy = true; inviteError = null; paintInviteModal();
           try {
-            const result = await createOnboardingLink(inviteTeamId || null, inviteSkillsetId || null, inviteRoleId || null, inviteLabel.trim() || null);
+            const result = await createOnboardingLink(inviteTeamId || null, inviteSkillsetId || null, inviteRoleId || null, inviteLabel.trim() || null, username);
             inviteResultUrl = result && result.url ? result.url : null;
-            inviteTeamId = ''; inviteSkillsetId = ''; inviteRoleId = ''; inviteLabel = '';
+            inviteResultUsername = (result && result.targetUsername) || username;
+            inviteTargetUsername = ''; inviteTeamId = ''; inviteSkillsetId = ''; inviteRoleId = ''; inviteLabel = '';
           } catch (e) {
             inviteError = (e && e.message) || 'Could not create that invite.';
           }
