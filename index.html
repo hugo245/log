@@ -4667,9 +4667,6 @@
           hrMaxHierarchy = json.maxHierarchy || 0;
           teamRemoved = json.teamRemoved === true;
           needsDiscordLink = json.discordLinked === false;
-          // A locked-out account gets the team-removed page regardless of
-          // onboarding state - get_my_onboarding is blocked server-side for
-          // them anyway (they'd have gotten null back from the catch above).
           needsOnboarding = teamRemoved ? false : (onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false);
         } else {
           isHrAuthed = false;
@@ -4719,9 +4716,6 @@
         if (res.status === 401) { clearToken(); isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; }
         const code = (json && json.error) || '';
         if (code === 'team_removed' && !teamRemoved) {
-          // Their only team just got deleted while they were already using the
-          // tool - lock them out right away instead of waiting for their next
-          // full page load to notice.
           teamRemoved = true;
           if (currentPath() !== '#/team-removed') window.location.hash = '#/team-removed';
         }
@@ -4989,11 +4983,11 @@
     }
 
     async function addRoleAssignment(roleId, robloxUserId) {
-      await callHrData('add_role_assignment', { roleId, robloxUserId });
+      return await callHrData('add_role_assignment', { roleId, robloxUserId });
     }
 
     async function deleteRoleAssignment(id) {
-      await callHrData('delete_role_assignment', { id });
+      return await callHrData('delete_role_assignment', { id });
     }
 
     async function getMySummary() {
@@ -5544,6 +5538,15 @@
       warn: ['Inflated or duplicate payment request', 'Missed deadline without notice', 'Disrespectful to other staff', 'Shared internal information'],
       ban: ['Fraudulent payment requests', 'Harassment of staff', 'Leaked internal information', 'Alt account used to bypass a ban']
     };
+    const DISCORD_SYNC_REASONS = {
+      discord_blocked: "Discord is blocking our server right now, so their Discord role didn't change",
+      no_discord_linked: "they haven't linked Discord, so their Discord role didn't change",
+      not_in_server: "they aren't in the Discord server, so their Discord role didn't change",
+      already_gone: 'they already did not have that Discord role',
+      bot_role_too_low: "the bot's role sits below that one in Discord, so it couldn't change it",
+      discord_error: "Discord wouldn't apply the change"
+    };
+
     const BAN_DURATIONS = [['24', '1 day'], ['72', '3 days'], ['168', '7 days'], ['720', '30 days'], ['0', 'Permanently']];
 
     function panelTabs() {
@@ -6129,11 +6132,16 @@
         const existing = umRolesState.assignments.find(a => String(a.role_id) === String(roleId));
         const role = (catalog.roles || []).find(r => String(r.id) === String(roleId));
         panelAction('role:' + roleId, async () => {
-          if (cb.checked && !existing) await addRoleAssignment(roleId, umTarget.id);
-          else if (!cb.checked && existing) await deleteRoleAssignment(existing.id);
+          let res = null;
+          if (cb.checked && !existing) res = await addRoleAssignment(roleId, umTarget.id);
+          else if (!cb.checked && existing) res = await deleteRoleAssignment(existing.id);
           umRolesState.assignments = await listRoleAssignments(umTarget.id);
           refreshUserMenuData();
-        }, `${role ? role.name : 'Role'} ${cb.checked ? 'given' : 'removed'}. It applies next time they load the site.`);
+          const name = role ? role.name : 'Role';
+          if (res && res.discordSynced) toast(`${name} ${cb.checked ? 'given' : 'removed'} here and in Discord.`);
+          else if (res && res.discordReason && res.discordReason !== 'not_configured') toast(`${name} ${cb.checked ? 'given' : 'removed'} here, but ${DISCORD_SYNC_REASONS[res.discordReason] || "their Discord role didn't change"}.`, 'err');
+          else toast(`${name} ${cb.checked ? 'given' : 'removed'}. It applies next time they load the site.`);
+        });
       }));
 
       q('input[name="ppMethod"]').forEach(r => r.addEventListener('change', () => {
@@ -6428,18 +6436,10 @@
         return;
       }
 
-      // Their only team was deleted (or they were never transferred to a new
-      // one after it happened) - lock every page behind the warning screen
-      // until an admin puts them on a real team or removes them entirely.
-      // This takes priority over the onboarding redirect below: there's no
-      // point walking a locked-out account through onboarding steps.
       if (isHrAuthed && teamRemoved && path !== '#/team-removed') {
         window.location.hash = '#/team-removed';
         return;
       }
-      // Symmetric case: they were fixed (reassigned) and are still sitting on
-      // the warning page's URL (bookmarked, or just hit refresh there) -
-      // bounce them back into the app instead of showing a stale lock screen.
       if (isHrAuthed && !teamRemoved && path === '#/team-removed') {
         window.location.hash = '#/';
         return;
@@ -9952,7 +9952,7 @@
               <div class="role-row-top">
                 <div>
                   <strong>${esc(r.name)}</strong>
-                  <div class="role-meta">${r.link_only ? `Link only${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ''}` : r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
+                  <div class="role-meta">${r.discord_role_id ? `Discord role ${esc(r.discord_role_id)} &middot; ` : ''}${r.link_only ? `Link only${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ''}` : r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
                 <div style="display:flex;gap:6px;">
                   <button type="button" class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
@@ -9977,6 +9977,7 @@
                   </label>
                 </div>
                 <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" class="editRoleHierarchy" data-role-id="${esc(r.id)}" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}" value="${esc(roleHierarchy)}"></div>
+                <div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" class="editRoleDiscordRoleId" data-role-id="${esc(r.id)}" placeholder="e.g. 123456789012345678" value="${r.discord_role_id ? esc(r.discord_role_id) : ''}"></div>
                 <div class="field">
                   <label>Permissions</label>
                   <div class="perm-check-grid">
@@ -10004,6 +10005,7 @@
               </label>
             </div>
             <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" id="newRoleHierarchy" placeholder="e.g. 10" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}"></div>
+            <div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" id="newRoleDiscordRoleId" placeholder="e.g. 123456789012345678"></div>
             <div class="field">
               <label>Permissions</label>
               <div class="perm-check-grid">
@@ -10672,12 +10674,13 @@
             const minRank = document.getElementById('newRoleMinRank').value;
             const hierarchy = document.getElementById('newRoleHierarchy').value;
             const linkOnly = document.getElementById('newRoleLinkOnly').checked;
+            const discordRoleId = (document.getElementById('newRoleDiscordRoleId') || { value: '' }).value.trim();
             const permissions = Array.from(document.querySelectorAll('.newRolePerm:checked')).map(el => el.value);
             if (!name) { addRoleError = 'Enter a role name.'; paint(); return; }
             if (hierarchy !== '' && Number(hierarchy) >= hrMaxHierarchy) { addRoleError = 'Hierarchy level must be lower than your own.'; paint(); return; }
             addingRole = true; addRoleError = null; paint();
             try {
-              await addRole({ name, robloxGroupId: groupId, minRank, hierarchy, linkOnly, permissions });
+              await addRole({ name, robloxGroupId: groupId, minRank, hierarchy, linkOnly, permissions, discordRoleId });
               addingRole = false;
               await loadRoles();
             } catch (err) {
@@ -10712,12 +10715,13 @@
             const minRank = document.querySelector(`.editRoleMinRank[data-role-id="${id}"]`).value;
             const hierarchy = document.querySelector(`.editRoleHierarchy[data-role-id="${id}"]`).value;
             const linkOnly = document.querySelector(`.editRoleLinkOnly[data-role-id="${id}"]`).checked;
+            const discordRoleId = document.querySelector(`.editRoleDiscordRoleId[data-role-id="${id}"]`).value.trim();
             const permissions = Array.from(document.querySelectorAll(`.editRolePerm[data-role-id="${id}"]:checked`)).map(x => x.value);
             if (!name) { editRoleError = 'Enter a role name.'; paint(); return; }
             if (hierarchy !== '' && Number(hierarchy) >= hrMaxHierarchy) { editRoleError = 'Hierarchy level must be lower than your own.'; paint(); return; }
             savingRoleEdit = true; editRoleError = null; paint();
             try {
-              await updateRole(id, { name, robloxGroupId: groupId, minRank, hierarchy, linkOnly, permissions });
+              await updateRole(id, { name, robloxGroupId: groupId, minRank, hierarchy, linkOnly, permissions, discordRoleId });
               savingRoleEdit = false;
               editingRoleId = null;
               await loadRoles();

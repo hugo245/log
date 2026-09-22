@@ -1009,6 +1009,41 @@ async function getBaseAccessDiscordServers() {
     return data || [];
 }
 
+async function syncDiscordRole(robloxUserId, discordRoleId, mode) {
+    if (!discordRoleId || !DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) return { synced: false, reason: 'not_configured' };
+    if (discordPaused()) return { synced: false, reason: 'discord_blocked' };
+    let discordUserId = null;
+    try { discordUserId = await getLinkedDiscordUserId(robloxUserId); } catch (e) { }
+    if (!discordUserId) return { synced: false, reason: 'no_discord_linked' };
+    const path = `/guilds/${DISCORD_GUILD_ID}/members/${discordUserId}/roles/${discordRoleId}`;
+    try {
+        await discordApi(path, { method: mode === 'add' ? 'PUT' : 'DELETE' });
+        return { synced: true };
+    } catch (e) {
+        const msg = String(e.message || '');
+        if (/discord_api_404/.test(msg)) return { synced: false, reason: mode === 'add' ? 'not_in_server' : 'already_gone' };
+        if (/discord_api_403/.test(msg)) return { synced: false, reason: 'bot_role_too_low' };
+        if (/discord_api_blocked/.test(msg)) return { synced: false, reason: 'discord_blocked' };
+        console.error(`syncDiscordRole: ${mode} role ${discordRoleId} for roblox user ${robloxUserId} failed: ${msg.slice(0, 300)}`);
+        return { synced: false, reason: 'discord_error' };
+    }
+}
+
+const DISCORD_SYNC_REASONS = {
+    not_configured: 'no Discord role is attached to it',
+    discord_blocked: "Discord is blocking this server right now, so their Discord role didn't change",
+    no_discord_linked: "they haven't linked Discord, so their Discord role didn't change",
+    not_in_server: "they aren't in the Discord server, so their Discord role didn't change",
+    already_gone: 'their Discord role was already removed',
+    bot_role_too_low: "the bot's own role sits below that one in Discord, so it couldn't change it",
+    discord_error: "Discord wouldn't apply the change"
+};
+
+async function getRoleForSync(roleId) {
+    const { data } = await supabase.from('roles').select('id, name, hierarchy, discord_role_id').eq('id', roleId).maybeSingle();
+    return data || null;
+}
+
 async function getLinkedDiscordUserId(robloxUserId) {
     const { data, error } = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', robloxUserId).maybeSingle();
     if (error) return null;
@@ -1802,15 +1837,6 @@ async function getUserTeamAssignments(robloxUserId) {
     }));
 }
 
-// A user is "team-locked" when every team they were ever assigned to has since
-// been deleted (their only team(s) got removed) - they keep their assignment
-// history rows (and all their payment_requests, which never reference team_id
-// and are never touched here). The database's own foreign key on
-// user_assignments.team_id (ON DELETE SET NULL) nulls out team_id on that row
-// when its team is deleted, rather than deleting the row - so "locked" means
-// every remaining row's team_id is null. Users who were never assigned to a
-// team at all (zero rows) are NOT locked - that's the normal "not part of a
-// team yet" onboarding case, not the same thing.
 async function isTeamAssignmentLocked(robloxUserId) {
     const { data: rows, error } = await supabase
         .from('user_assignments')
@@ -2070,11 +2096,6 @@ async function getSession(req) {
         }
     } catch (e) { }
 
-    // Computed fresh on every request (not just on the periodic role/permission
-    // resync below) so that losing/regaining access to the tool because a team
-    // was deleted or the user got transferred to a new team takes effect
-    // immediately, on the very next request - never delete the session for
-    // this, it must self-heal the moment the user is placed on a valid team.
     try {
         data.team_removed = await isTeamAssignmentLocked(data.roblox_user_id);
     } catch (e) {
@@ -2686,10 +2707,6 @@ const listRequestsSweepState = { paymentsAt: 0, usernamesAt: 0 };
 app.post('/hr-data', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false, error: 'not_authenticated' }); return; }
-    // Every team this user was ever assigned to has been deleted (it was their
-    // only one) - the session stays alive (so they don't need to sign in again
-    // once fixed) but every action is blocked until an admin transfers them to
-    // a real team or removes them from PlayVerse entirely.
     if (session.team_removed) { res.status(403).json({ ok: false, error: 'team_removed', teamRemoved: true }); return; }
 
     const action = req.body && req.body.action;
@@ -3489,7 +3506,8 @@ app.post('/hr-data', async (req, res) => {
             min_rank: minRank,
             link_only: linkOnly,
             hierarchy,
-            permissions
+            permissions,
+            discord_role_id: payload.discordRoleId ? String(payload.discordRoleId).trim() : null
         });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
@@ -3512,6 +3530,8 @@ app.post('/hr-data', async (req, res) => {
         const linkOnly = !!payload.linkOnly;
         if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
+        const { data: roleBeforeUpdate } = await supabase.from('roles').select('discord_role_id').eq('id', id).maybeSingle();
+        const newDiscordRoleId = payload.discordRoleId === undefined ? undefined : (payload.discordRoleId ? String(payload.discordRoleId).trim() : null);
         const update = {
             roblox_group_id: robloxGroupId,
             min_rank: minRank,
@@ -3520,9 +3540,22 @@ app.post('/hr-data', async (req, res) => {
             permissions
         };
         if (name) update.name = name;
+        if (newDiscordRoleId !== undefined) update.discord_role_id = newDiscordRoleId;
         const { error } = await supabase.from('roles').update(update).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        res.json({ ok: true });
+        const oldDiscordRoleId = roleBeforeUpdate ? roleBeforeUpdate.discord_role_id : null;
+        let reapplied = 0;
+        if (newDiscordRoleId !== undefined && String(oldDiscordRoleId || '') !== String(newDiscordRoleId || '')) {
+            const { data: holders } = await supabase.from('user_role_assignments').select('roblox_user_id').eq('role_id', id).limit(100);
+            for (const holder of (holders || [])) {
+                if (oldDiscordRoleId) await syncDiscordRole(holder.roblox_user_id, oldDiscordRoleId, 'remove');
+                if (newDiscordRoleId) {
+                    const r = await syncDiscordRole(holder.roblox_user_id, newDiscordRoleId, 'add');
+                    if (r.synced) reapplied += 1;
+                }
+            }
+        }
+        res.json({ ok: true, discordUpdatedFor: reapplied });
         return;
     }
 
@@ -3534,6 +3567,11 @@ app.post('/hr-data', async (req, res) => {
         if (existingErr) { res.status(500).json({ ok: false, error: existingErr.message }); return; }
         if (!existingRole) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
         if (!requireHigherHierarchy(res, session, existingRole.hierarchy)) return;
+        const roleForSync = await getRoleForSync(id);
+        if (roleForSync && roleForSync.discord_role_id) {
+            const { data: holders } = await supabase.from('user_role_assignments').select('roblox_user_id').eq('role_id', id).limit(100);
+            for (const holder of (holders || [])) await syncDiscordRole(holder.roblox_user_id, roleForSync.discord_role_id, 'remove');
+        }
         const { error } = await supabase.from('roles').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
@@ -3584,7 +3622,16 @@ app.post('/hr-data', async (req, res) => {
             roblox_username: robloxUsername
         });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        res.json({ ok: true });
+        const roleForSync = await getRoleForSync(roleId);
+        const discordResult = roleForSync && roleForSync.discord_role_id
+            ? await syncDiscordRole(robloxUserId, roleForSync.discord_role_id, 'add')
+            : { synced: false, reason: 'not_configured' };
+        await logAudit(session, {
+            category: 'roles', action: 'grant_role',
+            targetUserId: robloxUserId, targetUsername: robloxUsername,
+            details: { role: roleForSync ? roleForSync.name : roleId, discordSynced: discordResult.synced, discordReason: discordResult.reason || null }
+        });
+        res.json({ ok: true, discordSynced: discordResult.synced, discordReason: discordResult.reason || null });
         return;
     }
 
@@ -3602,9 +3649,20 @@ app.post('/hr-data', async (req, res) => {
         const { data: role, error: roleErr } = await supabase.from('roles').select('hierarchy').eq('id', assignment.role_id).maybeSingle();
         if (roleErr) { res.status(500).json({ ok: false, error: roleErr.message }); return; }
         if (!requireHigherHierarchy(res, session, role && role.hierarchy)) return;
+        const { data: fullAssignment } = await supabase.from('user_role_assignments').select('roblox_user_id, roblox_username').eq('id', id).maybeSingle();
         const { error } = await supabase.from('user_role_assignments').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        res.json({ ok: true });
+        const roleForSync = await getRoleForSync(assignment.role_id);
+        let discordResult = { synced: false, reason: 'not_configured' };
+        if (fullAssignment && roleForSync && roleForSync.discord_role_id) {
+            discordResult = await syncDiscordRole(fullAssignment.roblox_user_id, roleForSync.discord_role_id, 'remove');
+            await logAudit(session, {
+                category: 'roles', action: 'remove_role',
+                targetUserId: fullAssignment.roblox_user_id, targetUsername: fullAssignment.roblox_username,
+                details: { role: roleForSync.name, discordSynced: discordResult.synced, discordReason: discordResult.reason || null }
+            });
+        }
+        res.json({ ok: true, discordSynced: discordResult.synced, discordReason: discordResult.reason || null });
         return;
     }
 
@@ -3883,14 +3941,6 @@ app.post('/hr-data', async (req, res) => {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
 
-        // Nothing here touches payment_requests (it never stores team_id, so
-        // every payment log for people who were on this team stays exactly as
-        // it is) or user_assignments (those rows are left in place on purpose,
-        // as their assignment history - it's what lets isTeamAssignmentLocked
-        // detect "their only team was removed" and lock them out of the tool
-        // until an admin reassigns or removes them). Only the team's own
-        // skillset links are cleaned up here, since they're pure metadata with
-        // no history value once the team itself is gone.
         await supabase.from('team_skillsets').delete().eq('team_id', id);
 
         const { error } = await supabase.from('teams').delete().eq('id', id);
