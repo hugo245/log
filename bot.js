@@ -413,12 +413,14 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
                     const sameAsMainGroup = !!team && config.groupId != null && Number(team.roblox_group_id) === Number(config.groupId);
 
-                    if (flow.step !== 'main_ranked_awaiting_team' && !sameAsMainGroup) {
+                    const isRelink = !flow.ticket_id && !flow.link_token;
+
+                    if (!isRelink && flow.step !== 'main_ranked_awaiting_team' && !sameAsMainGroup) {
                         if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
 
                         await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
                         await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
-                    } else if (flow.step !== 'main_ranked_awaiting_team' && sameAsMainGroup) {
+                    } else if (!isRelink && flow.step !== 'main_ranked_awaiting_team' && sameAsMainGroup) {
                         if (!config.groupId) throw new Error('onboarding_group_not_configured');
 
                         await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
@@ -426,23 +428,28 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
 
                     let teamGroupNote = null;
-                    if (team && !sameAsMainGroup) {
+                    const alreadyInTeamGroup = isRelink && !!team && !sameAsMainGroup
+                        && (await getCurrentGroupRoleId(team.roblox_group_id, flow.roblox_user_id)) != null;
+                    if (team && !sameAsMainGroup && !alreadyInTeamGroup) {
                         try {
                             const accepted = await acceptGroupJoinRequest(team.roblox_group_id, flow.roblox_user_id);
                             if (!accepted) {
-                                teamGroupNote = `You're ranked in the main group. Now request to join **${team.name}**'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Continue to finish setting up your team access.`;
+                                teamGroupNote = `${isRelink ? "You're in the main group." : "You're ranked in the main group."} Now request to join **${team.name}**'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Continue to finish setting up your team access.`;
                             } else {
                                 await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
                             }
                         } catch (teamErr) {
                             console.error(`onboarding_continue: failed to process ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
-                            teamGroupNote = `You're ranked in the main group, but something went wrong getting you into **${team.name}**'s group automatically. Click Continue to try again, or ping a lead if it keeps failing.`;
+                            teamGroupNote = `${isRelink ? "You're in the main group" : "You're ranked in the main group"}, but something went wrong getting you into **${team.name}**'s group automatically. Click Continue to try again, or ping a lead if it keeps failing.`;
                         }
                     }
 
                     const stepAfter = teamGroupNote ? 'main_ranked_awaiting_team' : 'done';
 
                     let doneMessage = `You're all set, ${flow.roblox_username}. Welcome to the team.`;
+                    if (stepAfter === 'done' && isRelink) {
+                        doneMessage = `You're all set, ${flow.roblox_username}. Your account is unlocked again.`;
+                    }
                     if (stepAfter === 'done' && flow.link_token) {
                         await grantInviteLinkAccess(flow);
                         doneMessage = `You're all set, ${flow.roblox_username}. Your access to the Tool is now active - head back to the invite page and refresh if it's still showing "waiting".`;

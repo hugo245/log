@@ -1092,7 +1092,7 @@ async function getOnboardingGroupConfig() {
     };
 }
 
-async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discordUserId, ticketId = null, linkToken = null, teamId = null, skillsetId = null, roleId = null }) {
+async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discordUserId, ticketId = null, linkToken = null, teamId = null, skillsetId = null, roleId = null, relink = false }) {
     try {
         const config = await getOnboardingGroupConfig();
         if (!config.groupId || !DISCORD_BOT_TOKEN || !discordUserId) return null;
@@ -1146,7 +1146,9 @@ async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discord
         const message = await discordApi(`/channels/${dmChannel.id}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `Welcome to the team, ${robloxUsername}. To finish setting up your access, you need to join the PlayVerse Roblox group first.${teamGroupLine}`,
+                content: relink
+                    ? `Welcome back, ${robloxUsername}. Join the PlayVerse Roblox group to unlock your account again.${teamGroupLine}`
+                    : `Welcome to the team, ${robloxUsername}. To finish setting up your access, you need to join the PlayVerse Roblox group first.${teamGroupLine}`,
                 components
             })
         });
@@ -1158,6 +1160,92 @@ async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discord
         console.error(`startAccessOnboardingFlow failed:`, e.message);
         return null;
     }
+}
+
+async function getOpenAccessFlows(robloxUserId) {
+    const { data, error } = await supabase
+        .from('recruit_onboarding_flows')
+        .select('id, step, team_id, link_token, discord_user_id')
+        .eq('roblox_user_id', robloxUserId)
+        .is('ticket_id', null)
+        .neq('step', 'done');
+    if (error) throw error;
+    return data || [];
+}
+
+async function buildAccessStatus(robloxUserId) {
+    const [discordUserId, config] = await Promise.all([
+        getLinkedDiscordUserId(robloxUserId),
+        getOnboardingGroupConfig()
+    ]);
+    const flows = discordUserId ? await getOpenAccessFlows(robloxUserId) : [];
+
+    const teamIds = [...new Set(flows.map(f => f.team_id).filter(id => id != null))];
+    const teamById = {};
+    if (teamIds.length) {
+        const { data: teams } = await supabase.from('teams').select('id, name, roblox_group_id').in('id', teamIds);
+        (teams || []).forEach(t => { teamById[t.id] = t; });
+    }
+
+    return {
+        discordLinked: !!discordUserId,
+        open: flows.length > 0,
+        mainGroupId: config.groupId,
+        flows: flows.map(f => {
+            const team = f.team_id != null ? teamById[f.team_id] : null;
+            const ownGroup = team && team.roblox_group_id && Number(team.roblox_group_id) !== Number(config.groupId);
+            return {
+                id: f.id,
+                step: f.step,
+                team: team ? { name: team.name, robloxGroupId: ownGroup ? team.roblox_group_id : null } : null
+            };
+        })
+    };
+}
+
+async function startRelinkFlows({ session, discordUserId, inviteToken }) {
+    const robloxUserId = session.roblox_user_id;
+    const robloxUsername = session.roblox_username;
+    const result = { started: 0, failed: 0, inviteInvalid: false, inviteStarted: false };
+
+    if (inviteToken) {
+        const { data: link } = await supabase.from('onboarding_links').select('*').eq('token', inviteToken).maybeSingle();
+        if (!link) {
+            result.inviteInvalid = true;
+        } else {
+            const { data: prior } = await supabase
+                .from('recruit_onboarding_flows')
+                .select('id')
+                .eq('roblox_user_id', robloxUserId)
+                .eq('link_token', inviteToken)
+                .limit(1);
+            if (!prior || !prior.length) {
+                const flow = await startAccessOnboardingFlow({
+                    robloxUserId, robloxUsername, discordUserId,
+                    linkToken: inviteToken,
+                    teamId: link.team_id || null,
+                    skillsetId: link.skillset_id || null,
+                    roleId: link.role_id || null
+                });
+                if (flow) {
+                    await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
+                    result.started = 1;
+                    result.inviteStarted = true;
+                } else {
+                    result.failed = 1;
+                }
+                return result;
+            }
+        }
+    }
+
+    const assignments = await getUserTeamAssignments(robloxUserId);
+    const teamIds = [...new Set(assignments.map(a => a.teamId).filter(id => id != null))].slice(0, 3);
+    for (const teamId of teamIds) {
+        const flow = await startAccessOnboardingFlow({ robloxUserId, robloxUsername, discordUserId, teamId, relink: true });
+        if (flow) result.started++; else result.failed++;
+    }
+    return result;
 }
 
 async function startOnboardingFlow(ticket) {
@@ -4050,6 +4138,52 @@ app.post('/hr-data', async (req, res) => {
             res.json({ ok: true, data: assignments });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not load your team assignments.' });
+        }
+        return;
+    }
+
+    if (action === 'get_my_access_status') {
+        try {
+            res.json({ ok: true, data: await buildAccessStatus(session.roblox_user_id) });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: 'Could not check your access status.' });
+        }
+        return;
+    }
+
+    if (action === 'start_access_relink') {
+        try {
+            const robloxUserId = session.roblox_user_id;
+            const discordUserId = await getLinkedDiscordUserId(robloxUserId);
+            if (!discordUserId) { res.status(400).json({ ok: false, error: 'discord_not_linked' }); return; }
+            if (DISCORD_GUILD_ID && !(await isDiscordGuildMember(discordUserId))) {
+                res.status(403).json({ ok: false, error: 'discord_not_in_server' });
+                return;
+            }
+
+            const inviteToken = payload.inviteToken ? String(payload.inviteToken).trim() : '';
+            const restart = !!payload.restart;
+
+            const open = await getOpenAccessFlows(robloxUserId);
+            const stale = open.filter(f => restart || f.discord_user_id !== discordUserId);
+            if (stale.length) {
+                await supabase.from('recruit_onboarding_flows').delete().in('id', stale.map(f => f.id));
+            }
+            const stillOpen = open.length - stale.length;
+
+            let outcome = { started: 0, failed: 0, inviteInvalid: false, inviteStarted: false };
+            if (!stillOpen) {
+                outcome = await startRelinkFlows({ session, discordUserId, inviteToken });
+            }
+
+            const status = await buildAccessStatus(robloxUserId);
+            res.json({
+                ok: true,
+                data: { ...status, startFailed: outcome.failed > 0, inviteInvalid: outcome.inviteInvalid, inviteStarted: outcome.inviteStarted }
+            });
+        } catch (e) {
+            console.error('start_access_relink failed:', e.message);
+            res.status(500).json({ ok: false, error: 'Could not start the Discord setup. Try again in a moment.' });
         }
         return;
     }

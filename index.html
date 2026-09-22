@@ -3971,6 +3971,138 @@
       max-width: none;
     }
 
+    .lock-banner {
+      background: var(--err-bg);
+      border: 2px solid var(--err-text);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      margin-bottom: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .lock-banner-head {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .lock-icon {
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--err-text);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 22px;
+    }
+
+    .lock-banner h2 {
+      margin: 0 0 4px;
+      font-size: 21px;
+      color: var(--err-text);
+    }
+
+    .lock-banner-head p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--ink-soft);
+    }
+
+    .lock-steps {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .lock-step {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      background: var(--surface);
+      border: 1px solid var(--err-line);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+
+    .lock-step.done {
+      border-color: var(--ok-line);
+    }
+
+    .lock-step.wait {
+      opacity: .6;
+    }
+
+    .lock-mark {
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid var(--err-text);
+      color: var(--err-text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .lock-step.done .lock-mark {
+      background: var(--ok-text);
+      border-color: var(--ok-text);
+      color: #fff;
+    }
+
+    .lock-step-body {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .lock-step-body strong {
+      font-size: 14px;
+      color: var(--ink);
+    }
+
+    .lock-step-body .sub {
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--ink-soft);
+    }
+
+    .lock-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .lock-actions .btn {
+      width: auto;
+    }
+
+    .lock-banner .error-box {
+      margin: 0;
+      background: var(--surface);
+    }
+
+    .locked-zone {
+      opacity: .4;
+      filter: grayscale(1);
+      pointer-events: none;
+      user-select: none;
+    }
+
     @media (max-width:760px) {
       .ob-layout {
         grid-template-columns: 1fr;
@@ -4859,6 +4991,20 @@
     async function unlinkMyDiscord() {
       await callHrData('unlink_my_discord');
     }
+
+    async function getMyAccessStatus() {
+      const json = await callHrData('get_my_access_status');
+      return json.data || null;
+    }
+
+    async function startAccessRelink(inviteToken, restart) {
+      const json = await callHrData('start_access_relink', { inviteToken: inviteToken || null, restart: !!restart });
+      return json.data || null;
+    }
+
+    function rejoinKey() { return 'pv_rejoin_' + (hrUserId || 'me'); }
+    function getRejoinState() { try { return localStorage.getItem(rejoinKey()) || null; } catch (e) { return null; } }
+    function setRejoinState(v) { try { if (v) localStorage.setItem(rejoinKey(), v); else localStorage.removeItem(rejoinKey()); } catch (e) { } }
 
     async function getUsdEligibilityForUser(robloxUserId, robloxUsername) {
       const json = await callHrData('get_usd_eligibility_for_user', { robloxUserId, robloxUsername });
@@ -8913,7 +9059,103 @@
       let myTeams = [];
       let myTeamsLoading = true;
 
+      const landingQuery = parseHashQuery();
+      const discordLinkError = landingQuery.get('discordLinkError');
+      if ((discordLinkError || landingQuery.get('discordLinked')) && window.location.hash.split('?')[0] === '#/my') {
+        history.replaceState(null, '', '#/my');
+      }
+
+      let access = null;
+      let accessLoading = true;
+      let checkingAccess = false;
+      let starting = false;
+      let startAttempted = false;
+      let startError = null;
+      let pollTimer = null;
+
+      function isLocked() {
+        if (needsDiscordLink) return true;
+        if (getRejoinState()) return true;
+        return !!(access && access.open);
+      }
+
+      function stopPoll() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
+
+      function schedulePoll() {
+        stopPoll();
+        if (myGen !== renderGen || needsDiscordLink || !isLocked()) return;
+        pollTimer = setTimeout(() => syncAccess(false), 5000);
+      }
+
+      function lockBannerHtml() {
+        const linked = !needsDiscordLink;
+        const flows = (access && access.flows) || [];
+        const linkUrl = EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(getStoredToken() || '') + '&return=' + encodeURIComponent('#/my');
+        const linkErr = discordLinkError && !linked ? (DISCORD_LINK_ERROR_MESSAGES[discordLinkError] || 'Could not link that Discord account. Try again.') : null;
+        const mainGroupId = access && access.mainGroupId;
+
+        let step2 = '';
+        if (!linked) {
+          step2 = `<span class="sub">Available once Discord is linked.</span>`;
+        } else if (starting || (accessLoading && !flows.length)) {
+          step2 = `<span class="sub">Loading...</span>`;
+        } else if (startError) {
+          step2 = `<div class="error-box"><span>${esc(startError)}</span></div>
+            <div class="lock-actions"><button type="button" class="btn btn-primary btn-sm" id="lockRestartBtn">Try again</button></div>`;
+        } else if (!flows.length) {
+          step2 = `<span class="sub">Waiting for the bot's Discord message.</span>
+            <div class="lock-actions"><button type="button" class="btn btn-ghost btn-sm" id="lockCheckBtn" ${checkingAccess ? 'disabled' : ''}>${checkingAccess ? 'Checking...' : 'Check now'}</button><button type="button" class="btn btn-ghost btn-sm" id="lockRestartBtn">Resend Discord message</button></div>`;
+        } else {
+          const teamFlows = flows.filter(f => f.team && f.team.robloxGroupId);
+          const readyAll = flows.every(f => f.step === 'group_joined');
+          step2 = `
+            <span class="sub">${readyAll
+              ? 'Press Continue in the Discord message to finish.'
+              : `Check your Discord DMs. Join the PlayVerse Roblox group${teamFlows.length ? ' and request to join your team\'s group' : ''}, then press Continue in the message.`}</span>
+            <div class="lock-actions">
+              ${mainGroupId ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(mainGroupId)}" target="_blank" rel="noopener">Join PlayVerse group</a>` : ''}
+              ${teamFlows.map(f => `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(f.team.robloxGroupId)}" target="_blank" rel="noopener">Request to join ${esc(f.team.name)}</a>`).join('')}
+            </div>
+            ${flows.some(f => f.step === 'main_ranked_awaiting_team') ? `<span class="sub">Request to join your team's group, then press Continue again.</span>` : ''}
+            <div class="lock-actions"><button type="button" class="btn btn-ghost btn-sm" id="lockCheckBtn" ${checkingAccess ? 'disabled' : ''}>${checkingAccess ? 'Checking...' : 'Check now'}</button><button type="button" class="btn btn-ghost btn-sm" id="lockRestartBtn">Resend Discord message</button></div>`;
+        }
+
+        return `
+      <div class="lock-banner" role="alert">
+        <div class="lock-banner-head">
+          <div class="lock-icon" aria-hidden="true">!</div>
+          <div>
+            <h2>My payments is locked</h2>
+            <p>${linked
+            ? 'Join your team\'s Roblox groups below and this page unlocks on its own.'
+            : 'Link your Discord account and join your team\'s Roblox groups to unlock this page.'}</p>
+          </div>
+        </div>
+        ${linkErr ? `<div class="error-box"><span>${esc(linkErr)}</span></div>` : ''}
+        <ol class="lock-steps">
+          <li class="lock-step ${linked ? 'done' : ''}">
+            <span class="lock-mark" aria-hidden="true">${linked ? '&#10003;' : '1'}</span>
+            <div class="lock-step-body">
+              <strong>Link your Discord account</strong>
+              ${linked
+            ? `<span class="sub">Discord is linked${discordLink && discordLink.discord_username ? ' as ' + esc(discordLink.discord_username) : ''}.</span>`
+            : `<span class="sub">Used to message you about your team and payments.</span>
+                   <div class="lock-actions"><a class="btn btn-primary btn-sm" id="lockLinkDiscordBtn" href="${linkUrl}">${linkErr ? 'Try again' : 'Link Discord'}</a></div>`}
+            </div>
+          </li>
+          <li class="lock-step ${linked ? '' : 'wait'}">
+            <span class="lock-mark" aria-hidden="true">2</span>
+            <div class="lock-step-body">
+              <strong>Join your team's Roblox groups</strong>
+              ${step2}
+            </div>
+          </li>
+        </ol>
+      </div>`;
+      }
+
       function paint() {
+        const locked = isLocked();
         const totals = (summary && summary.totals) || {};
         const pendingRequests = summary ? summary.requests.filter(r => r.status === 'pending') : [];
         const paidRequests = summary ? summary.requests.filter(r => r.status === 'paid') : [];
@@ -8926,6 +9168,9 @@
         <h1>My payments</h1>
         <p class="sub">What you're owed, how you get paid, and whether you meet the payout requirements. A producer logs requests for you, so there's nothing to submit yourself.</p>
       </div>
+
+      ${locked ? lockBannerHtml() : ''}
+      <div class="${locked ? 'locked-zone' : ''}" ${locked ? 'inert aria-disabled="true"' : ''}>
 
       ${!myBroadcastsLoading && myBroadcasts.length > 0 ? `
       <div style="margin-bottom:24px;display:flex;flex-direction:column;gap:10px;">
@@ -8981,7 +9226,7 @@
           ${discordLinkLoading ? `<div class="dash-loading">Loading...</div>` : discordLink ? `
             <p style="color:var(--ink-soft);font-size:13px;margin-bottom:14px;">Linked to <strong>${esc(discordLink.discord_username)}</strong>.</p>
             <button type="button" class="btn btn-ghost btn-sm" id="unlinkDiscordBtn" ${unlinkingDiscord ? 'disabled' : ''}>${unlinkingDiscord ? 'Unlinking...' : 'Unlink Discord account'}</button>
-            <p class="sub" style="margin:10px 0 0;">Unlinking will ask you to link a Discord account again next time you use the tool.</p>
+            <p class="sub" style="margin:10px 0 0;">Unlinking locks My payments until you relink and rejoin your team's Roblox groups.</p>
           ` : `<p style="color:var(--ink-soft);font-size:13px;">No Discord account linked.</p>`}
         </div>
 
@@ -9066,10 +9311,18 @@
           </table>
         </div>`}
       </div>` : ''}
+      </div>
     </div>`;
 
         wireTopbarSignOut();
         paintMethodFields();
+
+        const lockLinkBtn = document.getElementById('lockLinkDiscordBtn');
+        if (lockLinkBtn) lockLinkBtn.addEventListener('click', () => setRejoinState('linking'));
+        const lockCheckBtn = document.getElementById('lockCheckBtn');
+        if (lockCheckBtn) lockCheckBtn.addEventListener('click', () => syncAccess(true));
+        const lockRestartBtn = document.getElementById('lockRestartBtn');
+        if (lockRestartBtn) lockRestartBtn.addEventListener('click', () => startRelink(true));
 
         document.querySelectorAll('input[name="methodChoice"]').forEach(el => el.addEventListener('change', () => {
           selectedMethod = el.value;
@@ -9082,12 +9335,16 @@
 
         const unlinkDiscordBtn = document.getElementById('unlinkDiscordBtn');
         if (unlinkDiscordBtn) unlinkDiscordBtn.addEventListener('click', async () => {
-          if (!confirm('Unlink your Discord account? You will be asked to link one again next time you use the tool.')) return;
+          if (!confirm('Unlink Discord? My payments will lock until you link it again and rejoin your team\'s Roblox groups.')) return;
           unlinkingDiscord = true; discordLinkMsg = null; paint();
           try {
             await unlinkMyDiscord();
             discordLink = null;
             unlinkingDiscord = false;
+            needsDiscordLink = true;
+            startError = null; startAttempted = false;
+            if (access) access = { ...access, discordLinked: false, open: false, flows: [] };
+            stopPoll();
             discordLinkMsg = { ok: true, text: 'Discord account unlinked.' };
             paint();
           } catch (err) {
@@ -9216,6 +9473,71 @@
         paint();
       }
 
+      function unlockNow() {
+        setRejoinState(null);
+        stopPoll();
+        toast('My payments is unlocked.');
+        paint();
+        loadDiscordLink();
+        loadEligibility();
+        loadMyTeamsData();
+      }
+
+      async function startRelink(restart) {
+        starting = true; startAttempted = true; startError = null; paint();
+        try {
+          const s = await startAccessRelink(getPendingInvite(), restart);
+          if (myGen !== renderGen) return;
+          access = s;
+          needsDiscordLink = !s.discordLinked;
+          if (s.inviteInvalid || s.inviteStarted) clearPendingInvite();
+          if (s.open) setRejoinState('started');
+          if (s.startFailed) {
+            startError = "Couldn't send the Discord message. Join our Discord server and allow DMs from server members, then try again.";
+          } else if (!s.open) {
+            unlockNow();
+            starting = false;
+            return;
+          }
+        } catch (e) {
+          if (myGen !== renderGen) return;
+          startError = e.code === 'discord_not_in_server'
+            ? 'Join our Discord server first, then press Try again.'
+            : (e.message || 'Could not start the Discord setup. Try again.');
+        }
+        starting = false;
+        paint();
+        schedulePoll();
+      }
+
+      async function syncAccess(manual) {
+        if (manual) { checkingAccess = true; paint(); }
+        try {
+          const s = await getMyAccessStatus();
+          if (myGen !== renderGen) return;
+          const before = JSON.stringify(access);
+          const wasOpen = !!(access && access.open);
+          access = s;
+          needsDiscordLink = !s.discordLinked;
+          checkingAccess = false;
+          accessLoading = false;
+
+          let st = getRejoinState();
+          if (st === 'linking' && s.open) { setRejoinState('started'); st = 'started'; }
+
+          if (s.discordLinked && st === 'linking' && !startAttempted) { await startRelink(false); return; }
+          if (s.discordLinked && !s.open && (st === 'started' || wasOpen)) { unlockNow(); return; }
+
+          if (manual || before !== JSON.stringify(access)) paint();
+        } catch (e) {
+          if (myGen !== renderGen) return;
+          checkingAccess = false;
+          accessLoading = false;
+          if (manual) { toast((e && e.message) || 'Could not check right now.', 'err'); paint(); }
+        }
+        schedulePoll();
+      }
+
       paint();
       loadSummary();
       loadMethod();
@@ -9225,6 +9547,7 @@
       loadWarnings();
       loadMyBroadcastsData();
       loadMyTeamsData();
+      syncAccess(false);
     }
 
     function renderManagePanel() {
@@ -10799,6 +11122,7 @@
       let busy = false;
       let stepError = null;
       let viewing = null;
+      let discordSkipped = false;
 
       let inviteToken = getPendingInvite();
       let invite = { info: null, invalid: false, started: false, done: false };
@@ -10810,13 +11134,13 @@
         const list = [];
         list.push({
           id: 'discord', title: 'Link Discord', blurb: 'So we can reach you and give you access.',
-          required: true, done: !needsDiscordLink
+          required: true, done: !needsDiscordLink, skipped: needsDiscordLink && discordSkipped
         });
         if (inviteToken && !invite.invalid) {
           const teamName = invite.info && invite.info.team ? invite.info.team.name : null;
           list.push({
             id: 'invite', title: teamName ? `Join ${teamName}` : 'Join your team', blurb: 'Finish your invite in Discord.',
-            required: true, done: invite.done
+            required: true, done: invite.done, skipped: !invite.done && needsDiscordLink && discordSkipped
           });
         }
         serverSteps.forEach(s => {
@@ -10869,8 +11193,9 @@
             ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Discord is linked</strong><span>You can change this later from your account.</span></div></div>`
             : `<div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <a class="btn btn-primary" href="${linkUrl}">${errMsg ? 'Try again' : 'Link Discord'}</a>
+                <button type="button" class="btn btn-ghost" id="obDiscordSkip">Skip for now</button>
               </div>
-              <p class="hint">You can't continue until Discord is linked${inviteToken ? ', and you have joined the Roblox groups for your team' : ''}.</p>`}`;
+              <p class="hint">You can skip this, but My payments stays locked until Discord is linked${inviteToken ? ' and you have joined your team\'s Roblox groups' : ''}.</p>`}`;
       }
 
       function inviteStepHtml(s) {
@@ -10933,7 +11258,9 @@
           <h2>Add a payout method</h2>
           <p class="ob-lead">Tell us whether you want to be paid in Robux, PayPal or Venmo. You can skip this and do it any time from My payments.</p>
           ${s.done ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Payout method saved</strong><span>${esc(PAYMENT_METHODS[payoutMethod.method] ? PAYMENT_METHODS[payoutMethod.method].label : payoutMethod.method)}</span></div></div>`
-            : `<div style="display:flex;gap:8px;flex-wrap:wrap;"><a class="btn btn-primary" href="#/my">Add payout method</a><button type="button" class="btn btn-ghost" id="obFinish">Skip for now</button></div>`}`;
+            : needsDiscordLink
+              ? `<p class="hint">My payments is locked until Discord is linked.</p><div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" class="btn btn-ghost" id="obFinish">Continue</button></div>`
+              : `<div style="display:flex;gap:8px;flex-wrap:wrap;"><a class="btn btn-primary" href="#/my">Add payout method</a><button type="button" class="btn btn-ghost" id="obFinish">Skip for now</button></div>`}`;
       }
 
       function finishHtml(list) {
@@ -10942,7 +11269,7 @@
         return `
           <h2>You're all set</h2>
           <p class="ob-lead">Your account is ready. You can come back to this page any time to reread the policies.</p>
-          ${skippedLeft.length ? `<div class="filter-notice" style="margin:0;">Still to do when Discord is working again: ${skippedLeft.map(s => esc(s.title.toLowerCase())).join(' and ')}. You'll be asked next time you sign in.</div>` : ''}
+          ${skippedLeft.length ? `<div class="error-box" style="margin:0;"><span>Still to do: ${skippedLeft.map(s => esc(s.title.toLowerCase())).join(' and ')}. My payments stays locked until then.</span></div>` : ''}
           ${optionalLeft.length ? `<p class="hint">Still optional: ${optionalLeft.map(s => esc(s.title.toLowerCase())).join(', ')}.</p>` : ''}
           <a class="btn btn-primary" href="${hasPermission('dashboard.view') ? '#/dashboard' : '#/my'}">Go to PlayVerse</a>`;
       }
@@ -10985,6 +11312,8 @@
         if (join) join.addEventListener('click', acceptInvite);
         const check = document.getElementById('obInviteCheck');
         if (check) check.addEventListener('click', () => checkInvite(true));
+        const skipDiscord = document.getElementById('obDiscordSkip');
+        if (skipDiscord) skipDiscord.addEventListener('click', () => { discordSkipped = true; viewing = null; stepError = null; paint(); window.scrollTo(0, 0); });
         const finish = document.getElementById('obFinish');
         if (finish) finish.addEventListener('click', () => { viewing = null; window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/my'; });
       }
