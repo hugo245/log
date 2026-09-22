@@ -949,6 +949,17 @@
       line-height: 1.5;
     }
 
+    .inline-link-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      color: var(--accent);
+      text-decoration: underline;
+      cursor: pointer;
+      font: inherit;
+    }
+
     .closed-shell {
       min-height: 100vh;
       display: flex;
@@ -968,6 +979,12 @@
       align-items: center;
       justify-content: center;
       margin: 0 auto 18px;
+    }
+
+    .closed-icon.warn {
+      background: var(--warn-bg);
+      border-color: var(--warn-line);
+      color: var(--warn-text);
     }
 
     .closed-note {
@@ -4301,6 +4318,7 @@
     let appDataReady = false;
     let needsOnboarding = false;
     let needsDiscordLink = false;
+    let teamRemoved = false;
 
     let renderGen = 0;
 
@@ -4628,7 +4646,7 @@
 
     async function verifySession() {
       const token = getStoredToken();
-      if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; return; }
+      if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; teamRemoved = false; return; }
       try {
         const [res, onboardingResult] = await Promise.all([
           fetch(EDGE_BASE + '/hr-session', {
@@ -4647,8 +4665,12 @@
           hrRoles = json.roles || [];
           hrPermissions = json.permissions || [];
           hrMaxHierarchy = json.maxHierarchy || 0;
-          needsOnboarding = onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false;
+          teamRemoved = json.teamRemoved === true;
           needsDiscordLink = json.discordLinked === false;
+          // A locked-out account gets the team-removed page regardless of
+          // onboarding state - get_my_onboarding is blocked server-side for
+          // them anyway (they'd have gotten null back from the catch above).
+          needsOnboarding = teamRemoved ? false : (onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false);
         } else {
           isHrAuthed = false;
           hrUsername = '';
@@ -4657,6 +4679,7 @@
           hrMaxHierarchy = 0;
           needsOnboarding = false;
           needsDiscordLink = false;
+          teamRemoved = false;
           clearToken();
         }
       } catch (e) {
@@ -4667,6 +4690,7 @@
         hrMaxHierarchy = 0;
         needsOnboarding = false;
         needsDiscordLink = false;
+        teamRemoved = false;
       }
     }
 
@@ -4694,6 +4718,13 @@
       if (!res.ok || !json.ok) {
         if (res.status === 401) { clearToken(); isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; }
         const code = (json && json.error) || '';
+        if (code === 'team_removed' && !teamRemoved) {
+          // Their only team just got deleted while they were already using the
+          // tool - lock them out right away instead of waiting for their next
+          // full page load to notice.
+          teamRemoved = true;
+          if (currentPath() !== '#/team-removed') window.location.hash = '#/team-removed';
+        }
         const err = new Error(friendlyError(code));
         err.code = code;
         throw err;
@@ -6345,6 +6376,7 @@
       hrPermissions = [];
       hrMaxHierarchy = 0;
       needsDiscordLink = false;
+      teamRemoved = false;
       window.location.hash = '#/';
     }
 
@@ -6396,6 +6428,23 @@
         return;
       }
 
+      // Their only team was deleted (or they were never transferred to a new
+      // one after it happened) - lock every page behind the warning screen
+      // until an admin puts them on a real team or removes them entirely.
+      // This takes priority over the onboarding redirect below: there's no
+      // point walking a locked-out account through onboarding steps.
+      if (isHrAuthed && teamRemoved && path !== '#/team-removed') {
+        window.location.hash = '#/team-removed';
+        return;
+      }
+      // Symmetric case: they were fixed (reassigned) and are still sitting on
+      // the warning page's URL (bookmarked, or just hit refresh there) -
+      // bounce them back into the app instead of showing a stale lock screen.
+      if (isHrAuthed && !teamRemoved && path === '#/team-removed') {
+        window.location.hash = '#/';
+        return;
+      }
+
       if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
         window.location.hash = '#/onboarding';
         return;
@@ -6411,6 +6460,8 @@
         if (isHrAuthed) renderPolicyPage('tos'); else renderHrGate();
       } else if (path === '#/aup') {
         if (isHrAuthed) renderPolicyPage('aup'); else renderHrGate();
+      } else if (path === '#/team-removed') {
+        if (isHrAuthed) renderTeamRemovedPage(); else renderHrGate();
       } else if (path === '#/hr' || path === '#/dashboard') {
         if (isHrAuthed) renderDashboard(); else renderHrGate();
       } else if (path === '#/manage') {
@@ -6512,6 +6563,7 @@
     }
 
     function topbar() {
+      const locked = isHrAuthed && teamRemoved;
       const canSeeDashboard = isHrAuthed && hasPermission('dashboard.view');
       const canSeeRecruitment = isHrAuthed && hasPermission('recruitment.view');
       const canSeeStaff = isHrAuthed && hasPermission('staff.view_database');
@@ -6525,8 +6577,18 @@
       <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
         <button type="button" class="theme-toggle" id="themeToggleBtn" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
-        ${isHrAuthed
-          ? `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeStaff ? pill('#/staff', 'Staff') : ''}${canSeeRecruitment ? pill('#/recruitment', 'Recruitment', ['#/recruitment', '#/recruitment-analytics']) : ''}${canSeeAnalytics() ? pill('#/analytics', 'Analytics') : ''}${hasPermission('audit.view') ? pill('#/audit', 'Audit logs') : ''}
+        ${!isHrAuthed
+          ? `<a class="link" href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a><a class="hr-pill" href="#/hr">Sign in</a>`
+          : locked
+            ? `<details class="acct-menu">
+               <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
+               <div class="acct-menu-list">
+                 <a href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a>
+                 <div class="acct-menu-divider"></div>
+                 <button type="button" id="signOutBtn">Sign out</button>
+               </div>
+             </details>`
+            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeStaff ? pill('#/staff', 'Staff') : ''}${canSeeRecruitment ? pill('#/recruitment', 'Recruitment', ['#/recruitment', '#/recruitment-analytics']) : ''}${canSeeAnalytics() ? pill('#/analytics', 'Analytics') : ''}${hasPermission('audit.view') ? pill('#/audit', 'Audit logs') : ''}
              <details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
@@ -6538,8 +6600,7 @@
                  <div class="acct-menu-divider"></div>
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
-             </details>`
-          : `<a class="link" href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a><a class="hr-pill" href="#/hr">Sign in</a>`}
+             </details>`}
       </div>
     </div>`;
     }
@@ -11050,6 +11111,51 @@
       if (canManageOnboarding) { loadTeamsData(); loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); loadOnboardingGroupConfig(); loadRobloxGroupApiKeyStatus(); }
       if (canManageRate) loadUsdMinimum();
       if (canManageBroadcasts) loadBroadcastsData();
+    }
+
+    function renderTeamRemovedPage() {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+      if (!isHrAuthed) { renderHrGate(); return; }
+
+      app.innerHTML = `
+    ${topbar()}
+    <div class="closed-shell">
+      <div class="lock-card">
+        <div class="closed-icon warn">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3.2l9.3 16.1a1 1 0 01-.87 1.5H3.57a1 1 0 01-.87-1.5L12 3.2z"></path>
+            <line x1="12" y1="9.6" x2="12" y2="14"></line>
+            <circle cx="12" cy="17.1" r="0.95" fill="currentColor" stroke="none"></circle>
+          </svg>
+        </div>
+        <h2>Your team was removed</h2>
+        <p>You cannot access the tool anymore until you're transferred to another team or removed from PlayVerse. Your data is safe with us.</p>
+        <button type="button" class="btn btn-primary" id="teamRemovedRetryBtn">Check again</button>
+        <div class="lock-note">Signed in as ${esc(hrUsername)}. Ask an admin to move you to a team - or <button type="button" class="inline-link-btn" id="teamRemovedSignOutBtn">sign out</button> if this isn't your account.</div>
+      </div>
+    </div>`;
+
+      wireTopbarSignOut();
+
+      const retryBtn = document.getElementById('teamRemovedRetryBtn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', async () => {
+          if (retryBtn.disabled) return;
+          retryBtn.disabled = true;
+          const original = retryBtn.textContent;
+          retryBtn.textContent = 'Checking...';
+          const myGen = renderGen;
+          await verifySession();
+          if (myGen !== renderGen) return;
+          if (!isHrAuthed) { window.location.hash = '#/'; return; }
+          if (!teamRemoved) { window.location.hash = '#/'; return; }
+          retryBtn.disabled = false;
+          retryBtn.textContent = original;
+        });
+      }
+
+      const signOutBtn = document.getElementById('teamRemovedSignOutBtn');
+      if (signOutBtn) signOutBtn.addEventListener('click', hrSignOut);
     }
 
     function renderPolicyPage(type) {

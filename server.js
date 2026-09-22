@@ -1802,6 +1802,36 @@ async function getUserTeamAssignments(robloxUserId) {
     }));
 }
 
+// A user is "team-locked" when every team they were ever assigned to has since
+// been deleted (their only team(s) got removed) - they keep their assignment
+// history rows (and all their payment_requests, which never reference team_id
+// and are never touched here). The database's own foreign key on
+// user_assignments.team_id (ON DELETE SET NULL) nulls out team_id on that row
+// when its team is deleted, rather than deleting the row - so "locked" means
+// every remaining row's team_id is null. Users who were never assigned to a
+// team at all (zero rows) are NOT locked - that's the normal "not part of a
+// team yet" onboarding case, not the same thing.
+async function isTeamAssignmentLocked(robloxUserId) {
+    const { data: rows, error } = await supabase
+        .from('user_assignments')
+        .select('team_id')
+        .eq('roblox_user_id', robloxUserId);
+    if (error) throw error;
+    const allRows = rows || [];
+    if (!allRows.length) return false;
+
+    const teamIds = [...new Set(allRows.filter(r => r.team_id != null).map(r => r.team_id))];
+    if (!teamIds.length) return true;
+
+    const { data: existingTeams, error: teamErr } = await supabase
+        .from('teams')
+        .select('id')
+        .in('id', teamIds);
+    if (teamErr) throw teamErr;
+    const existingIds = new Set((existingTeams || []).map(t => t.id));
+    return !teamIds.some(id => existingIds.has(id));
+}
+
 function isBanExpired(ban) {
     return !!(ban && ban.expires_at && new Date(ban.expires_at).getTime() <= Date.now());
 }
@@ -2039,6 +2069,17 @@ async function getSession(req) {
             return null;
         }
     } catch (e) { }
+
+    // Computed fresh on every request (not just on the periodic role/permission
+    // resync below) so that losing/regaining access to the tool because a team
+    // was deleted or the user got transferred to a new team takes effect
+    // immediately, on the very next request - never delete the session for
+    // this, it must self-heal the moment the user is placed on a valid team.
+    try {
+        data.team_removed = await isTeamAssignmentLocked(data.roblox_user_id);
+    } catch (e) {
+        data.team_removed = false;
+    }
 
     const lastSynced = data.last_synced_at ? new Date(data.last_synced_at).getTime() : 0;
     if (Date.now() - lastSynced > ACCESS_SYNC_INTERVAL_MS) {
@@ -2629,7 +2670,8 @@ app.get('/hr-session', async (req, res) => {
         roles: session.roles || [],
         permissions: session.permissions || [],
         maxHierarchy: session.max_hierarchy || 0,
-        discordLinked: !!discordUserId
+        discordLinked: !!discordUserId,
+        teamRemoved: !!session.team_removed
     });
 });
 
@@ -2644,6 +2686,11 @@ const listRequestsSweepState = { paymentsAt: 0, usernamesAt: 0 };
 app.post('/hr-data', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false, error: 'not_authenticated' }); return; }
+    // Every team this user was ever assigned to has been deleted (it was their
+    // only one) - the session stays alive (so they don't need to sign in again
+    // once fixed) but every action is blocked until an admin transfers them to
+    // a real team or removes them from PlayVerse entirely.
+    if (session.team_removed) { res.status(403).json({ ok: false, error: 'team_removed', teamRemoved: true }); return; }
 
     const action = req.body && req.body.action;
     const payload = (req.body && req.body.payload) || {};
@@ -3835,6 +3882,17 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+
+        // Nothing here touches payment_requests (it never stores team_id, so
+        // every payment log for people who were on this team stays exactly as
+        // it is) or user_assignments (those rows are left in place on purpose,
+        // as their assignment history - it's what lets isTeamAssignmentLocked
+        // detect "their only team was removed" and lock them out of the tool
+        // until an admin reassigns or removes them). Only the team's own
+        // skillset links are cleaned up here, since they're pure metadata with
+        // no history value once the team itself is gone.
+        await supabase.from('team_skillsets').delete().eq('team_id', id);
+
         const { error } = await supabase.from('teams').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
