@@ -4203,6 +4203,23 @@
       align-items: center;
     }
 
+    .org-toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .org-seg {
+      margin: 0;
+      grid-template-columns: repeat(2, auto);
+    }
+
+    .org-seg button {
+      padding: 6px 12px;
+    }
+
     .org-tier {
       width: 100%;
       display: flex;
@@ -4228,17 +4245,18 @@
 
     .org-connector {
       width: 2px;
-      height: 26px;
+      height: 24px;
       background: var(--line);
     }
 
     .org-teams {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 18px;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 14px;
       width: 100%;
       position: relative;
       padding-top: 18px;
+      align-items: start;
     }
 
     .org-teams::before {
@@ -4253,41 +4271,147 @@
 
     .org-team {
       border: 1px solid var(--line);
-      border-top: 3px solid var(--team-color);
+      border-left: 3px solid var(--team-color);
       border-radius: 12px;
       background: var(--surface);
-      padding: 14px;
       position: relative;
+      overflow: hidden;
     }
 
-    .org-team::before {
-      content: '';
-      position: absolute;
-      top: -18px;
-      left: 50%;
-      width: 2px;
-      height: 15px;
-      background: var(--line);
+    .org-team-loose {
+      width: 100%;
+    }
+
+    .org-team.open {
+      grid-column: 1 / -1;
     }
 
     .org-team-head {
-      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      padding: 12px 14px;
+      border: none;
+      background: none;
+      font: inherit;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
     }
 
-    .org-team-head h3 {
-      margin: 0;
+    .org-team-head:hover {
+      background: var(--row-alt);
+    }
+
+    .org-team-name {
+      display: block;
       font-size: 15px;
+      font-weight: 600;
     }
 
-    .org-team-head span {
+    .org-team-sub {
+      display: block;
       font-size: 12px;
       color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .org-caret {
+      color: var(--muted);
+      font-size: 12px;
+      transition: transform .15s ease;
+      flex-shrink: 0;
+    }
+
+    .org-caret.open {
+      transform: rotate(90deg);
+    }
+
+    .org-facepile {
+      display: flex;
+      flex-shrink: 0;
+    }
+
+    .org-face {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: 2px solid var(--surface);
+      margin-left: -8px;
+      background: var(--accent-soft);
+      object-fit: cover;
+    }
+
+    .org-face.more {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--ink-soft);
+      background: var(--line);
     }
 
     .org-team-body {
+      padding: 0 14px 14px;
       display: flex;
       flex-direction: column;
+      gap: 10px;
+    }
+
+    .org-lead-wrap {
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .org-group-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 4px 0;
+      border: none;
+      background: none;
+      font: inherit;
+      color: var(--ink-soft);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .org-group-name {
+      font-size: 12.5px;
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .org-count {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--muted);
+      background: var(--row-alt);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
+
+    .org-group-body {
+      display: flex;
+      flex-wrap: wrap;
       gap: 6px;
+      margin-top: 4px;
+    }
+
+    .org-more {
+      border: 1px dashed var(--line);
+      background: none;
+      color: var(--accent);
+      font: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      border-radius: 10px;
+      padding: 7px 12px;
+      cursor: pointer;
     }
 
     .org-person {
@@ -4296,10 +4420,24 @@
       gap: 9px;
       border: 1px solid var(--line);
       border-radius: 10px;
-      padding: 7px 10px;
+      padding: 6px 10px;
       background: var(--bg);
       cursor: pointer;
-      min-width: 170px;
+      flex: 1 1 190px;
+      min-width: 0;
+      max-width: 260px;
+    }
+
+    .org-person.compact {
+      flex: 0 0 auto;
+      max-width: none;
+      padding: 5px 10px 5px 6px;
+    }
+
+    .org-person.is-lead {
+      background: var(--surface);
+      border-color: var(--team-color, var(--accent));
+      flex: 0 1 auto;
     }
 
     .org-person:hover {
@@ -4323,6 +4461,7 @@
     .org-role {
       font-size: 11.5px;
       color: var(--muted);
+      overflow-wrap: anywhere;
     }
 
     .org-role b {
@@ -4334,6 +4473,7 @@
       .topbar,
       .dash-toolbar,
       .tabs,
+      .org-toolbar,
       #toastRoot {
         display: none !important;
       }
@@ -4343,7 +4483,8 @@
       }
 
       .org-team,
-      .org-person {
+      .org-person,
+      .org-group {
         break-inside: avoid;
       }
     }
@@ -12009,6 +12150,12 @@
       let overview = null;
       let detail = null;
       let org = null;
+      const ORG_PREVIEW = 6;
+      let orgSearch = '';
+      let orgGroupBy = 'skill';
+      let orgCompact = false;
+      let orgOpenTeams = new Set();
+      let orgOpenGroups = new Set();
       let view = query.get('view') === 'org' ? 'org' : 'teams';
       let loading = true;
       let loadError = null;
@@ -12024,52 +12171,134 @@
         load();
       }
 
-      function orgPersonCard(p, tagline) {
+      function orgPersonCard(p, tagline, opts) {
+        const o = opts || {};
+        const cls = ['org-person', o.lead ? 'is-lead' : '', orgCompact && !o.lead ? 'compact' : ''].filter(Boolean).join(' ');
         return `
-          <div class="org-person" data-user-link data-user-id="${esc(p.robloxUserId)}" data-username="${esc(p.robloxUsername || '')}" role="button" tabindex="0">
+          <div class="${cls}" data-user-link data-user-id="${esc(p.robloxUserId)}" data-username="${esc(p.robloxUsername || '')}" role="button" tabindex="0" title="${esc(p.robloxUsername || '')}">
             ${avatarImg(p.robloxUserId, '', 'class="org-avatar"')}
             <div style="min-width:0;">
               <div class="org-name">${esc(p.robloxUsername || 'Unknown')}</div>
-              <div class="org-role">${tagline || esc((p.roles || [])[0] || 'No role')}</div>
+              ${orgCompact && !o.lead ? '' : `<div class="org-role">${tagline || esc((p.roles || [])[0] || 'No role')}</div>`}
             </div>
+          </div>`;
+      }
+
+      function orgMatches(p) {
+        const q = orgSearch.trim().toLowerCase();
+        if (!q) return true;
+        return (p.robloxUsername || '').toLowerCase().includes(q) ||
+          String(p.robloxUserId) === q ||
+          (p.roles || []).some(r => r.toLowerCase().includes(q)) ||
+          (p.skillset && p.skillset.name.toLowerCase().includes(q));
+      }
+
+      function groupMembers(members) {
+        const groups = new Map();
+        members.forEach(m => {
+          const key = orgGroupBy === 'role' ? ((m.roles || [])[0] || 'No role') : (m.skillset ? m.skillset.name : 'No skill set');
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(m);
+        });
+        return [...groups.entries()]
+          .map(([name, people]) => ({ name, people: people.sort((a, b) => b.hierarchy - a.hierarchy || (a.robloxUsername || '').localeCompare(b.robloxUsername || '')) }))
+          .sort((a, b) => b.people.length - a.people.length || a.name.localeCompare(b.name));
+      }
+
+      function orgGroupHtml(teamKey, group) {
+        const key = teamKey + ':' + group.name;
+        const open = orgOpenGroups.has(key) || !!orgSearch.trim() || group.people.length <= ORG_PREVIEW;
+        const shown = open ? group.people : group.people.slice(0, ORG_PREVIEW);
+        const hidden = group.people.length - shown.length;
+        return `
+          <div class="org-group">
+            <button type="button" class="org-group-head" data-org-group="${esc(key)}" aria-expanded="${open}">
+              <span class="org-caret ${open ? 'open' : ''}" aria-hidden="true">&#9656;</span>
+              <span class="org-group-name">${esc(group.name)}</span>
+              <span class="org-count">${group.people.length}</span>
+            </button>
+            <div class="org-group-body">
+              ${shown.map(m => orgPersonCard(m, [
+          m.skillset && orgGroupBy !== 'skill' ? esc(m.skillset.name) : null,
+          esc((m.roles || [])[0] || '')
+        ].filter(Boolean).join(' &middot; '))).join('')}
+              ${hidden > 0 ? `<button type="button" class="org-more" data-org-group="${esc(key)}">Show ${hidden} more</button>` : ''}
+            </div>
+          </div>`;
+      }
+
+      function orgTeamHtml(t) {
+        const members = t.members.filter(orgMatches);
+        const lead = t.members.find(m => String(m.robloxUserId) === String(t.lead)) || null;
+        const rest = members.filter(m => !lead || String(m.robloxUserId) !== String(lead.robloxUserId));
+        const open = orgOpenTeams.has(String(t.id)) || !!orgSearch.trim();
+        const leadShown = lead && (orgMatches(lead) || (!orgSearch.trim() && rest.length));
+        return `
+          <div class="org-team ${open ? 'open' : ''}" style="--team-color:${esc(t.color || 'var(--muted)')};">
+            <button type="button" class="org-team-head" data-org-team="${esc(t.id)}" aria-expanded="${open}">
+              <span class="org-caret ${open ? 'open' : ''}" aria-hidden="true">&#9656;</span>
+              <span style="flex:1;min-width:0;">
+                <span class="org-team-name">${esc(t.name)}</span>
+                <span class="org-team-sub">${esc(t.members.length)} ${t.members.length === 1 ? 'person' : 'people'}${t.games.length ? ` &middot; ${esc(t.games.join(', '))}` : ''}</span>
+              </span>
+              ${!open ? `<span class="org-facepile">${t.members.slice(0, 5).map(m => avatarImg(m.robloxUserId, m.robloxUsername || '', 'class="org-face"')).join('')}${t.members.length > 5 ? `<span class="org-face more">+${t.members.length - 5}</span>` : ''}</span>` : ''}
+            </button>
+            ${open ? `
+            <div class="org-team-body">
+              ${leadShown ? `<div class="org-lead-wrap">${orgPersonCard(lead, 'Team lead' + ((lead.roles || [])[0] ? ' &middot; ' + esc(lead.roles[0]) : ''), { lead: true })}</div>` : ''}
+              ${rest.length ? groupMembers(rest).map(g => orgGroupHtml(String(t.id), g)).join('')
+              : `<p class="hint" style="margin:6px 0 0;">${orgSearch.trim() ? 'Nobody here matches your search.' : 'Only the lead so far.'}</p>`}
+            </div>` : ''}
           </div>`;
       }
 
       function orgHtml() {
         if (!org) return `<div class="dash-loading">Building the chart...</div>`;
-        const teamsWithPeople = org.teams.filter(t => t.members.length);
-        const emptyTeams = org.teams.filter(t => !t.members.length);
+        const q = orgSearch.trim();
+        const leadership = org.leadership.filter(orgMatches);
+        const teams = org.teams
+          .map(t => ({ t, hits: t.members.filter(orgMatches).length }))
+          .filter(x => q ? x.hits > 0 : x.t.members.length > 0)
+          .map(x => x.t);
+        const unassigned = org.unassigned.filter(orgMatches);
+        const emptyTeams = q ? [] : org.teams.filter(t => !t.members.length);
+        const matches = leadership.length + teams.reduce((n, t) => n + t.members.filter(orgMatches).length, 0) + unassigned.length;
+
         return `
-        <p class="sub" style="margin:-6px 0 18px;">Built from teams, skills and roles as they are right now. ${esc(org.totals.people)} people, ${esc(org.totals.onATeam)} of them on a team.</p>
+        <div class="org-toolbar">
+          <div class="search-input-wrap" style="flex:1 1 240px;">
+            <input type="text" id="orgSearchInput" placeholder="Find a person, role or skill" value="${esc(orgSearch)}" aria-label="Search the chart">
+          </div>
+          <div class="seg org-seg" role="tablist" aria-label="Group people by">
+            ${[['skill', 'By skill'], ['role', 'By role']].map(([v, l]) => `<button type="button" role="tab" aria-selected="${orgGroupBy === v}" class="${orgGroupBy === v ? 'on' : ''}" data-org-group-by="${v}">${l}</button>`).join('')}
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="orgCompactBtn" aria-pressed="${orgCompact}">${orgCompact ? 'Show details' : 'Compact'}</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="orgExpandBtn">${orgOpenTeams.size ? 'Collapse all' : 'Expand all'}</button>
+        </div>
+        <p class="sub" style="margin:0 0 18px;">${q
+            ? `${matches} ${matches === 1 ? 'person matches' : 'people match'} "${esc(q)}".`
+            : `${esc(org.totals.people)} people across ${esc(org.totals.teams)} teams, ${esc(org.totals.onATeam)} of them on a team. Built from teams, skills and roles as they are right now.`}</p>
         <div class="org-chart">
-          ${org.leadership.length ? `
+          ${leadership.length ? `
           <div class="org-tier">
             <div class="org-tier-label">Leadership</div>
-            <div class="org-row">${org.leadership.map(p => orgPersonCard(p)).join('')}</div>
+            <div class="org-row">${leadership.map(p => orgPersonCard(p, null, { lead: true })).join('')}</div>
           </div>
           <div class="org-connector" aria-hidden="true"></div>` : ''}
-          ${teamsWithPeople.length ? `
-          <div class="org-teams">
-            ${teamsWithPeople.map(t => `
-            <div class="org-team" style="--team-color:${esc(t.color || 'var(--muted)')};">
-              <div class="org-team-head">
-                <h3>${esc(t.name)}</h3>
-                <span>${esc(t.members.length)} ${t.members.length === 1 ? 'member' : 'members'}${t.games.length ? ` &middot; ${esc(t.games.join(', '))}` : ''}</span>
-              </div>
-              <div class="org-team-body">
-                ${t.members.map(m => orgPersonCard(m, [
-          String(m.robloxUserId) === String(t.lead) ? '<b>Lead</b>' : null,
-          m.skillset ? esc(m.skillset.name) : null,
-          esc((m.roles || [])[0] || '')
-        ].filter(Boolean).join(' &middot; '))).join('')}
-              </div>
-            </div>`).join('')}
-          </div>` : `<div class="dash-empty"><h3>Nobody is on a team yet</h3><p>Add people to teams from the Staff page and they will appear here.</p></div>`}
+          ${teams.length ? `<div class="org-teams">${teams.map(orgTeamHtml).join('')}</div>`
+            : `<div class="dash-empty"><h3>${q ? 'No teams match' : 'Nobody is on a team yet'}</h3><p>${q ? 'Try a different name, role or skill.' : 'Add people to teams from the Staff page and they will appear here.'}</p></div>`}
           ${emptyTeams.length ? `<p class="hint" style="margin-top:14px;">Teams with nobody on them: ${emptyTeams.map(t => esc(t.name)).join(', ')}.</p>` : ''}
-          ${org.unassigned.length ? `
-          <div class="org-tier" style="margin-top:26px;">
-            <div class="org-tier-label">Not on a team (${esc(org.unassigned.length)})</div>
-            <div class="org-row">${org.unassigned.map(p => orgPersonCard(p)).join('')}</div>
+          ${unassigned.length ? `
+          <div class="org-team org-team-loose ${orgOpenTeams.has('none') || q ? 'open' : ''}" style="--team-color:var(--muted);margin-top:22px;">
+            <button type="button" class="org-team-head" data-org-team="none" aria-expanded="${orgOpenTeams.has('none') || !!q}">
+              <span class="org-caret ${orgOpenTeams.has('none') || q ? 'open' : ''}" aria-hidden="true">&#9656;</span>
+              <span style="flex:1;min-width:0;">
+                <span class="org-team-name">Not on a team</span>
+                <span class="org-team-sub">${esc(unassigned.length)} ${unassigned.length === 1 ? 'person' : 'people'}</span>
+              </span>
+              ${!(orgOpenTeams.has('none') || q) ? `<span class="org-facepile">${unassigned.slice(0, 5).map(m => avatarImg(m.robloxUserId, '', 'class="org-face"')).join('')}${unassigned.length > 5 ? `<span class="org-face more">+${unassigned.length - 5}</span>` : ''}</span>` : ''}
+            </button>
+            ${orgOpenTeams.has('none') || q ? `<div class="org-team-body">${groupMembers(unassigned).map(g => orgGroupHtml('none', g)).join('')}</div>` : ''}
           </div>` : ''}
         </div>`;
       }
@@ -12299,6 +12528,27 @@
           history.replaceState(null, '', view === 'org' ? '#/teams?view=org' : '#/teams');
           if (view === 'org' && !org) load(); else paint();
         }));
+        const orgSearchInput = document.getElementById('orgSearchInput');
+        if (orgSearchInput) orgSearchInput.addEventListener('input', debounce(() => { orgSearch = orgSearchInput.value; paint(); const el = document.getElementById('orgSearchInput'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 150));
+        document.querySelectorAll('[data-org-group-by]').forEach(el => el.addEventListener('click', () => { orgGroupBy = el.dataset.orgGroupBy; orgOpenGroups = new Set(); paint(); }));
+        const compactBtn = document.getElementById('orgCompactBtn');
+        if (compactBtn) compactBtn.addEventListener('click', () => { orgCompact = !orgCompact; paint(); });
+        const expandBtn = document.getElementById('orgExpandBtn');
+        if (expandBtn) expandBtn.addEventListener('click', () => {
+          if (orgOpenTeams.size) { orgOpenTeams = new Set(); orgOpenGroups = new Set(); }
+          else { orgOpenTeams = new Set([...(org ? org.teams.map(t => String(t.id)) : []), 'none']); }
+          paint();
+        });
+        document.querySelectorAll('[data-org-team]').forEach(el => el.addEventListener('click', () => {
+          const id = el.dataset.orgTeam;
+          if (orgOpenTeams.has(id)) orgOpenTeams.delete(id); else orgOpenTeams.add(id);
+          paint();
+        }));
+        document.querySelectorAll('[data-org-group]').forEach(el => el.addEventListener('click', () => {
+          const key = el.dataset.orgGroup;
+          if (orgOpenGroups.has(key)) orgOpenGroups.delete(key); else orgOpenGroups.add(key);
+          paint();
+        }));
         const printOrg = document.getElementById('printOrgBtn');
         if (printOrg) printOrg.addEventListener('click', () => window.print());
         document.querySelectorAll('.org-person').forEach(el => el.addEventListener('keydown', (e) => {
@@ -12400,6 +12650,9 @@
             const json = await callHrData('org_chart');
             org = json.data;
             detail = null;
+            if (!orgOpenTeams.size && org.totals.onATeam <= 40) {
+              orgOpenTeams = new Set([...org.teams.filter(t => t.members.length).map(t => String(t.id)), 'none']);
+            }
           } else {
             const json = await callHrData('teams_overview');
             overview = json.data;
