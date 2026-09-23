@@ -4680,6 +4680,7 @@ app.post('/hr-data', async (req, res) => {
         if (!teamId || !title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
         const paymentAmount = payload.payment === '' || payload.payment == null ? null : Number(payload.payment);
         if (paymentAmount != null && (!Number.isFinite(paymentAmount) || paymentAmount < 0)) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        const newDueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
         const shared = {
             team_id: teamId,
             game_id: payload.gameId || null,
@@ -4687,14 +4688,16 @@ app.post('/hr-data', async (req, res) => {
             details: payload.details ? String(payload.details).trim() : null,
             payment: paymentAmount,
             currency: paymentAmount != null ? (payload.currency === 'USD' ? 'USD' : 'ROBUX') : null,
-            due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null,
-            repeat_every: ['weekly', 'fortnightly', 'monthly'].includes(payload.repeatEvery) ? payload.repeatEvery : null,
-            reminders_sent: []
+            due_at: newDueAt,
+            repeat_every: ['weekly', 'fortnightly', 'monthly'].includes(payload.repeatEvery) ? payload.repeatEvery : null
         };
         const assignToEveryone = payload.assignToEveryone === true;
 
         if (payload.batchId) {
-            const { error } = await supabase.from('team_tasks').update(shared).eq('batch_id', payload.batchId);
+            const { data: beforeBatch } = await supabase.from('team_tasks').select('due_at').eq('batch_id', payload.batchId).limit(1).maybeSingle();
+            const batchRow = { ...shared };
+            if (!beforeBatch || beforeBatch.due_at !== newDueAt) batchRow.reminders_sent = [];
+            const { error } = await supabase.from('team_tasks').update(batchRow).eq('batch_id', payload.batchId);
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
             const { data: updated } = await supabase.from('team_tasks').select('*').eq('batch_id', payload.batchId);
             let notified = 0;
@@ -4707,13 +4710,14 @@ app.post('/hr-data', async (req, res) => {
         }
 
         if (payload.id) {
-            const { data: before } = await supabase.from('team_tasks').select('assigned_to_user_id').eq('id', payload.id).maybeSingle();
+            const { data: before } = await supabase.from('team_tasks').select('assigned_to_user_id, due_at').eq('id', payload.id).maybeSingle();
             const row = {
                 ...shared,
                 assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
                 assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null
             };
-            const { data: updatedRows, error } = await supabase.from('team_tasks').update(row).eq('id', payload.id).select('id, payment, currency, game_id');
+            if (!before || before.due_at !== newDueAt) row.reminders_sent = [];
+            const { data: updatedRows, error } = await supabase.from('team_tasks').update(row).eq('id', payload.id).select('id, payment, currency, game_id, due_at');
             console.log('[save_team_task] update payload:', row, '-> result:', updatedRows, error);
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
             if (!updatedRows || !updatedRows.length) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
@@ -4727,7 +4731,7 @@ app.post('/hr-data', async (req, res) => {
             return;
         }
 
-        const base = { ...shared, status: 'open', created_by: session.roblox_username, created_at: new Date().toISOString() };
+        const base = { ...shared, reminders_sent: [], status: 'open', created_by: session.roblox_username, created_at: new Date().toISOString() };
 
         if (assignToEveryone) {
             const { data: members } = await supabase.from('user_assignments').select('roblox_user_id, roblox_username').eq('team_id', teamId);

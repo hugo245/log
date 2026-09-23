@@ -12815,7 +12815,7 @@
             <div class="team-form-row">
               <div class="field"><label for="taskDue">Deadline</label><input type="date" id="taskDue" value="${d.due_at ? esc(String(d.due_at).slice(0, 10)) : ''}"></div>
               <div class="field"><label for="taskGame">Game <span class="hint">(optional)</span></label>
-                <select id="taskGame"><option value="">No specific game</option>${detail.games.map(g => `<option value="${esc(g.id)}" ${String(d.game_id) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>
+                <select id="taskGame"><option value="">No specific game</option>${detail.games.map(g => `<option value="${esc(g.id)}" ${String(d.game_id) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}${d.game_id && !detail.games.some(g => String(g.id) === String(d.game_id)) ? `<option value="${esc(d.game_id)}" selected>Previously linked game (not on this team anymore)</option>` : ''}</select>
               </div>
               <div class="field"><label for="taskPayment">Pays <span class="hint">(optional)</span></label>
                 <div style="display:flex;gap:6px;">
