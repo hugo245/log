@@ -4713,8 +4713,9 @@ app.post('/hr-data', async (req, res) => {
                 assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
                 assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null
             };
-            const { error } = await supabase.from('team_tasks').update(row).eq('id', payload.id);
+            const { data: updatedRows, error } = await supabase.from('team_tasks').update(row).eq('id', payload.id).select('id');
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (!updatedRows || !updatedRows.length) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
             let notified = false;
             if (row.assigned_to_user_id) {
                 const reassigned = !before || String(before.assigned_to_user_id) !== String(row.assigned_to_user_id);
