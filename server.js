@@ -1119,6 +1119,24 @@ function nextDueDate(dueAt, repeatEvery) {
     return d.toISOString();
 }
 
+async function notifyTaskAssigned(task, teamId) {
+    if (!task || !task.assigned_to_user_id) return false;
+    let teamName = 'your team';
+    if (teamId) {
+        const { data: team } = await supabase.from('teams').select('name').eq('id', teamId).maybeSingle();
+        if (team && team.name) teamName = team.name;
+    }
+    const due = task.due_at ? `\nDue ${new Date(task.due_at).toUTCString()}.` : '';
+    const details = task.details ? `\n${task.details}` : '';
+    const repeats = task.repeat_every ? `\nThis one repeats ${{ weekly: 'every week', fortnightly: 'every 2 weeks', monthly: 'every month' }[task.repeat_every]}.` : '';
+    const text = `New ${teamName} task for you on PlayVerse: "${task.title}".${due}${details}${repeats}`;
+    try {
+        return await notifyModeratedUser(task.assigned_to_user_id, text);
+    } catch (e) {
+        return false;
+    }
+}
+
 async function notifyPaymentOutcome(request, outcome, note) {
     if (!request || !request.roblox_user_id) return false;
     const amount = request.currency === 'ROBUX'
@@ -4509,30 +4527,80 @@ app.post('/hr-data', async (req, res) => {
         if (!(await canManageTeamTasks(session, teamId))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
         const title = payload.title ? String(payload.title).trim() : '';
         if (!teamId || !title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
-        const row = {
+        const shared = {
             team_id: teamId,
             game_id: payload.gameId || null,
             title,
             details: payload.details ? String(payload.details).trim() : null,
-            assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
-            assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null,
             due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null,
             repeat_every: ['weekly', 'fortnightly', 'monthly'].includes(payload.repeatEvery) ? payload.repeatEvery : null,
             reminders_sent: []
         };
+        const assignToEveryone = payload.assignToEveryone === true;
+
+        if (payload.batchId) {
+            const { error } = await supabase.from('team_tasks').update(shared).eq('batch_id', payload.batchId);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            await logAudit(session, { category: 'teams', action: 'update_task', details: { teamId, title, everyone: true } });
+            res.json({ ok: true });
+            return;
+        }
+
         if (payload.id) {
+            const { data: before } = await supabase.from('team_tasks').select('assigned_to_user_id').eq('id', payload.id).maybeSingle();
+            const row = {
+                ...shared,
+                assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
+                assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null
+            };
             const { error } = await supabase.from('team_tasks').update(row).eq('id', payload.id);
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            let notified = false;
+            if (row.assigned_to_user_id && (!before || String(before.assigned_to_user_id) !== String(row.assigned_to_user_id))) {
+                notified = await notifyTaskAssigned(row, teamId);
+            }
             await logAudit(session, { category: 'teams', action: 'update_task', details: { teamId, title } });
-        } else {
-            row.status = 'open';
-            row.created_by = session.roblox_username;
-            row.created_at = new Date().toISOString();
-            const { error } = await supabase.from('team_tasks').insert(row);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-            await logAudit(session, { category: 'teams', action: 'create_task', details: { teamId, title, dueAt: row.due_at } });
+            res.json({ ok: true, notified: notified ? 1 : 0 });
+            return;
         }
-        res.json({ ok: true });
+
+        const base = { ...shared, status: 'open', created_by: session.roblox_username, created_at: new Date().toISOString() };
+
+        if (assignToEveryone) {
+            const { data: members } = await supabase.from('user_assignments').select('roblox_user_id, roblox_username').eq('team_id', teamId);
+            const list = (members || []).filter(m => m.roblox_user_id);
+            if (!list.length) { res.status(400).json({ ok: false, error: 'no_team_members' }); return; }
+            const batchId = randomToken(12);
+            const rows = list.map(m => ({
+                ...base,
+                batch_id: batchId,
+                assigned_to_user_id: m.roblox_user_id,
+                assigned_to_username: m.roblox_username || null
+            }));
+            const { error } = await supabase.from('team_tasks').insert(rows);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            let notified = 0;
+            for (const row of rows) {
+                if (await notifyTaskAssigned(row, teamId)) notified += 1;
+            }
+            await logAudit(session, {
+                category: 'teams', action: 'create_task',
+                details: { teamId, title, dueAt: base.due_at, everyone: true, people: rows.length, notified }
+            });
+            res.json({ ok: true, created: rows.length, notified });
+            return;
+        }
+
+        const row = {
+            ...base,
+            assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
+            assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null
+        };
+        const { error } = await supabase.from('team_tasks').insert(row);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const notified = row.assigned_to_user_id ? await notifyTaskAssigned(row, teamId) : false;
+        await logAudit(session, { category: 'teams', action: 'create_task', details: { teamId, title, dueAt: row.due_at } });
+        res.json({ ok: true, created: 1, notified: notified ? 1 : 0 });
         return;
     }
 
@@ -4560,6 +4628,7 @@ app.post('/hr-data', async (req, res) => {
             if (nextDue) {
                 const { data: made } = await supabase.from('team_tasks').insert({
                     team_id: task.team_id,
+                    batch_id: task.batch_id || null,
                     game_id: task.game_id,
                     title: task.title,
                     details: task.details,
@@ -4582,12 +4651,17 @@ app.post('/hr-data', async (req, res) => {
 
     if (action === 'delete_team_task') {
         const id = payload.id;
-        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        const { data: taskRow } = await supabase.from('team_tasks').select('team_id').eq('id', id).maybeSingle();
+        const batchId = payload.batchId || null;
+        if (!id && !batchId) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: taskRow } = batchId
+            ? await supabase.from('team_tasks').select('team_id').eq('batch_id', batchId).limit(1).maybeSingle()
+            : await supabase.from('team_tasks').select('team_id').eq('id', id).maybeSingle();
         if (taskRow && !(await canManageTeamTasks(session, taskRow.team_id))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
-        const { error } = await supabase.from('team_tasks').delete().eq('id', id);
+        const { error } = batchId
+            ? await supabase.from('team_tasks').delete().eq('batch_id', batchId)
+            : await supabase.from('team_tasks').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        await logAudit(session, { category: 'teams', action: 'delete_task', details: { taskId: id } });
+        await logAudit(session, { category: 'teams', action: 'delete_task', details: { taskId: id, batchId } });
         res.json({ ok: true });
         return;
     }

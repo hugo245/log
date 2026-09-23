@@ -4699,6 +4699,22 @@
       margin-top: 5px;
     }
 
+    .task-people {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 10px;
+      padding-left: 12px;
+      border-left: 2px solid var(--line);
+    }
+
+    .task-person {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+
     .task-details {
       font-size: 13px;
       color: var(--ink-soft);
@@ -12176,6 +12192,7 @@
       let linkingGameId = null;
       let chartMetric = 'playing';
       let historyChart = null;
+      let openTaskBatches = new Set();
 
       function go(nextTeamId, nextTab) {
         teamId = nextTeamId;
@@ -12451,10 +12468,55 @@
         return !!(detail && (detail.canManage || detail.canManageTasks));
       }
 
+      function batchRowHtml(batch) {
+        const first = batch[0];
+        const done = batch.filter(t => t.status === 'done').length;
+        const openOnes = batch.filter(t => t.status === 'open');
+        const st = taskState(openOnes[0] || first);
+        const key = 'batch:' + first.batch_id;
+        const expanded = openTaskBatches.has(key);
+        const game = detail.games.find(g => String(g.id) === String(first.game_id));
+        return `
+          <div class="task-row">
+            <div style="flex:1;min-width:0;">
+              <div class="task-title ${done === batch.length ? 'done' : ''}">${esc(first.title)} <span class="pp-tag">Everyone</span></div>
+              <div class="task-meta">
+                <span class="pp-state ${done === batch.length ? 'ok' : st.cls}">${done === batch.length ? 'All done' : esc(st.label)}</span>
+                <span>${esc(done)} of ${esc(batch.length)} done</span>
+                ${game ? `<span>${esc(game.name)}</span>` : ''}
+                ${first.due_at ? `<span title="${esc(fmtDateTime(first.due_at))}">${esc(fmtDate(first.due_at))}</span>` : ''}
+                ${first.repeat_every ? `<span class="pp-tag">Repeats ${esc({ weekly: 'weekly', fortnightly: 'every 2 weeks', monthly: 'monthly' }[first.repeat_every] || first.repeat_every)}</span>` : ''}
+                <button type="button" class="pp-linkbtn" data-batch-toggle="${esc(key)}">${expanded ? 'Hide people' : 'Show people'}</button>
+              </div>
+              ${first.details ? `<div class="task-details">${esc(first.details)}</div>` : ''}
+              ${expanded ? `<div class="task-people">${batch.map(t => `
+                <div class="task-person">
+                  ${avatarImg(t.assigned_to_user_id, '', 'style="width:22px;height:22px;border-radius:50%;"')}
+                  <span style="flex:1;min-width:0;">${userLink(t.assigned_to_user_id, t.assigned_to_username)}</span>
+                  <span class="pp-state ${taskState(t).cls}">${esc(taskState(t).label)}</span>
+                  ${canTasks() ? `<button type="button" class="pp-linkbtn" data-task-toggle="${esc(t.id)}" data-status="${t.status === 'done' ? 'open' : 'done'}">${t.status === 'done' ? 'Reopen' : 'Done'}</button>` : ''}
+                </div>`).join('')}</div>` : ''}
+            </div>
+            ${canTasks() ? `
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-ghost btn-sm" data-batch-edit="${esc(first.batch_id)}">Edit</button>
+              <button type="button" class="pp-icon-btn" data-batch-delete="${esc(first.batch_id)}" aria-label="Delete ${esc(first.title)} for everyone">&times;</button>
+            </div>` : ''}
+          </div>`;
+      }
+
       function deadlinesHtml() {
         const s = detail.taskSummary;
-        const open = detail.tasks.filter(t => t.status === 'open');
-        const closed = detail.tasks.filter(t => t.status !== 'open');
+        const batches = new Map();
+        detail.tasks.forEach(t => {
+          if (!t.batch_id) return;
+          if (!batches.has(t.batch_id)) batches.set(t.batch_id, []);
+          batches.get(t.batch_id).push(t);
+        });
+        const open = detail.tasks.filter(t => t.status === 'open' && !t.batch_id);
+        const closed = detail.tasks.filter(t => t.status !== 'open' && !t.batch_id);
+        const openBatches = [...batches.values()].filter(b => b.some(t => t.status === 'open'));
+        const doneBatches = [...batches.values()].filter(b => !b.some(t => t.status === 'open'));
         const row = (t) => {
           const st = taskState(t);
           const game = detail.games.find(g => String(g.id) === String(t.game_id));
@@ -12501,7 +12563,12 @@
                 <select id="taskRepeat">${[['', 'Does not repeat'], ['weekly', 'Every week'], ['fortnightly', 'Every 2 weeks'], ['monthly', 'Every month']].map(([v, l]) => `<option value="${v}" ${String(d.repeat_every || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
               </div>
               <div class="field"><label for="taskAssignee">Assign to <span class="hint">(optional)</span></label>
-                <select id="taskAssignee"><option value="">Nobody</option>${detail.members.map(m => `<option value="${esc(m.robloxUserId)}" ${String(d.assigned_to_user_id) === String(m.robloxUserId) ? 'selected' : ''}>${esc(m.robloxUsername)}</option>`).join('')}</select>
+                <select id="taskAssignee" ${d.batch_id ? 'disabled' : ''}>
+                  <option value="">Nobody</option>
+                  ${d.id ? '' : `<option value="__all__" ${d.assignAll ? 'selected' : ''}>Everyone on the team (${esc(detail.members.length)})</option>`}
+                  ${detail.members.map(m => `<option value="${esc(m.robloxUserId)}" ${String(d.assigned_to_user_id) === String(m.robloxUserId) ? 'selected' : ''}>${esc(m.robloxUsername)}</option>`).join('')}
+                </select>
+                ${d.batch_id ? '<span class="hint">Given to everyone. Editing changes it for all of them.</span>' : ''}
               </div>
             </div>
             <div class="field"><label for="taskDetails">Notes <span class="hint">(optional)</span></label><textarea id="taskDetails" rows="2">${esc(d.details || '')}</textarea></div>
@@ -12510,8 +12577,8 @@
               <button type="button" class="btn btn-ghost btn-sm" id="cancelTaskBtn">Cancel</button>
             </div>
           </div>` : `<button type="button" class="btn btn-primary btn-sm" id="newTaskBtn" style="margin-bottom:18px;">Add a task</button>`) : ''}
-          ${open.length ? `<div class="task-list">${open.map(row).join('')}</div>` : `<div class="dash-empty"><h3>Nothing open</h3><p>${canTasks() ? 'Add a task to start tracking deadlines for this team.' : 'This team has no open tasks.'}</p></div>`}
-          ${closed.length ? `<h3 class="sec-title" style="margin:24px 0 8px;font-size:15px;">Finished (${closed.length})</h3><div class="task-list">${closed.map(row).join('')}</div>` : ''}`;
+          ${open.length || openBatches.length ? `<div class="task-list">${openBatches.map(batchRowHtml).join('')}${open.map(row).join('')}</div>` : `<div class="dash-empty"><h3>Nothing open</h3><p>${canTasks() ? 'Add a task to start tracking deadlines for this team.' : 'This team has no open tasks.'}</p></div>`}
+          ${closed.length || doneBatches.length ? `<h3 class="sec-title" style="margin:24px 0 8px;font-size:15px;">Finished (${closed.length + doneBatches.length})</h3><div class="task-list">${doneBatches.map(batchRowHtml).join('')}${closed.map(row).join('')}</div>` : ''}`;
       }
 
       function paint() {
@@ -12642,17 +12709,35 @@
           if (!title) { toast('Give the task a name.', 'err'); return; }
           const due = document.getElementById('taskDue').value;
           const assignee = document.getElementById('taskAssignee').value;
+          const everyone = assignee === '__all__';
+          if (everyone && !detail.members.length) { toast('Nobody is on this team yet.', 'err'); return; }
           const member = detail.members.find(m => String(m.robloxUserId) === String(assignee));
-          await run(() => callHrData('save_team_task', {
-            id: taskDraft.id, teamId, title,
+          const saved = await run(() => callHrData('save_team_task', {
+            id: taskDraft.id, batchId: taskDraft.batch_id || null, teamId, title,
             details: document.getElementById('taskDetails').value.trim(),
             dueAt: due ? new Date(due + 'T23:59:59').toISOString() : null,
             gameId: document.getElementById('taskGame').value || null,
-            assignedToUserId: assignee || null,
-            assignedToUsername: member ? member.robloxUsername : null,
+            assignToEveryone: everyone,
+            assignedToUserId: everyone ? null : (assignee || null),
+            assignedToUsername: everyone ? null : (member ? member.robloxUsername : null),
             repeatEvery: document.getElementById('taskRepeat').value || null
-          }), taskDraft.id ? 'Task updated' : 'Task added', () => { taskDraft = null; });
+          }), taskDraft.id || taskDraft.batch_id ? 'Task updated' : (everyone ? `Task given to ${detail.members.length} people` : 'Task added'), () => { taskDraft = null; });
+          if (saved && saved.created > 1) toast(saved.notified ? `${saved.notified} of ${saved.created} got a Discord message.` : 'Nobody had Discord linked, so no messages were sent.', saved.notified ? undefined : 'err');
         });
+        document.querySelectorAll('[data-batch-toggle]').forEach(el => el.addEventListener('click', () => {
+          const key = el.dataset.batchToggle;
+          if (openTaskBatches.has(key)) openTaskBatches.delete(key); else openTaskBatches.add(key);
+          paint();
+        }));
+        document.querySelectorAll('[data-batch-edit]').forEach(el => el.addEventListener('click', () => {
+          taskDraft = detail.tasks.find(t => String(t.batch_id) === String(el.dataset.batchEdit)) || null;
+          paint();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }));
+        document.querySelectorAll('[data-batch-delete]').forEach(el => el.addEventListener('click', async () => {
+          if (!confirm('Delete this task for everyone it was given to?')) return;
+          await run(() => callHrData('delete_team_task', { batchId: el.dataset.batchDelete }), 'Task deleted for everyone');
+        }));
         document.querySelectorAll('[data-task-edit]').forEach(el => el.addEventListener('click', () => {
           taskDraft = detail.tasks.find(t => String(t.id) === String(el.dataset.taskEdit)) || null;
           paint();
@@ -12708,12 +12793,14 @@
 
       async function run(fn, successText, after) {
         busy = true; paint();
+        let result = null;
         try {
-          await fn();
+          result = await fn();
           if (after) after();
           toast(successText);
           busy = false;
           await load();
+          return result;
         } catch (e) {
           busy = false;
           toast(e.message || 'That did not save.', 'err');
