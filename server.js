@@ -4611,7 +4611,6 @@ app.post('/hr-data', async (req, res) => {
             : { data: null };
         const requestId = generateRequestId();
         const currency = task.currency === 'USD' ? 'USD' : 'ROBUX';
-        const markPaid = payload.markPaid === true && hasPermission(session, 'dashboard.mark_paid');
         const { error } = await supabase.from('payment_requests').insert({
             id: requestId,
             requested_by: session.roblox_username,
@@ -4625,9 +4624,9 @@ app.post('/hr-data', async (req, res) => {
             time_worked: '',
             payment: Number(task.payment),
             currency,
-            paid: markPaid,
-            status: markPaid ? 'paid' : 'pending',
-            paid_at: markPaid ? new Date().toISOString() : null,
+            paid: false,
+            status: 'pending',
+            paid_at: null,
             created_at: new Date().toISOString()
         });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
@@ -4635,15 +4634,14 @@ app.post('/hr-data', async (req, res) => {
         await logAudit(session, {
             category: 'payments', action: 'submit_request',
             targetUserId: task.assigned_to_user_id, targetUsername: task.assigned_to_username,
-            details: { id: requestId, taskName: task.title, payment: task.payment, currency, fromTask: id, markedPaid: markPaid },
+            details: { id: requestId, taskName: task.title, payment: task.payment, currency, fromTask: id },
             revert: { type: 'delete_payment_request', id: requestId }
         });
         runPaymentMethodConversionSweep({ robloxUserId: task.assigned_to_user_id });
         const amount = currency === 'ROBUX' ? `R$ ${Number(task.payment).toLocaleString()}` : `$${Number(task.payment).toFixed(2)}`;
-        const notified = await notifyModeratedUser(task.assigned_to_user_id, markPaid
-            ? `Your payment for "${task.title}" (${amount}) has been marked as paid.`
-            : `Your payment for "${task.title}" (${amount}) has been logged and is waiting to be paid out. You can follow it under My payments on PlayVerse.`);
-        res.json({ ok: true, requestId, markedPaid: markPaid, notified });
+        const notified = await notifyModeratedUser(task.assigned_to_user_id,
+            `Your payment for "${task.title}" (${amount}) has been logged and is waiting to be paid out. You can follow it under My payments on PlayVerse.`);
+        res.json({ ok: true, requestId, notified });
         return;
     }
 

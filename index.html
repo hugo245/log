@@ -12370,12 +12370,11 @@
         const payBtn = document.getElementById('taskPayBtn');
         if (payBtn) payBtn.addEventListener('click', async () => {
           const t = data.task;
-          const alsoMark = hasPermission('dashboard.mark_paid')
-            && confirm(`Log ${money(t)} for ${t.assigned_to_username}.\n\nPress OK if you have already sent it and want it marked as paid.\nPress Cancel to log it as pending, so it shows on the dashboard to pay.`);
+          if (!confirm(`Log ${money(t)} for ${t.assigned_to_username} as a pending payment?\n\nIt'll show up on the payments dashboard to be paid out from there.`)) return;
           busy = true; paint();
           try {
-            const r = await callHrData('pay_team_task', { id: t.id, markPaid: alsoMark });
-            toast(r.markedPaid ? `Logged and marked paid (${r.requestId}).` : `Payment logged as pending (${r.requestId}).`);
+            const r = await callHrData('pay_team_task', { id: t.id });
+            toast(`Payment logged as pending (${r.requestId}).`);
             busy = false;
             await load();
           } catch (e) {
