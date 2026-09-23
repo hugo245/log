@@ -4708,6 +4708,15 @@
       flex: 0 0 auto;
     }
 
+    .task-banner {
+      width: 100%;
+      max-height: 220px;
+      object-fit: cover;
+      border-radius: 14px;
+      margin-bottom: 18px;
+      display: block;
+    }
+
     .task-page-head {
       display: flex;
       gap: 16px;
@@ -4747,6 +4756,16 @@
     .task-facts b {
       font-size: 14.5px;
       overflow-wrap: anywhere;
+    }
+
+    .my-task-row {
+      text-decoration: none;
+      color: inherit;
+      align-items: center;
+    }
+
+    .my-task-row:hover {
+      background: var(--row-alt);
     }
 
     .task-people {
@@ -9747,6 +9766,8 @@
 
       let myBroadcasts = [];
       let myBroadcastsLoading = true;
+      let myTasks = [];
+      let myTasksLoading = true;
 
       let myTeams = [];
       let myTeamsLoading = true;
@@ -9860,6 +9881,33 @@
         <h1>My payments</h1>
         <p class="sub">What you're owed, how you get paid, and whether you meet the payout requirements. A producer logs requests for you, so there's nothing to submit yourself.</p>
       </div>
+
+      ${!myTasksLoading && myTasks.length ? `
+      <div class="panel" style="margin-bottom:24px;">
+        <h2 class="sec-title" style="font-size:16px;">Your tasks</h2>
+        <p class="sub" style="margin:0 0 12px;">Work your team lead has set for you. Open one to see the details and mark it done.</p>
+        <div class="task-list">
+          ${myTasks.map(t => {
+          const st = taskState(t);
+          const pay = t.payment ? (t.currency === 'USD' ? '$' + Number(t.payment).toFixed(2) : 'R$ ' + Number(t.payment).toLocaleString()) : null;
+          return `
+            <a class="task-row my-task-row" href="#/task/${encodeURIComponent(t.id)}">
+              ${t.game && t.game.icon_url ? `<img src="${esc(t.game.icon_url)}" alt="" class="game-icon" style="width:38px;height:38px;border-radius:8px;">` : ''}
+              <div style="flex:1;min-width:0;">
+                <div class="task-title ${t.status === 'done' ? 'done' : ''}">${esc(t.title)}</div>
+                <div class="task-meta">
+                  <span class="pp-state ${st.cls}">${esc(st.label)}</span>
+                  ${t.team ? `<span>${esc(t.team.name)}</span>` : ''}
+                  ${t.game ? `<span>${esc(t.game.name)}</span>` : ''}
+                  ${pay ? `<span class="pp-tag">${esc(pay)}</span>` : ''}
+                  ${t.payment_request_id ? `<span class="pp-state ok">Payment logged</span>` : ''}
+                </div>
+              </div>
+              <span class="pp-linkbtn">Open</span>
+            </a>`;
+        }).join('')}
+        </div>
+      </div>` : ''}
 
       ${locked ? lockBannerHtml() : ''}
       <div class="${locked ? 'locked-zone' : ''}" ${locked ? 'inert aria-disabled="true"' : ''}>
@@ -10141,6 +10189,19 @@
         paint();
       }
 
+      async function loadMyTasksData() {
+        myTasksLoading = true;
+        try {
+          const json = await callHrData('my_tasks');
+          myTasks = json.data || [];
+        } catch (err) {
+          myTasks = [];
+        }
+        if (myGen !== renderGen) return;
+        myTasksLoading = false;
+        paint();
+      }
+
       async function loadMyBroadcastsData() {
         myBroadcastsLoading = true; paint();
         try {
@@ -10238,6 +10299,7 @@
       loadEligibility();
       loadWarnings();
       loadMyBroadcastsData();
+      loadMyTasksData();
       loadMyTeamsData();
       syncAccess(false);
     }
@@ -12250,6 +12312,7 @@
           const others = (data.sharedWith || []).filter(x => String(x.id) !== String(t.id));
           body = `
       <div class="task-page">
+        ${data.game && data.game.thumbnail_url ? `<img src="${esc(data.game.thumbnail_url)}" alt="${esc(data.game.name)}" class="task-banner">` : ''}
         <div class="task-page-head">
           ${data.game && data.game.icon_url
               ? `<img src="${esc(data.game.icon_url)}" alt="" class="task-game-icon">`
@@ -12274,10 +12337,16 @@
 
         ${t.details ? `<div class="panel" style="margin:0 0 18px;"><h3 style="margin:0 0 8px;font-size:15px;">Details</h3><p class="task-details" style="margin:0;">${esc(t.details)}</p></div>` : ''}
 
-        ${money(t) ? `<div class="filter-notice" style="margin-bottom:18px;">Once this is finished, log a payment request for ${esc(money(t))} so it gets paid.${canSubmitRequests() ? '' : ' Ask your lead to log it.'}${canSubmitRequests() ? ` <a class="btn btn-ghost btn-sm" href="#/new">Log the payment</a>` : ''}</div>` : ''}
+        ${money(t) ? (t.payment_request_id
+              ? `<div class="confirm-box" style="margin-bottom:18px;"><div class="icon">&#10003;</div><div class="txt"><strong>Payment logged</strong><span>${esc(money(t))} for ${esc(t.assigned_to_username || 'them')}. Follow it on the payments dashboard.</span></div></div>`
+              : done
+                ? `<div class="filter-notice" style="margin-bottom:18px;">Finished and worth ${esc(money(t))}.${data.canManage && canSubmitRequests() ? '' : ' A lead can log the payment from here.'}</div>`
+                : `<div class="filter-notice" style="margin-bottom:18px;">Pays ${esc(money(t))} once it's finished and a lead logs it.</div>`) : ''}
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          ${(data.isMine || data.canManage) ? `<button type="button" class="btn ${done ? 'btn-ghost' : 'btn-primary'} btn-sm" id="taskToggleBtn" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : done ? 'Reopen this task' : 'Mark it done'}</button>` : ''}
+          ${(data.isMine || data.canManage) ? `<button type="button" class="btn ${done && t.payment ? 'btn-ghost' : done ? 'btn-ghost' : 'btn-primary'} btn-sm" id="taskToggleBtn" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : done ? 'Reopen this task' : 'Mark it done'}</button>` : ''}
+          ${done && t.payment && !t.payment_request_id && data.canManage && canSubmitRequests()
+              ? `<button type="button" class="btn btn-ok btn-sm" id="taskPayBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : `Pay ${esc(money(t))}`}</button>` : ''}
           ${data.team ? `<a class="btn btn-ghost btn-sm" href="#/teams?team=${encodeURIComponent(data.team.id)}&tab=deadlines">All ${esc(data.team.name)} deadlines</a>` : ''}
           ${data.game && data.game.roblox_place_id ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/games/${esc(data.game.roblox_place_id)}" target="_blank" rel="noopener">Open the game</a>` : ''}
         </div>
@@ -12298,6 +12367,23 @@
 
         app.innerHTML = `${topbar()}<div class="dash-shell">${body}</div>`;
         wireTopbarSignOut();
+        const payBtn = document.getElementById('taskPayBtn');
+        if (payBtn) payBtn.addEventListener('click', async () => {
+          const t = data.task;
+          const alsoMark = hasPermission('dashboard.mark_paid')
+            && confirm(`Log ${money(t)} for ${t.assigned_to_username}.\n\nPress OK if you have already sent it and want it marked as paid.\nPress Cancel to log it as pending, so it shows on the dashboard to pay.`);
+          busy = true; paint();
+          try {
+            const r = await callHrData('pay_team_task', { id: t.id, markPaid: alsoMark });
+            toast(r.markedPaid ? `Logged and marked paid (${r.requestId}).` : `Payment logged as pending (${r.requestId}).`);
+            busy = false;
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.code === 'task_not_done' ? 'Mark the task done first.' : (e.message || 'Could not log that payment.'), 'err');
+            paint();
+          }
+        });
         const toggle = document.getElementById('taskToggleBtn');
         if (toggle) toggle.addEventListener('click', async () => {
           const next = data.task.status === 'done' ? 'open' : 'done';

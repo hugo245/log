@@ -1268,11 +1268,17 @@ async function fetchRobloxGameStats(universeIds) {
     for (let i = 0; i < ids.length; i += 50) {
         const batch = ids.slice(i, i + 50);
         const idParam = batch.join(',');
-        const [infoRes, votesRes, iconRes] = await Promise.all([
+        const [infoRes, votesRes, iconRes, thumbRes] = await Promise.all([
             fetch(`https://games.roblox.com/v1/games?universeIds=${idParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
             fetch(`https://games.roblox.com/v1/games/votes?universeIds=${idParam}`).then(r => r.ok ? r.json() : null).catch(() => null),
-            fetch(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${idParam}&size=256x256&format=Png&isCircular=false`).then(r => r.ok ? r.json() : null).catch(() => null)
+            fetch(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${idParam}&size=256x256&format=Png&isCircular=false`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`https://thumbnails.roblox.com/v1/games/multiget/thumbnails?universeIds=${idParam}&size=768x432&format=Png&countPerUniverse=1`).then(r => r.ok ? r.json() : null).catch(() => null)
         ]);
+        const thumbById = {};
+        ((thumbRes && thumbRes.data) || []).forEach(entry => {
+            const first = (entry.thumbnails || []).find(t => t.state === 'Completed');
+            if (first) thumbById[entry.universeId] = first.imageUrl;
+        });
         const votesById = {};
         ((votesRes && votesRes.data) || []).forEach(v => { votesById[v.id] = v; });
         const iconById = {};
@@ -1291,7 +1297,8 @@ async function fetchRobloxGameStats(universeIds) {
                 maxPlayers: g.maxPlayers || 0,
                 created: g.created || null,
                 updated: g.updated || null,
-                iconUrl: iconById[g.id] || null
+                iconUrl: iconById[g.id] || null,
+                thumbnailUrl: thumbById[g.id] || null
             };
         });
     }
@@ -1337,6 +1344,7 @@ async function captureGameSnapshots(games, force) {
             if (!st) continue;
             const patch = {};
             if (st.iconUrl && st.iconUrl !== g.icon_url) patch.icon_url = st.iconUrl;
+            if (st.thumbnailUrl && st.thumbnailUrl !== g.thumbnail_url) patch.thumbnail_url = st.thumbnailUrl;
             if (!g.roblox_place_id && st.rootPlaceId) patch.roblox_place_id = st.rootPlaceId;
             if (Object.keys(patch).length) await supabase.from('games').update(patch).eq('id', g.id);
         }
@@ -4557,13 +4565,92 @@ app.post('/hr-data', async (req, res) => {
         const { error } = await supabase.from('games').update({
             roblox_place_id: placeId,
             roblox_universe_id: universeId,
-            icon_url: info ? info.iconUrl : null
+            icon_url: info ? info.iconUrl : null,
+            thumbnail_url: info ? info.thumbnailUrl : null
         }).eq('id', gameId);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         const { data: gameRow } = await supabase.from('games').select('*').eq('id', gameId).maybeSingle();
         if (gameRow) await captureGameSnapshots([gameRow], true);
         await logAudit(session, { category: 'teams', action: 'link_game', details: { gameId, placeId, universeId, name: info ? info.name : null } });
         res.json({ ok: true, universeId, placeId, robloxName: info ? info.name : null });
+        return;
+    }
+
+    if (action === 'my_tasks') {
+        const { data: tasks } = await supabase
+            .from('team_tasks')
+            .select('*')
+            .eq('assigned_to_user_id', session.roblox_user_id)
+            .order('due_at', { ascending: true });
+        const list = (tasks || []).filter(t => t.status === 'open' || (t.completed_at && Date.now() - new Date(t.completed_at).getTime() < 14 * 24 * 60 * 60 * 1000));
+        const teamIds = [...new Set(list.map(t => t.team_id))];
+        const gameIds = [...new Set(list.map(t => t.game_id).filter(Boolean))];
+        const [teamsRes, gamesRes] = await Promise.all([
+            teamIds.length ? supabase.from('teams').select('id, name, color').in('id', teamIds) : Promise.resolve({ data: [] }),
+            gameIds.length ? supabase.from('games').select('id, name, icon_url').in('id', gameIds) : Promise.resolve({ data: [] })
+        ]);
+        const teamById = {}; (teamsRes.data || []).forEach(t => { teamById[String(t.id)] = t; });
+        const gameById = {}; (gamesRes.data || []).forEach(g => { gameById[String(g.id)] = g; });
+        res.json({
+            ok: true,
+            data: list.map(t => ({
+                ...t,
+                team: teamById[String(t.team_id)] || null,
+                game: t.game_id ? (gameById[String(t.game_id)] || null) : null
+            }))
+        });
+        return;
+    }
+
+    if (action === 'pay_team_task') {
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: task } = await supabase.from('team_tasks').select('*').eq('id', id).maybeSingle();
+        if (!task) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
+        if (!(await canManageTeamTasks(session, task.team_id))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
+        if (!hasPermission(session, 'dashboard.submit_request')) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
+        if (task.status !== 'done') { res.status(400).json({ ok: false, error: 'task_not_done' }); return; }
+        if (!task.payment || !task.assigned_to_user_id) { res.status(400).json({ ok: false, error: 'task_has_no_payment' }); return; }
+        if (task.payment_request_id) { res.status(400).json({ ok: false, error: 'already_paid' }); return; }
+
+        const { data: game } = task.game_id
+            ? await supabase.from('games').select('name').eq('id', task.game_id).maybeSingle()
+            : { data: null };
+        const requestId = generateRequestId();
+        const currency = task.currency === 'USD' ? 'USD' : 'ROBUX';
+        const markPaid = payload.markPaid === true && hasPermission(session, 'dashboard.mark_paid');
+        const { error } = await supabase.from('payment_requests').insert({
+            id: requestId,
+            requested_by: session.roblox_username,
+            requested_by_user_id: session.roblox_user_id,
+            roblox_username: task.assigned_to_username,
+            roblox_user_id: task.assigned_to_user_id,
+            task_name: task.title,
+            game: game ? game.name : null,
+            game_id: task.game_id || null,
+            work_raw: task.details || '',
+            time_worked: '',
+            payment: Number(task.payment),
+            currency,
+            paid: markPaid,
+            status: markPaid ? 'paid' : 'pending',
+            paid_at: markPaid ? new Date().toISOString() : null,
+            created_at: new Date().toISOString()
+        });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        await supabase.from('team_tasks').update({ payment_request_id: requestId }).eq('id', id);
+        await logAudit(session, {
+            category: 'payments', action: 'submit_request',
+            targetUserId: task.assigned_to_user_id, targetUsername: task.assigned_to_username,
+            details: { id: requestId, taskName: task.title, payment: task.payment, currency, fromTask: id, markedPaid: markPaid },
+            revert: { type: 'delete_payment_request', id: requestId }
+        });
+        runPaymentMethodConversionSweep({ robloxUserId: task.assigned_to_user_id });
+        const amount = currency === 'ROBUX' ? `R$ ${Number(task.payment).toLocaleString()}` : `$${Number(task.payment).toFixed(2)}`;
+        const notified = await notifyModeratedUser(task.assigned_to_user_id, markPaid
+            ? `Your payment for "${task.title}" (${amount}) has been marked as paid.`
+            : `Your payment for "${task.title}" (${amount}) has been logged and is waiting to be paid out. You can follow it under My payments on PlayVerse.`);
+        res.json({ ok: true, requestId, markedPaid: markPaid, notified });
         return;
     }
 
@@ -4576,7 +4663,7 @@ app.post('/hr-data', async (req, res) => {
         if (!mine && !canViewTeams(session)) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
         const [teamRes, gameRes, batchRes] = await Promise.all([
             supabase.from('teams').select('id, name, color').eq('id', task.team_id).maybeSingle(),
-            task.game_id ? supabase.from('games').select('id, name, icon_url, roblox_place_id').eq('id', task.game_id).maybeSingle() : Promise.resolve({ data: null }),
+            task.game_id ? supabase.from('games').select('id, name, icon_url, thumbnail_url, roblox_place_id').eq('id', task.game_id).maybeSingle() : Promise.resolve({ data: null }),
             task.batch_id ? supabase.from('team_tasks').select('id, assigned_to_user_id, assigned_to_username, status, completed_at').eq('batch_id', task.batch_id) : Promise.resolve({ data: [] })
         ]);
         res.json({
