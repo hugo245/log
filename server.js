@@ -4809,6 +4809,8 @@ app.post('/hr-data', async (req, res) => {
                     assigned_to_username: task.assigned_to_username,
                     due_at: nextDue,
                     repeat_every: task.repeat_every,
+                    payment: task.payment,
+                    currency: task.currency,
                     reminders_sent: [],
                     status: 'open',
                     created_by: task.created_by,
