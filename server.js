@@ -1059,7 +1059,7 @@ async function runScheduledGameSnapshots() {
 function reminderNeeded(task) {
     if (!task.due_at) return false;
     const due = new Date(task.due_at).getTime();
-    return due - Date.now() < 3 * 24 * 60 * 60 * 1000; // overdue, or due within 3 days
+    return due - Date.now() < 3 * 24 * 60 * 60 * 1000;
 }
 
 async function runTaskReminders() {
@@ -1081,7 +1081,7 @@ async function runTaskReminders() {
     for (const task of tasks) {
         if (!reminderNeeded(task)) continue;
         const sent = Array.isArray(task.reminders_sent) ? task.reminders_sent : [];
-        if (sent[sent.length - 1] === today) continue; // already reminded today
+        if (sent[sent.length - 1] === today) continue;
         const due = new Date(task.due_at);
         const overdue = due.getTime() < Date.now();
         const when = overdue ? `was due ${due.toUTCString()}` : `is due on ${due.toUTCString()}`;
@@ -1561,7 +1561,7 @@ async function buildAccessStatus(robloxUserId) {
         getLinkedDiscordUserId(robloxUserId),
         getOnboardingGroupConfig()
     ]);
-    const flows = discordUserId ? await getOpenAccessFlows(robloxUserId) : [];
+    let flows = discordUserId ? await getOpenAccessFlows(robloxUserId) : [];
 
     const teamIds = [...new Set(flows.map(f => f.team_id).filter(id => id != null))];
     const teamById = {};
@@ -1570,8 +1570,19 @@ async function buildAccessStatus(robloxUserId) {
         (teams || []).forEach(t => { teamById[t.id] = t; });
     }
 
+    const orphaned = flows.filter(f => f.team_id != null && !teamById[f.team_id]);
+    if (orphaned.length) {
+        await supabase.from('recruit_onboarding_flows').update({ step: 'done' }).in('id', orphaned.map(f => f.id));
+        flows = flows.filter(f => !orphaned.some(o => o.id === f.id));
+        console.log(`[access] closed ${orphaned.length} join flow(s) for roblox user ${robloxUserId} whose team no longer exists`);
+    }
+
+    let teamState = 'ok';
+    try { teamState = await getTeamState(robloxUserId); } catch (e) { }
+
     return {
         discordLinked: !!discordUserId,
+        teamState,
         open: flows.length > 0,
         mainGroupId: config.groupId,
         flows: flows.map(f => {
@@ -2185,6 +2196,25 @@ async function getUserTeamAssignments(robloxUserId) {
     }));
 }
 
+async function getTeamState(robloxUserId) {
+    const { data: rows, error } = await supabase
+        .from('user_assignments')
+        .select('team_id')
+        .eq('roblox_user_id', robloxUserId);
+    if (error) throw error;
+    const allRows = rows || [];
+    if (!allRows.length) return 'none';
+    const teamIds = [...new Set(allRows.filter(r => r.team_id != null).map(r => r.team_id))];
+    if (!teamIds.length) return 'removed';
+    const { data: existingTeams, error: teamErr } = await supabase
+        .from('teams')
+        .select('id')
+        .in('id', teamIds);
+    if (teamErr) throw teamErr;
+    const existingIds = new Set((existingTeams || []).map(t => t.id));
+    return teamIds.some(id => existingIds.has(id)) ? 'ok' : 'removed';
+}
+
 async function isTeamAssignmentLocked(robloxUserId) {
     const { data: rows, error } = await supabase
         .from('user_assignments')
@@ -2459,8 +2489,10 @@ async function getSession(req) {
     } catch (e) { }
 
     try {
-        data.team_removed = await isTeamAssignmentLocked(data.roblox_user_id);
+        data.team_state = await getTeamState(data.roblox_user_id);
+        data.team_removed = data.team_state === 'removed';
     } catch (e) {
+        data.team_state = 'ok';
         data.team_removed = false;
     }
 
@@ -3054,7 +3086,8 @@ app.get('/hr-session', async (req, res) => {
         permissions: session.permissions || [],
         maxHierarchy: session.max_hierarchy || 0,
         discordLinked: !!discordUserId,
-        teamRemoved: !!session.team_removed
+        teamRemoved: !!session.team_removed,
+        teamState: session.team_state || 'ok'
     });
 });
 

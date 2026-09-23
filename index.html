@@ -4952,6 +4952,7 @@
     let needsOnboarding = false;
     let needsDiscordLink = false;
     let teamRemoved = false;
+    let hrTeamState = 'ok';
 
     let renderGen = 0;
 
@@ -5299,6 +5300,7 @@
           hrPermissions = json.permissions || [];
           hrMaxHierarchy = json.maxHierarchy || 0;
           teamRemoved = json.teamRemoved === true;
+          hrTeamState = json.teamState || (json.teamRemoved ? 'removed' : 'ok');
           needsDiscordLink = json.discordLinked === false;
           needsOnboarding = teamRemoved ? false : (onboardingResult ? onboardingResult.some(s => s.required && !s.completedAt) : false);
         } else {
@@ -9787,6 +9789,7 @@
       let pollTimer = null;
 
       function isLocked() {
+        if (hrTeamState === 'none' || hrTeamState === 'removed') return true;
         if (needsDiscordLink) return true;
         if (getRejoinState()) return true;
         return !!(access && access.open);
@@ -9796,8 +9799,40 @@
 
       function schedulePoll() {
         stopPoll();
-        if (myGen !== renderGen || needsDiscordLink || !isLocked()) return;
+        if (myGen !== renderGen || needsDiscordLink || hrTeamState === 'none' || hrTeamState === 'removed' || !isLocked()) return;
         pollTimer = setTimeout(() => syncAccess(false), 5000);
+      }
+
+      function noTeamBannerHtml() {
+        return `
+      <div class="lock-banner" role="alert">
+        <div class="lock-banner-head">
+          <div class="lock-icon" aria-hidden="true">!</div>
+          <div>
+            <h2>You're not on a team</h2>
+            <p>${hrTeamState === 'removed'
+            ? 'Your team was removed, so payments are on hold until someone puts you on another one.'
+            : 'Payments stay locked until a lead puts you on a team. Nothing is needed from you.'}</p>
+          </div>
+        </div>
+        <ol class="lock-steps">
+          <li class="lock-step wait">
+            <span class="lock-mark" aria-hidden="true">1</span>
+            <div class="lock-step-body">
+              <strong>Wait to be placed</strong>
+              <span class="sub">A lead will move you onto a team, or let you know if you're leaving PlayVerse. There's nothing you need to do here.</span>
+            </div>
+          </li>
+          <li class="lock-step wait">
+            <span class="lock-mark" aria-hidden="true">2</span>
+            <div class="lock-step-body">
+              <strong>Nothing is lost</strong>
+              <span class="sub">Payments already logged for you are still paid out, and your record stays exactly as it is.</span>
+            </div>
+          </li>
+        </ol>
+        <div class="lock-note">Signed in as ${esc(hrUsername)}. Ask a lead if you think this is wrong, or <button type="button" class="inline-link-btn" id="noTeamSignOutBtn">sign out</button> if this isn't your account.</div>
+      </div>`;
       }
 
       function lockBannerHtml() {
@@ -9909,7 +9944,7 @@
         </div>
       </div>` : ''}
 
-      ${locked ? lockBannerHtml() : ''}
+      ${locked ? ((hrTeamState === 'none' || hrTeamState === 'removed') ? noTeamBannerHtml() : lockBannerHtml()) : ''}
       <div class="${locked ? 'locked-zone' : ''}" ${locked ? 'inert aria-disabled="true"' : ''}>
 
       ${!myBroadcastsLoading && myBroadcasts.length > 0 ? `
@@ -10001,7 +10036,7 @@
         <h1>My teams &amp; skillsets</h1>
       </div>
       <div class="panel">
-        ${myTeamsLoading ? `<div class="dash-loading">Loading your teams...</div>` : myTeams.length === 0 ? `<div class="empty-note">You haven't joined any teams yet. Ask whoever invited you for an invite link.</div>` : `
+        ${myTeamsLoading ? `<div class="dash-loading">Loading your teams...</div>` : myTeams.length === 0 ? `<div class="empty-note">${hrTeamState === 'removed' ? "Your team was removed, so you're not on one at the moment. A lead will place you on another team or let you know what's happening." : hrTeamState === 'none' ? "You're not on a team yet. A lead will add you, or send you an invite link." : "You haven't joined any teams yet. Ask whoever invited you for an invite link."}</div>` : `
           <div class="team-chip-grid">
             ${myTeams.map(a => `
               <div class="team-chip-card">
@@ -10059,6 +10094,8 @@
 
         const lockLinkBtn = document.getElementById('lockLinkDiscordBtn');
         if (lockLinkBtn) lockLinkBtn.addEventListener('click', () => setRejoinState('linking'));
+        const noTeamSignOut = document.getElementById('noTeamSignOutBtn');
+        if (noTeamSignOut) noTeamSignOut.addEventListener('click', hrSignOut);
         const lockCheckBtn = document.getElementById('lockCheckBtn');
         if (lockCheckBtn) lockCheckBtn.addEventListener('click', () => syncAccess(true));
         const lockRestartBtn = document.getElementById('lockRestartBtn');
@@ -11825,8 +11862,8 @@
             <circle cx="12" cy="17.1" r="0.95" fill="currentColor" stroke="none"></circle>
           </svg>
         </div>
-        <h2>Your team was removed</h2>
-        <p>You cannot access the tool anymore until you're transferred to another team or removed from PlayVerse. Your data is safe with us.</p>
+        <h2>You're not on a team</h2>
+        <p>Your team was removed, so the tool is on hold for you until a lead puts you on another team, or tells you that you're leaving PlayVerse. Nothing of yours is lost, and payments already logged for you are still paid.</p>
         <button type="button" class="btn btn-primary" id="teamRemovedRetryBtn">Check again</button>
         <div class="lock-note">Signed in as ${esc(hrUsername)}. Ask an admin to move you to a team - or <button type="button" class="inline-link-btn" id="teamRemovedSignOutBtn">sign out</button> if this isn't your account.</div>
       </div>
@@ -12978,10 +13015,6 @@
           const everyone = assignee === '__all__';
           if (everyone && !detail.members.length) { toast('Nobody is on this team yet.', 'err'); return; }
           const member = detail.members.find(m => String(m.robloxUserId) === String(assignee));
-          // Capture every field BEFORE run() flips busy=true and repaints the form —
-          // reading them lazily inside the payload object meant they were read from
-          // freshly-rebuilt (stale) DOM elements after the repaint, losing whatever
-          // was just typed/selected.
           const detailsVal = document.getElementById('taskDetails').value.trim();
           const gameIdVal = document.getElementById('taskGame').value || null;
           const repeatVal = document.getElementById('taskRepeat').value || null;
