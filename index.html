@@ -5378,6 +5378,19 @@
       roblox_user_not_found: "That Roblox username doesn't exist.",
       discord_not_linked: "This person hasn't linked a Discord account yet.",
       discord_not_in_server: "This person isn't in the Discord server.",
+      server_error: 'Something went wrong on our side. Try again in a moment, and tell an admin if it keeps happening.',
+      task_not_found: 'That task no longer exists.',
+      task_not_done: 'Mark the task done before logging its payment.',
+      task_has_no_payment: "That task doesn't have a payment set on it.",
+      already_paid: 'A payment has already been logged for that task.',
+      no_team_members: 'Nobody is on that team yet, so there is no one to give the task to.',
+      team_not_found: 'That team no longer exists.',
+      game_not_found: 'That game no longer exists.',
+      missing_team_id: 'No team was chosen for that task.',
+      missing_game_id: 'No game was chosen.',
+      invalid_place_id: "That doesn't look like a Roblox place ID or game link.",
+      roblox_game_not_found: "Roblox doesn't have a game with that place ID.",
+      team_removed: 'Your team was removed, so this is on hold until a lead places you on another one.',
       unknown_action: 'The server did not recognise that action. Refresh the page to load the latest version.'
     };
     function friendlyError(code) {
@@ -9573,15 +9586,6 @@
       function wireShellEvents() {
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) refreshBtn.addEventListener('click', () => { load(true); });
-
-        const missingCard = document.getElementById('missingMethodCard');
-        const showMissing = () => { missingOnly = true; filter = 'pending'; paintShell(); };
-        if (missingCard) {
-          missingCard.addEventListener('click', showMissing);
-          missingCard.addEventListener('keydown', (e) => { if (e.key === 'Enter') showMissing(); });
-        }
-        const clearMissingBtn = document.getElementById('clearMissingBtn');
-        if (clearMissingBtn) clearMissingBtn.addEventListener('click', () => { missingOnly = false; paintShell(); });
 
         const searchInput = document.getElementById('searchInput');
         if (searchInput) searchInput.addEventListener('input', () => { search = searchInput.value; paintContent(); });

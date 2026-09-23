@@ -522,9 +522,7 @@ client.on(Events.InteractionCreate, async interaction => {
                 const user = await client.users.fetch(discordUserId);
                 const parts = [`You've been accepted and placed on the **${team.name}** team!`];
                 if (skillset) parts.push(`Skillset: **${skillset.name}**.`);
-                parts.push(nextRunUnix
-                    ? `Your access will finish setting up automatically <t:${nextRunUnix}:R>, a lead can also speed this up for you if needed.`
-                    : `Your access will finish setting up shortly, a lead can also speed this up for you if needed.`);
+                parts.push('Your access will finish setting up shortly, a lead can also speed this up for you if needed.');
                 if (APP_ORIGIN) parts.push(`Check your status here: ${APP_ORIGIN}/#/recruit/status`);
                 await user.send(parts.join(' '));
             } catch (e) { }
@@ -585,3 +583,11 @@ http.createServer((req, res) => res.end('bot is alive')).listen(4000);
     }
     setInterval(reconcilePlacements, RECONCILE_INTERVAL_MS);
 })();
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[bot] unhandled promise rejection:', reason && reason.stack ? reason.stack : reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('[bot] uncaught exception:', err && err.stack ? err.stack : err);
+});

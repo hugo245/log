@@ -3100,6 +3100,15 @@ app.delete('/hr-session', async (req, res) => {
 const listRequestsSweepState = { paymentsAt: 0, usernamesAt: 0 };
 
 app.post('/hr-data', async (req, res) => {
+    try {
+        await handleHrData(req, res);
+    } catch (err) {
+        console.error('[hr-data] unhandled error on action', (req.body && req.body.action) || 'unknown', ':', err && err.stack ? err.stack : err);
+        if (!res.headersSent) res.status(500).json({ ok: false, error: 'server_error' });
+    }
+});
+
+async function handleHrData(req, res) {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false, error: 'not_authenticated' }); return; }
     if (session.team_removed) { res.status(403).json({ ok: false, error: 'team_removed', teamRemoved: true }); return; }
@@ -6467,6 +6476,14 @@ app.post('/hr-data', async (req, res) => {
     }
 
     res.status(400).json({ ok: false, error: 'unknown_action' });
+}
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[server] unhandled promise rejection:', reason && reason.stack ? reason.stack : reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('[server] uncaught exception:', err && err.stack ? err.stack : err);
 });
 
 app.listen(PORT, () => {
