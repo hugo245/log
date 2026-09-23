@@ -4213,7 +4213,10 @@
 
     .org-seg {
       margin: 0;
-      grid-template-columns: repeat(2, auto);
+      display: inline-grid;
+      grid-auto-flow: column;
+      grid-auto-columns: auto;
+      grid-template-columns: none;
     }
 
     .org-seg button {
@@ -12125,6 +12128,15 @@
       </svg>`;
     }
 
+    function spendText(spend, monthOnly) {
+      if (!spend) return null;
+      const src = monthOnly ? spend.thisMonth : spend;
+      const bits = [];
+      if (src.ROBUX) bits.push('R$ ' + bigNum(src.ROBUX));
+      if (src.USD) bits.push('$' + Number(src.USD).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+      return bits.length ? bits.join(' + ') : null;
+    }
+
     function taskState(t) {
       if (t.status === 'done') {
         const late = t.due_at && t.completed_at && new Date(t.completed_at) > new Date(t.due_at);
@@ -12162,6 +12174,8 @@
       let busy = false;
       let taskDraft = null;
       let linkingGameId = null;
+      let chartMetric = 'playing';
+      let historyChart = null;
 
       function go(nextTeamId, nextTab) {
         teamId = nextTeamId;
@@ -12392,6 +12406,12 @@
             <div><span class="hint">Last 7 days</span><b>${s.visitsLast7d == null ? 'Not enough history' : esc(bigNum(s.visitsLast7d)) + ' visits'}</b></div>
             <div><span class="hint">Players online vs a week ago</span><b class="${s.playingChange7d > 0 ? 'good' : s.playingChange7d < 0 ? 'danger' : ''}">${s.playingChange7d == null ? 'Not enough history' : esc(signedNum(s.playingChange7d))}</b></div>
           </div>
+          ${g.spend ? `
+          <div class="game-growth">
+            <div><span class="hint">Paid out for this game</span><b>${esc(spendText(g.spend) || 'Nothing yet')}</b></div>
+            <div><span class="hint">This month</span><b>${esc(spendText(g.spend, true) || 'Nothing yet')}</b></div>
+            ${g.spend.ROBUX && s.visitsLast7d ? `<div><span class="hint">Robux per 1K visits this week</span><b>${esc((g.spend.ROBUX / (s.visitsLast7d / 1000)).toFixed(1))}</b></div>` : ''}
+          </div>` : ''}
           <div class="game-spark">
             <span class="hint">Players online, since ${esc(fmtDate(s.firstSeen))}</span>
             ${sparkline(s.series, 'playing')}
@@ -12410,9 +12430,25 @@
             <button type="button" class="btn btn-primary btn-sm" id="addGameBtn" ${busy ? 'disabled' : ''}>Assign</button>
             <button type="button" class="btn btn-ghost btn-sm" id="refreshStatsBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : 'Refresh stats'}</button>
           </div>` : ''}
+          ${detail.games.some(g => g.stats && g.stats.series.length > 1) ? `
+          <div class="panel" style="margin:0 0 18px;">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+              <h3 style="margin:0;font-size:15px;flex:1;">History</h3>
+              <div class="seg org-seg" role="tablist" aria-label="Metric">
+                ${[['playing', 'Players online'], ['visits', 'Visits'], ['favorites', 'Favourites']].map(([v, l]) =>
+          `<button type="button" role="tab" aria-selected="${chartMetric === v}" class="${chartMetric === v ? 'on' : ''}" data-chart-metric="${v}">${l}</button>`).join('')}
+              </div>
+            </div>
+            <div style="position:relative;height:260px;"><canvas id="gameHistoryChart"></canvas></div>
+            <p class="hint" style="margin:10px 0 0;">Readings are taken every few hours, and whenever someone opens this page.</p>
+          </div>` : ''}
           ${detail.games.length
             ? `<div class="game-grid">${detail.games.map(gameCardHtml).join('')}</div>`
             : `<div class="dash-empty"><h3>No games assigned</h3><p>${detail.canManage ? 'Assign one above, then link it to its Roblox place to track how it grows.' : 'Nobody has assigned a game to this team yet.'}</p></div>`}`;
+      }
+
+      function canTasks() {
+        return !!(detail && (detail.canManage || detail.canManageTasks));
       }
 
       function deadlinesHtml() {
@@ -12431,10 +12467,12 @@
                 ${game ? `<span>${esc(game.name)}</span>` : ''}
                 ${t.assigned_to_user_id ? `<span>${userLink(t.assigned_to_user_id, t.assigned_to_username)}</span>` : '<span class="hint">Nobody assigned</span>'}
                 ${t.due_at ? `<span title="${esc(fmtDateTime(t.due_at))}">${esc(fmtDate(t.due_at))}</span>` : ''}
+                ${t.repeat_every ? `<span class="pp-tag">Repeats ${esc({ weekly: 'weekly', fortnightly: 'every 2 weeks', monthly: 'monthly' }[t.repeat_every] || t.repeat_every)}</span>` : ''}
+                ${t.assigned_to_user_id && t.status === 'open' && t.due_at ? `<span class="hint" title="A Discord reminder goes out 3 days before, the day before, and if it goes overdue">Reminders on</span>` : ''}
               </div>
               ${t.details ? `<div class="task-details">${esc(t.details)}</div>` : ''}
             </div>
-            ${detail.canManage ? `
+            ${canTasks() ? `
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <button type="button" class="btn btn-ghost btn-sm" data-task-toggle="${esc(t.id)}" data-status="${t.status === 'done' ? 'open' : 'done'}">${t.status === 'done' ? 'Reopen' : 'Mark done'}</button>
               <button type="button" class="btn btn-ghost btn-sm" data-task-edit="${esc(t.id)}">Edit</button>
@@ -12450,7 +12488,7 @@
             <div class="strip-card"><div class="strip-label">Due within 3 days</div><div class="strip-value">${esc(s.dueSoon)}</div></div>
             <div class="strip-card"><div class="strip-label">Open</div><div class="strip-value">${esc(s.open)}</div></div>
           </div>
-          ${detail.canManage ? (d ? `
+          ${canTasks() ? (d ? `
           <div class="panel" style="margin:0 0 18px;">
             <h3 style="margin:0 0 12px;font-size:15px;">${d.id ? 'Edit task' : 'New task'}</h3>
             <div class="field"><label for="taskTitle">What needs doing</label><input type="text" id="taskTitle" value="${esc(d.title || '')}" placeholder="e.g. Ship the winter map update"></div>
@@ -12458,6 +12496,9 @@
               <div class="field"><label for="taskDue">Deadline</label><input type="date" id="taskDue" value="${d.due_at ? esc(String(d.due_at).slice(0, 10)) : ''}"></div>
               <div class="field"><label for="taskGame">Game <span class="hint">(optional)</span></label>
                 <select id="taskGame"><option value="">No specific game</option>${detail.games.map(g => `<option value="${esc(g.id)}" ${String(d.game_id) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>
+              </div>
+              <div class="field"><label for="taskRepeat">Repeats <span class="hint">(optional)</span></label>
+                <select id="taskRepeat">${[['', 'Does not repeat'], ['weekly', 'Every week'], ['fortnightly', 'Every 2 weeks'], ['monthly', 'Every month']].map(([v, l]) => `<option value="${v}" ${String(d.repeat_every || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
               </div>
               <div class="field"><label for="taskAssignee">Assign to <span class="hint">(optional)</span></label>
                 <select id="taskAssignee"><option value="">Nobody</option>${detail.members.map(m => `<option value="${esc(m.robloxUserId)}" ${String(d.assigned_to_user_id) === String(m.robloxUserId) ? 'selected' : ''}>${esc(m.robloxUsername)}</option>`).join('')}</select>
@@ -12469,7 +12510,7 @@
               <button type="button" class="btn btn-ghost btn-sm" id="cancelTaskBtn">Cancel</button>
             </div>
           </div>` : `<button type="button" class="btn btn-primary btn-sm" id="newTaskBtn" style="margin-bottom:18px;">Add a task</button>`) : ''}
-          ${open.length ? `<div class="task-list">${open.map(row).join('')}</div>` : `<div class="dash-empty"><h3>Nothing open</h3><p>${detail.canManage ? 'Add a task to start tracking deadlines for this team.' : 'This team has no open tasks.'}</p></div>`}
+          ${open.length ? `<div class="task-list">${open.map(row).join('')}</div>` : `<div class="dash-empty"><h3>Nothing open</h3><p>${canTasks() ? 'Add a task to start tracking deadlines for this team.' : 'This team has no open tasks.'}</p></div>`}
           ${closed.length ? `<h3 class="sec-title" style="margin:24px 0 8px;font-size:15px;">Finished (${closed.length})</h3><div class="task-list">${closed.map(row).join('')}</div>` : ''}`;
       }
 
@@ -12485,7 +12526,7 @@
           ? `<div>
               <a class="pp-linkbtn" href="#/teams" id="backToTeams">Back to all teams</a>
               <h1 style="margin:6px 0 4px;display:flex;align-items:center;gap:10px;"><span class="pp-dot" style="background:${esc(detail.team.color || 'var(--muted)')};width:14px;height:14px;"></span>${esc(detail.team.name)}</h1>
-              <p class="sub">${esc(detail.members.length)} members &middot; ${esc(detail.games.length)} games &middot; ${detail.taskSummary.open} open tasks${detail.taskSummary.overdue ? `, ${detail.taskSummary.overdue} overdue` : ''}</p>
+              <p class="sub">${esc(detail.members.length)} members &middot; ${esc(detail.games.length)} games &middot; ${detail.taskSummary.open} open tasks${detail.taskSummary.overdue ? `, ${detail.taskSummary.overdue} overdue` : ''}${spendText(detail.spend, true) ? ` &middot; ${esc(spendText(detail.spend, true))} paid out this month` : ''}</p>
             </div>`
           : `<div>
               <h1 style="margin-bottom:4px;">Teams</h1>
@@ -12566,6 +12607,8 @@
           if (!confirm('Take this game off the team?')) return;
           await run(() => callHrData('set_team_games', { teamId, gameId: el.dataset.removeGame, mode: 'remove' }), 'Game removed');
         }));
+        document.querySelectorAll('[data-chart-metric]').forEach(el => el.addEventListener('click', () => { chartMetric = el.dataset.chartMetric; paint(); }));
+        drawHistoryChart();
         const refreshStats = document.getElementById('refreshStatsBtn');
         if (refreshStats) refreshStats.addEventListener('click', () => load(true));
         document.querySelectorAll('[data-link-game]').forEach(el => el.addEventListener('click', () => { linkingGameId = linkingGameId === el.dataset.linkGame ? null : el.dataset.linkGame; paint(); const i = document.getElementById('gameLinkInput'); if (i) i.focus(); }));
@@ -12606,7 +12649,8 @@
             dueAt: due ? new Date(due + 'T23:59:59').toISOString() : null,
             gameId: document.getElementById('taskGame').value || null,
             assignedToUserId: assignee || null,
-            assignedToUsername: member ? member.robloxUsername : null
+            assignedToUsername: member ? member.robloxUsername : null,
+            repeatEvery: document.getElementById('taskRepeat').value || null
           }), taskDraft.id ? 'Task updated' : 'Task added', () => { taskDraft = null; });
         });
         document.querySelectorAll('[data-task-edit]').forEach(el => el.addEventListener('click', () => {
@@ -12621,6 +12665,45 @@
           if (!confirm('Delete this task? It disappears from the on-time figures too.')) return;
           await run(() => callHrData('delete_team_task', { id: el.dataset.taskDelete }), 'Task deleted');
         }));
+      }
+
+      function drawHistoryChart() {
+        const canvas = document.getElementById('gameHistoryChart');
+        if (!canvas || typeof Chart === 'undefined' || !detail) return;
+        if (historyChart) { historyChart.destroy(); historyChart = null; }
+        const palette = ['#4F46E5', '#178A4C', '#DB2777', '#EA580C', '#0EA5E9', '#B45309'];
+        const withHistory = detail.games.filter(g => g.stats && g.stats.series.length > 1);
+        const labels = [...new Set(withHistory.flatMap(g => g.stats.series.map(p => p.at)))].sort();
+        const dark = getTheme() === 'dark';
+        historyChart = new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: labels.map(at => fmtDate(at)),
+            datasets: withHistory.map((g, i) => ({
+              label: g.name,
+              data: labels.map(at => {
+                const point = g.stats.series.find(p => p.at === at);
+                return point ? point[chartMetric] : null;
+              }),
+              borderColor: palette[i % palette.length],
+              backgroundColor: palette[i % palette.length] + '22',
+              borderWidth: 2,
+              pointRadius: 2,
+              tension: .3,
+              spanGaps: true
+            }))
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: dark ? '#C9C7D4' : '#3A3850', boxWidth: 12 } } },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: dark ? '#8C89A0' : '#6B6880', maxTicksLimit: 8 } },
+              y: { beginAtZero: chartMetric === 'playing', grid: { color: dark ? '#2A2836' : '#EDECF5' }, ticks: { color: dark ? '#8C89A0' : '#6B6880', callback: v => bigNum(v) } }
+            }
+          }
+        });
       }
 
       async function run(fn, successText, after) {

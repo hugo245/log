@@ -1046,6 +1046,125 @@ async function getRoleForSync(roleId) {
     return data || null;
 }
 
+const GAME_SNAPSHOT_INTERVAL_MS = 3 * 60 * 60 * 1000;
+const TASK_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runScheduledGameSnapshots() {
+    const { data: games } = await supabase.from('games').select('*').not('roblox_universe_id', 'is', null);
+    if (!games || !games.length) return;
+    const result = await captureGameSnapshots(games, true);
+    if (result.captured) console.log(`[games] stored ${result.captured} stat snapshot(s)`);
+}
+
+function reminderStage(task) {
+    if (!task.due_at) return null;
+    const due = new Date(task.due_at).getTime();
+    const now = Date.now();
+    const hoursLeft = (due - now) / (60 * 60 * 1000);
+    if (hoursLeft < 0) return 'overdue';
+    if (hoursLeft <= 24) return 'due_today';
+    if (hoursLeft <= 72) return 'due_soon';
+    return null;
+}
+
+async function runTaskReminders() {
+    if (discordPaused()) return;
+    const { data: tasks } = await supabase
+        .from('team_tasks')
+        .select('*')
+        .eq('status', 'open')
+        .not('due_at', 'is', null)
+        .not('assigned_to_user_id', 'is', null);
+    if (!tasks || !tasks.length) return;
+    const teamIds = [...new Set(tasks.map(t => t.team_id))];
+    const { data: teams } = await supabase.from('teams').select('id, name').in('id', teamIds);
+    const teamName = {};
+    (teams || []).forEach(t => { teamName[String(t.id)] = t.name; });
+
+    for (const task of tasks) {
+        const stage = reminderStage(task);
+        if (!stage) continue;
+        const sent = Array.isArray(task.reminders_sent) ? task.reminders_sent : [];
+        if (sent.includes(stage)) continue;
+        const due = new Date(task.due_at);
+        const when = stage === 'overdue'
+            ? `was due ${due.toUTCString()}`
+            : stage === 'due_today'
+                ? `is due within 24 hours (${due.toUTCString()})`
+                : `is due on ${due.toUTCString()}`;
+        const text = stage === 'overdue'
+            ? `Your ${teamName[String(task.team_id)] || 'team'} task "${task.title}" ${when}. Mark it done on PlayVerse, or tell your lead if it needs moving.`
+            : `Reminder: your ${teamName[String(task.team_id)] || 'team'} task "${task.title}" ${when}.`;
+        let delivered = false;
+        try {
+            delivered = await notifyModeratedUser(task.assigned_to_user_id, text);
+        } catch (e) {
+            console.error('runTaskReminders: could not message', task.assigned_to_user_id, e.message);
+            if (discordPaused()) return;
+        }
+        await supabase.from('team_tasks').update({ reminders_sent: [...sent, stage] }).eq('id', task.id);
+        if (delivered) console.log(`[tasks] reminded ${task.assigned_to_username || task.assigned_to_user_id} about "${task.title}" (${stage})`);
+    }
+}
+
+const REPEAT_LABELS = { weekly: 'week', fortnightly: '2 weeks', monthly: 'month' };
+
+function nextDueDate(dueAt, repeatEvery) {
+    if (!dueAt || !repeatEvery) return null;
+    const d = new Date(dueAt);
+    if (repeatEvery === 'weekly') d.setDate(d.getDate() + 7);
+    else if (repeatEvery === 'fortnightly') d.setDate(d.getDate() + 14);
+    else if (repeatEvery === 'monthly') d.setMonth(d.getMonth() + 1);
+    else return null;
+    return d.toISOString();
+}
+
+async function notifyPaymentOutcome(request, outcome, note) {
+    if (!request || !request.roblox_user_id) return false;
+    const amount = request.currency === 'ROBUX'
+        ? `R$ ${Number(request.payment || 0).toLocaleString()}`
+        : `$${Number(request.payment || 0).toFixed(2)}`;
+    const text = outcome === 'paid'
+        ? `Your PlayVerse payment for "${request.task_name}" (${amount}) has been marked as paid.`
+        : `Your PlayVerse payment request for "${request.task_name}" (${amount}) was rejected.${note ? `\nReason: ${note}` : ''}`;
+    try {
+        return await notifyModeratedUser(request.roblox_user_id, text);
+    } catch (e) {
+        return false;
+    }
+}
+
+async function resolveGameId(gameName) {
+    if (!gameName) return null;
+    const { data } = await supabase.from('games').select('id').ilike('name', String(gameName).trim()).limit(1);
+    return data && data.length ? data[0].id : null;
+}
+
+async function isTeamLead(session, teamId) {
+    if (!session || !teamId) return false;
+    const { data: mine } = await supabase
+        .from('user_assignments')
+        .select('roblox_user_id')
+        .eq('team_id', teamId)
+        .eq('roblox_user_id', session.roblox_user_id)
+        .maybeSingle();
+    if (!mine) return false;
+    const { data: members } = await supabase.from('user_assignments').select('roblox_user_id').eq('team_id', teamId);
+    const ids = (members || []).map(m => m.roblox_user_id);
+    if (!ids.length) return false;
+    let best = -1;
+    for (const id of ids) {
+        const h = await getUserHierarchy(id);
+        if (h > best) best = h;
+    }
+    return (Number(session.max_hierarchy) || 0) >= best && best > 0;
+}
+
+async function canManageTeamTasks(session, teamId) {
+    if (canManageTeams(session)) return true;
+    return await isTeamLead(session, teamId);
+}
+
 const GAME_STATS_CACHE_MS = 15 * 60 * 1000;
 
 function canViewTeams(session) {
@@ -2240,6 +2359,20 @@ setInterval(() => {
     enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).then(() => refreshPaymentRequestUsernames()).catch(e => console.error('scheduled payment conversion pass failed:', e.message));
 }, PAYMENT_CONVERSION_SWEEP_INTERVAL_MS);
 
+setTimeout(() => {
+    runScheduledGameSnapshots().catch(e => console.error('initial game snapshot pass failed:', e.message));
+}, 45 * 1000);
+setInterval(() => {
+    runScheduledGameSnapshots().catch(e => console.error('scheduled game snapshot pass failed:', e.message));
+}, GAME_SNAPSHOT_INTERVAL_MS);
+
+setTimeout(() => {
+    runTaskReminders().catch(e => console.error('initial task reminder pass failed:', e.message));
+}, 120 * 1000);
+setInterval(() => {
+    runTaskReminders().catch(e => console.error('scheduled task reminder pass failed:', e.message));
+}, TASK_REMINDER_INTERVAL_MS);
+
 async function getSession(req) {
     const token = getBearerToken(req);
     if (!token) return null;
@@ -2924,6 +3057,7 @@ app.post('/hr-data', async (req, res) => {
             roblox_user_id: recipientUserId,
             task_name: taskName,
             game,
+            game_id: await resolveGameId(game),
             work_raw: workRaw,
             time_worked: timeWorked,
             payment,
@@ -3033,19 +3167,20 @@ app.post('/hr-data', async (req, res) => {
         if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        const { data: existing } = await supabase.from('payment_requests').select('roblox_user_id, roblox_username').eq('id', id).maybeSingle();
+        const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
         const { error } = await supabase
             .from('payment_requests')
             .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const paidNotified = await notifyPaymentOutcome(existing, 'paid');
         logAudit(session, {
             category: 'payments', action: 'mark_paid',
             targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
             details: { id },
             revert: { type: 'unmark_paid', id }
         });
-        res.json({ ok: true });
+        res.json({ ok: true, notified: paidNotified });
         return;
     }
 
@@ -3085,19 +3220,20 @@ app.post('/hr-data', async (req, res) => {
         const id = payload.id;
         const note = payload.note ? String(payload.note).trim() : '';
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        const { data: existing } = await supabase.from('payment_requests').select('roblox_user_id, roblox_username').eq('id', id).maybeSingle();
+        const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
         const { error } = await supabase
             .from('payment_requests')
             .update({ paid: false, paid_at: null, status: 'rejected', status_note: note || null })
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const rejectNotified = await notifyPaymentOutcome(existing, 'rejected', note);
         logAudit(session, {
             category: 'payments', action: 'reject_request',
             targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
             details: { id, note },
             revert: { type: 'reopen_request', id }
         });
-        res.json({ ok: true });
+        res.json({ ok: true, notified: rejectNotified });
         return;
     }
 
@@ -4205,6 +4341,9 @@ app.post('/hr-data', async (req, res) => {
             supabase.from('team_tasks').select('*').eq('team_id', teamId).order('due_at', { ascending: true }),
             supabase.from('skillsets').select('*')
         ]);
+        const { data: teamPayments } = await supabase
+            .from('payment_requests')
+            .select('roblox_user_id, game, game_id, payment, currency, status, paid_at, created_at');
         const gameById = {}; (gamesRes.data || []).forEach(g => { gameById[g.id] = g; });
         const skillsetById = {}; (skillsetsRes.data || []).forEach(k => { skillsetById[k.id] = k; });
         const teamGames = (teamGamesRes.data || []).map(tg => gameById[tg.game_id]).filter(Boolean);
@@ -4241,6 +4380,41 @@ app.post('/hr-data', async (req, res) => {
         });
 
         const tasks = tasksRes.data || [];
+        const memberIdSet = new Set(memberIds.map(String));
+        const gameNameById = {};
+        teamGames.forEach(g => { gameNameById[String(g.id)] = (g.name || '').toLowerCase(); });
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const emptySpend = () => ({ ROBUX: 0, USD: 0, thisMonth: { ROBUX: 0, USD: 0 }, requests: 0 });
+        const spendByGame = {};
+        const teamSpend = emptySpend();
+        (teamPayments || []).forEach(r => {
+            if (r.status !== 'paid') return;
+            const matchesGame = r.game_id != null
+                ? teamGames.some(g => String(g.id) === String(r.game_id))
+                : (r.game ? teamGames.some(g => (g.name || '').toLowerCase() === String(r.game).toLowerCase()) : false);
+            const matchesMember = memberIdSet.has(String(r.roblox_user_id));
+            if (!matchesGame && !matchesMember) return;
+            const cur = r.currency === 'ROBUX' ? 'ROBUX' : 'USD';
+            const amount = Number(r.payment) || 0;
+            const recent = r.paid_at && new Date(r.paid_at) >= monthStart;
+            teamSpend[cur] += amount;
+            teamSpend.requests += 1;
+            if (recent) teamSpend.thisMonth[cur] += amount;
+            if (matchesGame) {
+                const game = r.game_id != null
+                    ? teamGames.find(g => String(g.id) === String(r.game_id))
+                    : teamGames.find(g => (g.name || '').toLowerCase() === String(r.game).toLowerCase());
+                if (game) {
+                    const key = String(game.id);
+                    if (!spendByGame[key]) spendByGame[key] = emptySpend();
+                    spendByGame[key][cur] += amount;
+                    spendByGame[key].requests += 1;
+                    if (recent) spendByGame[key].thisMonth[cur] += amount;
+                }
+            }
+        });
         res.json({
             ok: true,
             data: {
@@ -4264,8 +4438,11 @@ app.post('/hr-data', async (req, res) => {
                     universeId: g.roblox_universe_id,
                     placeId: g.roblox_place_id,
                     iconUrl: g.icon_url,
-                    stats: summariseSnapshots(snapsByGame[g.id])
+                    stats: summariseSnapshots(snapsByGame[g.id]),
+                    spend: spendByGame[String(g.id)] || null
                 })),
+                spend: teamSpend,
+                canManageTasks: canManageTeams(session) || await isTeamLead(session, teamId),
                 availableGames: (gamesRes.data || [])
                     .filter(g => !teamGames.some(tg => String(tg.id) === String(g.id)))
                     .map(g => ({ id: g.id, name: g.name, universeId: g.roblox_universe_id })),
@@ -4328,8 +4505,8 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'save_team_task') {
-        if (!requireTeamManage(res, session)) return;
         const teamId = payload.teamId;
+        if (!(await canManageTeamTasks(session, teamId))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
         const title = payload.title ? String(payload.title).trim() : '';
         if (!teamId || !title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
         const row = {
@@ -4339,7 +4516,9 @@ app.post('/hr-data', async (req, res) => {
             details: payload.details ? String(payload.details).trim() : null,
             assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
             assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null,
-            due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null
+            due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null,
+            repeat_every: ['weekly', 'fortnightly', 'monthly'].includes(payload.repeatEvery) ? payload.repeatEvery : null,
+            reminders_sent: []
         };
         if (payload.id) {
             const { error } = await supabase.from('team_tasks').update(row).eq('id', payload.id);
@@ -4358,10 +4537,12 @@ app.post('/hr-data', async (req, res) => {
     }
 
     if (action === 'set_team_task_status') {
-        if (!requireTeamManage(res, session)) return;
         const id = payload.id;
         const status = ['open', 'done', 'cancelled'].includes(payload.status) ? payload.status : null;
         if (!id || !status) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: task } = await supabase.from('team_tasks').select('*').eq('id', id).maybeSingle();
+        if (!task) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
+        if (!(await canManageTeamTasks(session, task.team_id))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
         const update = { status };
         if (status === 'done') {
             update.completed_at = new Date().toISOString();
@@ -4369,18 +4550,41 @@ app.post('/hr-data', async (req, res) => {
         } else {
             update.completed_at = null;
             update.completed_by = null;
+            update.reminders_sent = [];
         }
         const { error } = await supabase.from('team_tasks').update(update).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        await logAudit(session, { category: 'teams', action: 'task_' + status, details: { taskId: id } });
-        res.json({ ok: true });
+        let repeated = null;
+        if (status === 'done' && task.repeat_every) {
+            const nextDue = nextDueDate(task.due_at, task.repeat_every);
+            if (nextDue) {
+                const { data: made } = await supabase.from('team_tasks').insert({
+                    team_id: task.team_id,
+                    game_id: task.game_id,
+                    title: task.title,
+                    details: task.details,
+                    assigned_to_user_id: task.assigned_to_user_id,
+                    assigned_to_username: task.assigned_to_username,
+                    due_at: nextDue,
+                    repeat_every: task.repeat_every,
+                    reminders_sent: [],
+                    status: 'open',
+                    created_by: task.created_by,
+                    created_at: new Date().toISOString()
+                }).select('id, due_at').maybeSingle();
+                repeated = made ? made.due_at : nextDue;
+            }
+        }
+        await logAudit(session, { category: 'teams', action: 'task_' + status, details: { taskId: id, repeated } });
+        res.json({ ok: true, repeated });
         return;
     }
 
     if (action === 'delete_team_task') {
-        if (!requireTeamManage(res, session)) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: taskRow } = await supabase.from('team_tasks').select('team_id').eq('id', id).maybeSingle();
+        if (taskRow && !(await canManageTeamTasks(session, taskRow.team_id))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
         const { error } = await supabase.from('team_tasks').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         await logAudit(session, { category: 'teams', action: 'delete_task', details: { taskId: id } });
