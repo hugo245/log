@@ -4699,6 +4699,56 @@
       margin-top: 5px;
     }
 
+    .task-page {
+      max-width: 780px;
+    }
+
+    .task-page .btn {
+      width: auto;
+      flex: 0 0 auto;
+    }
+
+    .task-page-head {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+
+    .task-game-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 14px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .task-game-icon.placeholder {
+      background: var(--accent-soft);
+    }
+
+    .task-facts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .task-facts>div {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      background: var(--surface);
+    }
+
+    .task-facts b {
+      font-size: 14.5px;
+      overflow-wrap: anywhere;
+    }
+
     .task-people {
       display: flex;
       flex-direction: column;
@@ -7002,6 +7052,11 @@
 
       const routeQuery = new URLSearchParams(window.location.hash.split('?')[1] || '');
       if (routeQuery.get('discordLinked') === '1') needsDiscordLink = false;
+
+      if (path.indexOf('#/task/') === 0) {
+        renderTaskPage(decodeURIComponent(path.slice('#/task/'.length)));
+        return;
+      }
 
       if (path.indexOf('#/join/') === 0) {
         const token = decodeURIComponent(path.slice('#/join/'.length));
@@ -12166,6 +12221,120 @@
       return { cls: '', label: 'Due ' + relTime(t.due_at) };
     }
 
+    function renderTaskPage(taskId) {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+      if (!isHrAuthed) { renderHrGate(); return; }
+
+      const myGen = renderGen;
+      let data = null;
+      let loading = true;
+      let loadError = null;
+      let busy = false;
+
+      function money(task) {
+        if (!task.payment) return null;
+        return task.currency === 'USD'
+          ? '$' + Number(task.payment).toFixed(2)
+          : 'R$ ' + Number(task.payment).toLocaleString();
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        let body;
+        if (loading) body = `<div class="dash-loading">Loading task...</div>`;
+        else if (loadError) body = `<div class="dash-empty"><h3>Could not open this task</h3><p>${esc(loadError)}</p><a class="btn btn-ghost btn-sm" href="#/teams">Back to teams</a></div>`;
+        else {
+          const t = data.task;
+          const st = taskState(t);
+          const done = t.status === 'done';
+          const others = (data.sharedWith || []).filter(x => String(x.id) !== String(t.id));
+          body = `
+      <div class="task-page">
+        <div class="task-page-head">
+          ${data.game && data.game.icon_url
+              ? `<img src="${esc(data.game.icon_url)}" alt="" class="task-game-icon">`
+              : `<div class="task-game-icon placeholder" aria-hidden="true"></div>`}
+          <div style="flex:1;min-width:0;">
+            <div class="hint">${data.team ? `<span class="pp-dot" style="background:${esc(data.team.color || 'var(--muted)')};display:inline-block;margin-right:6px;"></span>${esc(data.team.name)}` : 'Task'}${data.game ? ` &middot; ${esc(data.game.name)}` : ''}</div>
+            <h1 style="margin:4px 0 8px;">${esc(t.title)}</h1>
+            <div class="pp-chips">
+              <span class="pp-state ${st.cls}">${esc(st.label)}</span>
+              ${t.repeat_every ? `<span class="pp-tag">Repeats ${esc({ weekly: 'weekly', fortnightly: 'every 2 weeks', monthly: 'monthly' }[t.repeat_every] || t.repeat_every)}</span>` : ''}
+              ${t.batch_id ? `<span class="pp-tag">Given to everyone</span>` : ''}
+            </div>
+          </div>
+        </div>
+
+        <div class="task-facts">
+          <div><span class="hint">Deadline</span><b>${t.due_at ? esc(fmtDateTime(t.due_at)) : 'No deadline'}</b></div>
+          <div><span class="hint">Pays</span><b>${money(t) ? esc(money(t)) : 'Nothing set'}</b></div>
+          <div><span class="hint">Assigned to</span><b>${t.assigned_to_user_id ? userLink(t.assigned_to_user_id, t.assigned_to_username) : 'Nobody'}</b></div>
+          <div><span class="hint">${done ? 'Finished' : 'Set by'}</span><b>${done ? `${esc(t.completed_by || 'someone')}, ${esc(relTime(t.completed_at))}` : esc(t.created_by || 'unknown')}</b></div>
+        </div>
+
+        ${t.details ? `<div class="panel" style="margin:0 0 18px;"><h3 style="margin:0 0 8px;font-size:15px;">Details</h3><p class="task-details" style="margin:0;">${esc(t.details)}</p></div>` : ''}
+
+        ${money(t) ? `<div class="filter-notice" style="margin-bottom:18px;">Once this is finished, log a payment request for ${esc(money(t))} so it gets paid.${canSubmitRequests() ? '' : ' Ask your lead to log it.'}${canSubmitRequests() ? ` <a class="btn btn-ghost btn-sm" href="#/new">Log the payment</a>` : ''}</div>` : ''}
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${(data.isMine || data.canManage) ? `<button type="button" class="btn ${done ? 'btn-ghost' : 'btn-primary'} btn-sm" id="taskToggleBtn" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : done ? 'Reopen this task' : 'Mark it done'}</button>` : ''}
+          ${data.team ? `<a class="btn btn-ghost btn-sm" href="#/teams?team=${encodeURIComponent(data.team.id)}&tab=deadlines">All ${esc(data.team.name)} deadlines</a>` : ''}
+          ${data.game && data.game.roblox_place_id ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/games/${esc(data.game.roblox_place_id)}" target="_blank" rel="noopener">Open the game</a>` : ''}
+        </div>
+
+        ${others.length ? `
+        <div class="panel" style="margin:20px 0 0;">
+          <h3 style="margin:0 0 10px;font-size:15px;">Everyone else on this task</h3>
+          <div class="task-people" style="border:none;padding:0;margin:0;">
+            ${others.map(o => `<div class="task-person">
+              ${avatarImg(o.assigned_to_user_id, '', 'style="width:22px;height:22px;border-radius:50%;"')}
+              <span style="flex:1;min-width:0;">${userLink(o.assigned_to_user_id, o.assigned_to_username)}</span>
+              <span class="pp-state ${o.status === 'done' ? 'ok' : ''}">${o.status === 'done' ? 'Done' : 'Still open'}</span>
+            </div>`).join('')}
+          </div>
+        </div>` : ''}
+      </div>`;
+        }
+
+        app.innerHTML = `${topbar()}<div class="dash-shell">${body}</div>`;
+        wireTopbarSignOut();
+        const toggle = document.getElementById('taskToggleBtn');
+        if (toggle) toggle.addEventListener('click', async () => {
+          const next = data.task.status === 'done' ? 'open' : 'done';
+          busy = true; paint();
+          try {
+            await callHrData('set_team_task_status', { id: data.task.id, status: next });
+            toast(next === 'done' ? 'Marked done' : 'Reopened');
+            busy = false;
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.message || 'Could not update the task.', 'err');
+            paint();
+          }
+        });
+      }
+
+      async function load() {
+        loading = !data;
+        loadError = null;
+        paint();
+        try {
+          const json = await callHrData('get_task', { id: taskId });
+          data = json.data;
+        } catch (e) {
+          loadError = e.code === 'task_not_found' ? "This task no longer exists. It may have been finished and cleared, or deleted."
+            : e.code === 'missing_permission' ? "This task belongs to someone else, and you don't have access to team tasks."
+              : (e.message || 'Could not load this task.');
+        }
+        if (myGen !== renderGen) return;
+        loading = false;
+        paint();
+      }
+
+      load();
+    }
+
     function renderTeams() {
       if (!authReady) { app.innerHTML = topbar(); return; }
       if (!isHrAuthed) { renderHrGate(); return; }
@@ -12485,6 +12654,7 @@
                 <span>${esc(done)} of ${esc(batch.length)} done</span>
                 ${game ? `<span>${esc(game.name)}</span>` : ''}
                 ${first.due_at ? `<span title="${esc(fmtDateTime(first.due_at))}">${esc(fmtDate(first.due_at))}</span>` : ''}
+                ${first.payment ? `<span class="pp-tag">${esc(first.currency === 'USD' ? '$' + Number(first.payment).toFixed(2) : 'R$ ' + Number(first.payment).toLocaleString())}</span>` : ''}
                 ${first.repeat_every ? `<span class="pp-tag">Repeats ${esc({ weekly: 'weekly', fortnightly: 'every 2 weeks', monthly: 'monthly' }[first.repeat_every] || first.repeat_every)}</span>` : ''}
                 <button type="button" class="pp-linkbtn" data-batch-toggle="${esc(key)}">${expanded ? 'Hide people' : 'Show people'}</button>
               </div>
@@ -12493,6 +12663,7 @@
                 <div class="task-person">
                   ${avatarImg(t.assigned_to_user_id, '', 'style="width:22px;height:22px;border-radius:50%;"')}
                   <span style="flex:1;min-width:0;">${userLink(t.assigned_to_user_id, t.assigned_to_username)}</span>
+                  <a class="pp-linkbtn" href="#/task/${encodeURIComponent(t.id)}">Open</a>
                   <span class="pp-state ${taskState(t).cls}">${esc(taskState(t).label)}</span>
                   ${canTasks() ? `<button type="button" class="pp-linkbtn" data-task-toggle="${esc(t.id)}" data-status="${t.status === 'done' ? 'open' : 'done'}">${t.status === 'done' ? 'Reopen' : 'Done'}</button>` : ''}
                 </div>`).join('')}</div>` : ''}
@@ -12529,8 +12700,9 @@
                 ${game ? `<span>${esc(game.name)}</span>` : ''}
                 ${t.assigned_to_user_id ? `<span>${userLink(t.assigned_to_user_id, t.assigned_to_username)}</span>` : '<span class="hint">Nobody assigned</span>'}
                 ${t.due_at ? `<span title="${esc(fmtDateTime(t.due_at))}">${esc(fmtDate(t.due_at))}</span>` : ''}
+                ${t.payment ? `<span class="pp-tag">${esc(t.currency === 'USD' ? '$' + Number(t.payment).toFixed(2) : 'R$ ' + Number(t.payment).toLocaleString())}</span>` : ''}
                 ${t.repeat_every ? `<span class="pp-tag">Repeats ${esc({ weekly: 'weekly', fortnightly: 'every 2 weeks', monthly: 'monthly' }[t.repeat_every] || t.repeat_every)}</span>` : ''}
-                ${t.assigned_to_user_id && t.status === 'open' && t.due_at ? `<span class="hint" title="A Discord reminder goes out 3 days before, the day before, and if it goes overdue">Reminders on</span>` : ''}
+                <a class="pp-linkbtn" href="#/task/${encodeURIComponent(t.id)}">Open</a>
               </div>
               ${t.details ? `<div class="task-details">${esc(t.details)}</div>` : ''}
             </div>
@@ -12558,6 +12730,15 @@
               <div class="field"><label for="taskDue">Deadline</label><input type="date" id="taskDue" value="${d.due_at ? esc(String(d.due_at).slice(0, 10)) : ''}"></div>
               <div class="field"><label for="taskGame">Game <span class="hint">(optional)</span></label>
                 <select id="taskGame"><option value="">No specific game</option>${detail.games.map(g => `<option value="${esc(g.id)}" ${String(d.game_id) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>
+              </div>
+              <div class="field"><label for="taskPayment">Pays <span class="hint">(optional)</span></label>
+                <div style="display:flex;gap:6px;">
+                  <input type="number" id="taskPayment" min="0" step="0.01" placeholder="e.g. 5000" value="${d.payment != null ? esc(d.payment) : ''}" style="flex:1;">
+                  <select id="taskCurrency" aria-label="Currency" style="flex:0 0 100px;">
+                    <option value="ROBUX" ${String(d.currency || 'ROBUX') === 'ROBUX' ? 'selected' : ''}>Robux</option>
+                    <option value="USD" ${d.currency === 'USD' ? 'selected' : ''}>USD</option>
+                  </select>
+                </div>
               </div>
               <div class="field"><label for="taskRepeat">Repeats <span class="hint">(optional)</span></label>
                 <select id="taskRepeat">${[['', 'Does not repeat'], ['weekly', 'Every week'], ['fortnightly', 'Every 2 weeks'], ['monthly', 'Every month']].map(([v, l]) => `<option value="${v}" ${String(d.repeat_every || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -12720,7 +12901,9 @@
             assignToEveryone: everyone,
             assignedToUserId: everyone ? null : (assignee || null),
             assignedToUsername: everyone ? null : (member ? member.robloxUsername : null),
-            repeatEvery: document.getElementById('taskRepeat').value || null
+            repeatEvery: document.getElementById('taskRepeat').value || null,
+            payment: document.getElementById('taskPayment').value || null,
+            currency: document.getElementById('taskCurrency').value
           }), taskDraft.id || taskDraft.batch_id ? 'Task updated' : (everyone ? `Task given to ${detail.members.length} people` : 'Task added'), () => { taskDraft = null; });
           if (saved && saved.created > 1) toast(saved.notified ? `${saved.notified} of ${saved.created} got a Discord message.` : 'Nobody had Discord linked, so no messages were sent.', saved.notified ? undefined : 'err');
         });

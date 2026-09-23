@@ -1119,7 +1119,52 @@ function nextDueDate(dueAt, repeatEvery) {
     return d.toISOString();
 }
 
+function taskLink(taskId) {
+    if (!APP_ORIGIN || !taskId) return null;
+    return `${APP_ORIGIN.replace(/\/$/, '')}/#/task/${encodeURIComponent(taskId)}`;
+}
+
+function taskMoneyLine(task) {
+    if (!task || !task.payment) return '';
+    const amount = task.currency === 'ROBUX'
+        ? `R$ ${Number(task.payment).toLocaleString()}`
+        : `$${Number(task.payment).toFixed(2)}`;
+    return `\nPays ${amount} once it's approved.`;
+}
+
+async function notifyTaskEvent(task, teamId, kind, extra) {
+    if (!task || !task.assigned_to_user_id) return false;
+    let teamName = 'your team';
+    if (teamId) {
+        const { data: team } = await supabase.from('teams').select('name').eq('id', teamId).maybeSingle();
+        if (team && team.name) teamName = team.name;
+    }
+    const link = taskLink(task.id);
+    const due = task.due_at ? `\nDue ${new Date(task.due_at).toUTCString()}.` : '';
+    const lines = {
+        assigned: `New ${teamName} task for you on PlayVerse: "${task.title}".${due}${taskMoneyLine(task)}`,
+        updated: `Your ${teamName} task "${task.title}" was updated.${due}${taskMoneyLine(task)}`,
+        done: `Nice one, you finished "${task.title}" for ${teamName}.${task.due_at && new Date(task.completed_at || Date.now()) <= new Date(task.due_at) ? ' Right on time.' : ''}${taskMoneyLine(task)}`,
+        reopened: `Your ${teamName} task "${task.title}" has been reopened.${due}`,
+        cancelled: `Your ${teamName} task "${task.title}" has been cancelled. Nothing more to do.`,
+        deleted: `Your ${teamName} task "${task.title}" has been removed.`
+    };
+    let text = lines[kind] || lines.updated;
+    if (extra) text += `\n${extra}`;
+    if (task.details && (kind === 'assigned' || kind === 'updated')) text += `\n${task.details}`;
+    if (link && kind !== 'deleted' && kind !== 'cancelled') text += `\n${link}`;
+    try {
+        return await notifyModeratedUser(task.assigned_to_user_id, text);
+    } catch (e) {
+        return false;
+    }
+}
+
 async function notifyTaskAssigned(task, teamId) {
+    return notifyTaskEvent(task, teamId, 'assigned');
+}
+
+async function legacyNotifyTaskAssigned(task, teamId) {
     if (!task || !task.assigned_to_user_id) return false;
     let teamName = 'your team';
     if (teamId) {
@@ -4522,16 +4567,46 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'get_task') {
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: task } = await supabase.from('team_tasks').select('*').eq('id', id).maybeSingle();
+        if (!task) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
+        const mine = String(task.assigned_to_user_id) === String(session.roblox_user_id);
+        if (!mine && !canViewTeams(session)) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
+        const [teamRes, gameRes, batchRes] = await Promise.all([
+            supabase.from('teams').select('id, name, color').eq('id', task.team_id).maybeSingle(),
+            task.game_id ? supabase.from('games').select('id, name, icon_url, roblox_place_id').eq('id', task.game_id).maybeSingle() : Promise.resolve({ data: null }),
+            task.batch_id ? supabase.from('team_tasks').select('id, assigned_to_user_id, assigned_to_username, status, completed_at').eq('batch_id', task.batch_id) : Promise.resolve({ data: [] })
+        ]);
+        res.json({
+            ok: true,
+            data: {
+                task,
+                team: teamRes.data || null,
+                game: gameRes.data || null,
+                sharedWith: batchRes.data || [],
+                isMine: mine,
+                canManage: await canManageTeamTasks(session, task.team_id)
+            }
+        });
+        return;
+    }
+
     if (action === 'save_team_task') {
         const teamId = payload.teamId;
         if (!(await canManageTeamTasks(session, teamId))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
         const title = payload.title ? String(payload.title).trim() : '';
         if (!teamId || !title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const paymentAmount = payload.payment === '' || payload.payment == null ? null : Number(payload.payment);
+        if (paymentAmount != null && (!Number.isFinite(paymentAmount) || paymentAmount < 0)) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
         const shared = {
             team_id: teamId,
             game_id: payload.gameId || null,
             title,
             details: payload.details ? String(payload.details).trim() : null,
+            payment: paymentAmount,
+            currency: paymentAmount != null ? (payload.currency === 'USD' ? 'USD' : 'ROBUX') : null,
             due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null,
             repeat_every: ['weekly', 'fortnightly', 'monthly'].includes(payload.repeatEvery) ? payload.repeatEvery : null,
             reminders_sent: []
@@ -4541,8 +4616,13 @@ app.post('/hr-data', async (req, res) => {
         if (payload.batchId) {
             const { error } = await supabase.from('team_tasks').update(shared).eq('batch_id', payload.batchId);
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            const { data: updated } = await supabase.from('team_tasks').select('*').eq('batch_id', payload.batchId);
+            let notified = 0;
+            for (const row of (updated || [])) {
+                if (row.status === 'open' && await notifyTaskEvent(row, teamId, 'updated')) notified += 1;
+            }
             await logAudit(session, { category: 'teams', action: 'update_task', details: { teamId, title, everyone: true } });
-            res.json({ ok: true });
+            res.json({ ok: true, notified });
             return;
         }
 
@@ -4556,8 +4636,9 @@ app.post('/hr-data', async (req, res) => {
             const { error } = await supabase.from('team_tasks').update(row).eq('id', payload.id);
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
             let notified = false;
-            if (row.assigned_to_user_id && (!before || String(before.assigned_to_user_id) !== String(row.assigned_to_user_id))) {
-                notified = await notifyTaskAssigned(row, teamId);
+            if (row.assigned_to_user_id) {
+                const reassigned = !before || String(before.assigned_to_user_id) !== String(row.assigned_to_user_id);
+                notified = await notifyTaskEvent({ ...row, id: payload.id }, teamId, reassigned ? 'assigned' : 'updated');
             }
             await logAudit(session, { category: 'teams', action: 'update_task', details: { teamId, title } });
             res.json({ ok: true, notified: notified ? 1 : 0 });
@@ -4622,6 +4703,11 @@ app.post('/hr-data', async (req, res) => {
         }
         const { error } = await supabase.from('team_tasks').update(update).eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        const notified = await notifyTaskEvent(
+            { ...task, ...update },
+            task.team_id,
+            status === 'done' ? 'done' : status === 'cancelled' ? 'cancelled' : 'reopened'
+        );
         let repeated = null;
         if (status === 'done' && task.repeat_every) {
             const nextDue = nextDueDate(task.due_at, task.repeat_every);
@@ -4645,7 +4731,7 @@ app.post('/hr-data', async (req, res) => {
             }
         }
         await logAudit(session, { category: 'teams', action: 'task_' + status, details: { taskId: id, repeated } });
-        res.json({ ok: true, repeated });
+        res.json({ ok: true, repeated, notified });
         return;
     }
 
@@ -4653,10 +4739,14 @@ app.post('/hr-data', async (req, res) => {
         const id = payload.id;
         const batchId = payload.batchId || null;
         if (!id && !batchId) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        const { data: taskRow } = batchId
-            ? await supabase.from('team_tasks').select('team_id').eq('batch_id', batchId).limit(1).maybeSingle()
-            : await supabase.from('team_tasks').select('team_id').eq('id', id).maybeSingle();
+        const { data: doomed } = batchId
+            ? await supabase.from('team_tasks').select('*').eq('batch_id', batchId)
+            : await supabase.from('team_tasks').select('*').eq('id', id);
+        const taskRow = (doomed || [])[0] || null;
         if (taskRow && !(await canManageTeamTasks(session, taskRow.team_id))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
+        for (const row of (doomed || [])) {
+            if (row.status === 'open') await notifyTaskEvent(row, row.team_id, 'deleted');
+        }
         const { error } = batchId
             ? await supabase.from('team_tasks').delete().eq('batch_id', batchId)
             : await supabase.from('team_tasks').delete().eq('id', id);
