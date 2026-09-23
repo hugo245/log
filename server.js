@@ -4425,6 +4425,135 @@ app.post('/hr-data', async (req, res) => {
         return;
     }
 
+    if (action === 'games_overview') {
+        if (!requireTeamView(res, session)) return;
+        const [gamesRes, teamGamesRes, teamsRes, assignRes, tasksRes] = await Promise.all([
+            supabase.from('games').select('*').order('name', { ascending: true }),
+            supabase.from('team_games').select('team_id, game_id'),
+            supabase.from('teams').select('id, name, color'),
+            supabase.from('user_assignments').select('roblox_user_id, team_id'),
+            supabase.from('team_tasks').select('*')
+        ]);
+        const games = gamesRes.data || [];
+        await captureGameSnapshots(games.filter(g => g.roblox_universe_id), false);
+        const { data: snaps } = await supabase
+            .from('game_stat_snapshots')
+            .select('*')
+            .gte('captured_at', new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString())
+            .order('captured_at', { ascending: true });
+        const snapsByGame = {};
+        (snaps || []).forEach(s => { (snapsByGame[s.game_id] = snapsByGame[s.game_id] || []).push(s); });
+        const teamById = {}; (teamsRes.data || []).forEach(t => { teamById[String(t.id)] = t; });
+
+        res.json({
+            ok: true,
+            data: games.map(g => {
+                const teamIds = (teamGamesRes.data || []).filter(tg => String(tg.game_id) === String(g.id)).map(tg => String(tg.team_id));
+                const members = new Set((assignRes.data || []).filter(a => teamIds.includes(String(a.team_id))).map(a => String(a.roblox_user_id)));
+                const tasks = (tasksRes.data || []).filter(t => String(t.game_id) === String(g.id));
+                const sum = summariseSnapshots(snapsByGame[g.id]);
+                return {
+                    id: g.id,
+                    name: g.name,
+                    iconUrl: g.icon_url,
+                    thumbnailUrl: g.thumbnail_url,
+                    universeId: g.roblox_universe_id,
+                    placeId: g.roblox_place_id,
+                    teams: teamIds.map(id => teamById[id]).filter(Boolean),
+                    memberCount: members.size,
+                    tasks: summariseTasks(tasks),
+                    stats: sum ? { playing: sum.latest.playing, visits: sum.latest.visits, visits7d: sum.visitsLast7d, playingChange7d: sum.playingChange7d } : null
+                };
+            })
+        });
+        return;
+    }
+
+    if (action === 'game_detail') {
+        if (!requireTeamView(res, session)) return;
+        const gameId = payload.gameId;
+        if (!gameId) { res.status(400).json({ ok: false, error: 'missing_game_id' }); return; }
+        const { data: game } = await supabase.from('games').select('*').eq('id', gameId).maybeSingle();
+        if (!game) { res.status(404).json({ ok: false, error: 'game_not_found' }); return; }
+        if (payload.refreshStats) await captureGameSnapshots([game], true);
+        else await captureGameSnapshots([game], false);
+
+        const [teamGamesRes, teamsRes, tasksRes, skillsetsRes, snapsRes, paymentsRes] = await Promise.all([
+            supabase.from('team_games').select('team_id').eq('game_id', gameId),
+            supabase.from('teams').select('id, name, color'),
+            supabase.from('team_tasks').select('*').eq('game_id', gameId).order('due_at', { ascending: true }),
+            supabase.from('skillsets').select('id, name, color'),
+            supabase.from('game_stat_snapshots').select('*').eq('game_id', gameId)
+                .gte('captured_at', new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString())
+                .order('captured_at', { ascending: true }),
+            supabase.from('payment_requests').select('roblox_user_id, game, game_id, payment, currency, status, paid_at')
+        ]);
+        const teamIds = (teamGamesRes.data || []).map(tg => tg.team_id);
+        const teamById = {}; (teamsRes.data || []).forEach(t => { teamById[String(t.id)] = t; });
+        const skillsetById = {}; (skillsetsRes.data || []).forEach(k => { skillsetById[String(k.id)] = k; });
+        const { data: assignments } = teamIds.length
+            ? await supabase.from('user_assignments').select('*').in('team_id', teamIds)
+            : { data: [] };
+
+        const tasks = tasksRes.data || [];
+        const memberIds = [...new Set((assignments || []).map(a => a.roblox_user_id))];
+        const { data: sessions } = memberIds.length
+            ? await supabase.from('hr_sessions').select('roblox_user_id, roles, last_synced_at').in('roblox_user_id', memberIds)
+            : { data: [] };
+        const sessionByUser = {};
+        (sessions || []).forEach(r => {
+            const cur = sessionByUser[r.roblox_user_id];
+            if (!cur || new Date(r.last_synced_at || 0) > new Date(cur.last_synced_at || 0)) sessionByUser[r.roblox_user_id] = r;
+        });
+
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const spend = { ROBUX: 0, USD: 0, thisMonth: { ROBUX: 0, USD: 0 }, requests: 0 };
+        (paymentsRes.data || []).forEach(r => {
+            if (r.status !== 'paid') return;
+            const mine = r.game_id != null
+                ? String(r.game_id) === String(gameId)
+                : (r.game && String(r.game).toLowerCase() === String(game.name || '').toLowerCase());
+            if (!mine) return;
+            const cur = r.currency === 'ROBUX' ? 'ROBUX' : 'USD';
+            spend[cur] += Number(r.payment) || 0;
+            spend.requests += 1;
+            if (r.paid_at && new Date(r.paid_at) >= monthStart) spend.thisMonth[cur] += Number(r.payment) || 0;
+        });
+
+        res.json({
+            ok: true,
+            data: {
+                game: {
+                    id: game.id,
+                    name: game.name,
+                    iconUrl: game.icon_url,
+                    thumbnailUrl: game.thumbnail_url,
+                    universeId: game.roblox_universe_id,
+                    placeId: game.roblox_place_id
+                },
+                teams: teamIds.map(id => teamById[String(id)]).filter(Boolean),
+                members: (assignments || []).map(a => ({
+                    robloxUserId: a.roblox_user_id,
+                    robloxUsername: a.roblox_username,
+                    team: teamById[String(a.team_id)] || null,
+                    skillset: a.skillset_id != null ? (skillsetById[String(a.skillset_id)] || null) : null,
+                    roles: sessionByUser[a.roblox_user_id] ? (sessionByUser[a.roblox_user_id].roles || []) : [],
+                    lastActive: sessionByUser[a.roblox_user_id] ? sessionByUser[a.roblox_user_id].last_synced_at : null,
+                    openTasks: tasks.filter(t => t.status !== 'done' && String(t.assigned_to_user_id) === String(a.roblox_user_id)).length
+                })),
+                tasks,
+                taskSummary: summariseTasks(tasks),
+                stats: summariseSnapshots(snapsRes.data || []),
+                spend,
+                canManage: canManageTeams(session),
+                canManageTasks: canManageTeams(session) || (await Promise.all(teamIds.map(id => isTeamLead(session, id)))).some(Boolean)
+            }
+        });
+        return;
+    }
+
     if (action === 'team_detail') {
         if (!requireTeamView(res, session)) return;
         const teamId = payload.teamId;

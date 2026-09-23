@@ -12475,7 +12475,11 @@
       let orgCompact = false;
       let orgOpenTeams = new Set();
       let orgOpenGroups = new Set();
-      let view = query.get('view') === 'org' ? 'org' : 'teams';
+      let view = ['org', 'games'].includes(query.get('view')) ? query.get('view') : 'teams';
+      let gameId = query.get('game') || null;
+      let gamesList = null;
+      let gameDetail = null;
+      if (gameId) view = 'games';
       let loading = true;
       let loadError = null;
       let busy = false;
@@ -12484,6 +12488,15 @@
       let chartMetric = 'playing';
       let historyChart = null;
       let openTaskBatches = new Set();
+
+      function goGame(nextGameId, nextTab) {
+        gameId = nextGameId;
+        gameDetail = null;
+        tab = nextTab || 'members';
+        view = 'games';
+        history.replaceState(null, '', gameId ? `#/teams?view=games&game=${encodeURIComponent(gameId)}&tab=${tab}` : '#/teams?view=games');
+        load();
+      }
 
       function go(nextTeamId, nextTab) {
         teamId = nextTeamId;
@@ -12652,6 +12665,84 @@
         }).join('')}</div>`;
       }
 
+      function gamesListHtml() {
+        if (!gamesList) return `<div class="dash-loading">Loading games...</div>`;
+        if (!gamesList.length) return `<div class="dash-empty"><h3>No games yet</h3><p>Add games in Manage, under Games &amp; rate, then assign them to a team.</p></div>`;
+        return `<div class="team-grid">${gamesList.map(g => `
+          <button type="button" class="team-card" data-open-game="${esc(g.id)}">
+            <div class="team-card-head">
+              ${g.iconUrl ? `<img src="${esc(g.iconUrl)}" alt="" class="game-icon" style="width:36px;height:36px;border-radius:8px;">` : `<span class="pp-dot" style="background:var(--muted);"></span>`}
+              <h3>${esc(g.name)}</h3>
+            </div>
+            <div class="team-card-stats">
+              <div><b>${esc(g.memberCount)}</b><span>People</span></div>
+              <div><b>${esc(g.teams.length)}</b><span>Teams</span></div>
+              <div><b>${g.tasks.onTimeRate == null ? '-' : esc(g.tasks.onTimeRate) + '%'}</b><span>On time</span></div>
+              <div><b class="${g.tasks.overdue ? 'danger' : ''}">${esc(g.tasks.overdue)}</b><span>Overdue</span></div>
+            </div>
+            <div class="team-card-foot">
+              ${g.stats
+            ? `<span>${esc(bigNum(g.stats.playing))} playing now</span><span>${g.stats.visits7d == null ? 'New' : esc(bigNum(g.stats.visits7d)) + ' visits this week'}</span>`
+            : `<span class="hint">${g.universeId ? 'Waiting for the first reading' : 'Not linked to Roblox yet'}</span>`}
+            </div>
+          </button>`).join('')}</div>`;
+      }
+
+      function gameMembersHtml() {
+        const members = gameDetail.members.slice().sort((a, b) => (b.openTasks - a.openTasks) || (a.robloxUsername || '').localeCompare(b.robloxUsername || ''));
+        if (!members.length) return `<div class="dash-empty"><h3>Nobody works on this game yet</h3><p>Assign it to a team and everyone on that team shows up here.</p></div>`;
+        return `<div class="table-scroll"><table class="req-table">
+          <thead><tr><th>Person</th><th>Team</th><th>Skill</th><th>Open tasks</th><th>Last active</th></tr></thead>
+          <tbody>
+            ${members.map(m => `
+            <tr>
+              <td class="name-cell" style="display:flex;gap:10px;align-items:center;">
+                ${avatarImg(m.robloxUserId, '', 'style="width:28px;height:28px;border-radius:50%;"')}
+                <span>${userLink(m.robloxUserId, m.robloxUsername)}
+                  <span style="display:block;color:var(--muted);font-size:12px;">${(m.roles || []).join(', ') || 'No roles'}</span>
+                </span>
+              </td>
+              <td>${m.team ? `<span class="pp-tag">${esc(m.team.name)}</span>` : '<span class="hint">None</span>'}</td>
+              <td>${m.skillset ? esc(m.skillset.name) : '<span class="hint">Not set</span>'}</td>
+              <td>${m.openTasks ? esc(m.openTasks) : '<span class="hint">None</span>'}</td>
+              <td style="white-space:nowrap;color:var(--ink-soft);">${m.lastActive ? esc(shortAgo(m.lastActive)) : '-'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`;
+      }
+
+      function gameAnalyticsHtml() {
+        const s = gameDetail.stats;
+        const g = gameDetail.game;
+        if (!g.universeId) return `<div class="dash-empty"><h3>Not linked to Roblox</h3><p>Open the team that owns this game and press "Link to Roblox" to start tracking players, visits and growth.</p></div>`;
+        if (!s) return `<div class="dash-empty"><h3>No readings yet</h3><p>The first numbers arrive within a few hours, or press Refresh now.</p></div>`;
+        return `
+          <div class="stat-strip team-detail-strip">
+            <div class="strip-card"><div class="strip-label">Playing now</div><div class="strip-value">${esc(bigNum(s.latest.playing))}</div></div>
+            <div class="strip-card"><div class="strip-label">Visits</div><div class="strip-value">${esc(bigNum(s.latest.visits))}</div><div class="hint">${s.visitsLast7d == null ? 'Growth builds up from now' : esc(bigNum(s.visitsLast7d)) + ' this week'}</div></div>
+            <div class="strip-card"><div class="strip-label">Favourites</div><div class="strip-value">${esc(bigNum(s.latest.favorites))}</div></div>
+            <div class="strip-card"><div class="strip-label">Liked</div><div class="strip-value">${s.latest.likes + s.latest.dislikes ? Math.round(s.latest.likes / (s.latest.likes + s.latest.dislikes) * 100) + '%' : '-'}</div></div>
+          </div>
+          <div class="panel" style="margin:0 0 18px;">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+              <h3 style="margin:0;font-size:15px;flex:1;">History</h3>
+              <div class="seg org-seg" role="tablist" aria-label="Metric">
+                ${[['playing', 'Players online'], ['visits', 'Visits'], ['favorites', 'Favourites']].map(([v, l]) =>
+          `<button type="button" role="tab" aria-selected="${chartMetric === v}" class="${chartMetric === v ? 'on' : ''}" data-chart-metric="${v}">${l}</button>`).join('')}
+              </div>
+            </div>
+            <div style="position:relative;height:260px;"><canvas id="gameHistoryChart"></canvas></div>
+          </div>
+          <div class="panel" style="margin:0;">
+            <h3 style="margin:0 0 10px;font-size:15px;">Money</h3>
+            <div class="game-growth" style="border:none;padding:0;">
+              <div><span class="hint">Paid out for this game</span><b>${esc(spendText(gameDetail.spend) || 'Nothing yet')}</b></div>
+              <div><span class="hint">This month</span><b>${esc(spendText(gameDetail.spend, true) || 'Nothing yet')}</b></div>
+              ${gameDetail.spend.ROBUX && s.visitsLast7d ? `<div><span class="hint">Robux per 1K visits this week</span><b>${esc((gameDetail.spend.ROBUX / (s.visitsLast7d / 1000)).toFixed(1))}</b></div>` : ''}
+            </div>
+          </div>`;
+      }
+
       function membersHtml() {
         const members = detail.members.slice().sort((a, b) => (b.openTasks - a.openTasks) || (a.robloxUsername || '').localeCompare(b.robloxUsername || ''));
         if (!members.length) return `<div class="dash-empty"><h3>Nobody on this team yet</h3><p>Add people from the Staff page, or send them an invite link.</p></div>`;
@@ -12755,18 +12846,20 @@
             : `<div class="dash-empty"><h3>No games assigned</h3><p>${detail.canManage ? 'Assign one above, then link it to its Roblox place to track how it grows.' : 'Nobody has assigned a game to this team yet.'}</p></div>`}`;
       }
 
-      function canTasks() {
-        return !!(detail && (detail.canManage || detail.canManageTasks));
+      function canTasks(source) {
+        const src = source || detail;
+        return !!(src && (src.canManage || src.canManageTasks));
       }
 
-      function batchRowHtml(batch) {
+      function batchRowHtml(batch, source) {
+        const src = source || detail;
         const first = batch[0];
         const done = batch.filter(t => t.status === 'done').length;
         const openOnes = batch.filter(t => t.status === 'open');
         const st = taskState(openOnes[0] || first);
         const key = 'batch:' + first.batch_id;
         const expanded = openTaskBatches.has(key);
-        const game = detail.games.find(g => String(g.id) === String(first.game_id));
+        const game = src.games.find(g => String(g.id) === String(first.game_id));
         return `
           <div class="task-row">
             <div style="flex:1;min-width:0;">
@@ -12787,10 +12880,10 @@
                   <span style="flex:1;min-width:0;">${userLink(t.assigned_to_user_id, t.assigned_to_username)}</span>
                   <a class="pp-linkbtn" href="#/task/${encodeURIComponent(t.id)}">Open</a>
                   <span class="pp-state ${taskState(t).cls}">${esc(taskState(t).label)}</span>
-                  ${canTasks() ? `<button type="button" class="pp-linkbtn" data-task-toggle="${esc(t.id)}" data-status="${t.status === 'done' ? 'open' : 'done'}">${t.status === 'done' ? 'Reopen' : 'Done'}</button>` : ''}
+                  ${canTasks(src) ? `<button type="button" class="pp-linkbtn" data-task-toggle="${esc(t.id)}" data-status="${t.status === 'done' ? 'open' : 'done'}">${t.status === 'done' ? 'Reopen' : 'Done'}</button>` : ''}
                 </div>`).join('')}</div>` : ''}
             </div>
-            ${canTasks() ? `
+            ${canTasks(src) ? `
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <button type="button" class="btn btn-ghost btn-sm" data-batch-edit="${esc(first.batch_id)}">Edit</button>
               <button type="button" class="pp-icon-btn" data-batch-delete="${esc(first.batch_id)}" aria-label="Delete ${esc(first.title)} for everyone">&times;</button>
@@ -12798,21 +12891,22 @@
           </div>`;
       }
 
-      function deadlinesHtml() {
-        const s = detail.taskSummary;
+      function deadlinesHtml(source) {
+        const src = source || detail;
+        const s = src.taskSummary;
         const batches = new Map();
-        detail.tasks.forEach(t => {
+        src.tasks.forEach(t => {
           if (!t.batch_id) return;
           if (!batches.has(t.batch_id)) batches.set(t.batch_id, []);
           batches.get(t.batch_id).push(t);
         });
-        const open = detail.tasks.filter(t => t.status === 'open' && !t.batch_id);
-        const closed = detail.tasks.filter(t => t.status !== 'open' && !t.batch_id);
+        const open = src.tasks.filter(t => t.status === 'open' && !t.batch_id);
+        const closed = src.tasks.filter(t => t.status !== 'open' && !t.batch_id);
         const openBatches = [...batches.values()].filter(b => b.some(t => t.status === 'open'));
         const doneBatches = [...batches.values()].filter(b => !b.some(t => t.status === 'open'));
         const row = (t) => {
           const st = taskState(t);
-          const game = detail.games.find(g => String(g.id) === String(t.game_id));
+          const game = src.games.find(g => String(g.id) === String(t.game_id));
           return `
           <div class="task-row">
             <div style="flex:1;min-width:0;">
@@ -12828,7 +12922,7 @@
               </div>
               ${t.details ? `<div class="task-details">${esc(t.details)}</div>` : ''}
             </div>
-            ${canTasks() ? `
+            ${canTasks(src) ? `
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <button type="button" class="btn btn-ghost btn-sm" data-task-toggle="${esc(t.id)}" data-status="${t.status === 'done' ? 'open' : 'done'}">${t.status === 'done' ? 'Reopen' : 'Mark done'}</button>
               <button type="button" class="btn btn-ghost btn-sm" data-task-edit="${esc(t.id)}">Edit</button>
@@ -12844,14 +12938,14 @@
             <div class="strip-card"><div class="strip-label">Due within 3 days</div><div class="strip-value">${esc(s.dueSoon)}</div></div>
             <div class="strip-card"><div class="strip-label">Open</div><div class="strip-value">${esc(s.open)}</div></div>
           </div>
-          ${canTasks() ? (d ? `
+          ${canTasks(src) ? (d ? `
           <div class="panel" style="margin:0 0 18px;">
             <h3 style="margin:0 0 12px;font-size:15px;">${d.id ? 'Edit task' : 'New task'}</h3>
             <div class="field"><label for="taskTitle">What needs doing</label><input type="text" id="taskTitle" value="${esc(d.title || '')}" placeholder="e.g. Ship the winter map update"></div>
             <div class="team-form-row">
               <div class="field"><label for="taskDue">Deadline</label><input type="date" id="taskDue" value="${d.due_at ? esc(String(d.due_at).slice(0, 10)) : ''}"></div>
               <div class="field"><label for="taskGame">Game <span class="hint">(optional)</span></label>
-                <select id="taskGame"><option value="">No specific game</option>${detail.games.map(g => `<option value="${esc(g.id)}" ${String(d.game_id) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}${d.game_id && !detail.games.some(g => String(g.id) === String(d.game_id)) ? `<option value="${esc(d.game_id)}" selected>Previously linked game (not on this team anymore)</option>` : ''}</select>
+                <select id="taskGame"><option value="">No specific game</option>${src.games.map(g => `<option value="${esc(g.id)}" ${String(d.game_id || (!d.id && gameDetail ? gameDetail.game.id : '')) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}${d.game_id && !src.games.some(g => String(g.id) === String(d.game_id)) ? `<option value="${esc(d.game_id)}" selected>Previously linked game (not on this team anymore)</option>` : ''}</select>
               </div>
               <div class="field"><label for="taskPayment">Pays <span class="hint">(optional)</span></label>
                 <div style="display:flex;gap:6px;">
@@ -12868,8 +12962,8 @@
               <div class="field"><label for="taskAssignee">Assign to <span class="hint">(optional)</span></label>
                 <select id="taskAssignee" ${d.batch_id ? 'disabled' : ''}>
                   <option value="">Nobody</option>
-                  ${d.id ? '' : `<option value="__all__" ${d.assignAll ? 'selected' : ''}>Everyone on the team (${esc(detail.members.length)})</option>`}
-                  ${detail.members.map(m => `<option value="${esc(m.robloxUserId)}" ${String(d.assigned_to_user_id) === String(m.robloxUserId) ? 'selected' : ''}>${esc(m.robloxUsername)}</option>`).join('')}
+                  ${d.id ? '' : `<option value="__all__" ${d.assignAll ? 'selected' : ''}>Everyone on the team (${esc(src.members.length)})</option>`}
+                  ${src.members.map(m => `<option value="${esc(m.robloxUserId)}" ${String(d.assigned_to_user_id) === String(m.robloxUserId) ? 'selected' : ''}>${esc(m.robloxUsername)}</option>`).join('')}
                 </select>
                 ${d.batch_id ? '<span class="hint">Given to everyone. Editing changes it for all of them.</span>' : ''}
               </div>
@@ -12880,8 +12974,8 @@
               <button type="button" class="btn btn-ghost btn-sm" id="cancelTaskBtn">Cancel</button>
             </div>
           </div>` : `<button type="button" class="btn btn-primary btn-sm" id="newTaskBtn" style="margin-bottom:18px;">Add a task</button>`) : ''}
-          ${open.length || openBatches.length ? `<div class="task-list">${openBatches.map(batchRowHtml).join('')}${open.map(row).join('')}</div>` : `<div class="dash-empty"><h3>Nothing open</h3><p>${canTasks() ? 'Add a task to start tracking deadlines for this team.' : 'This team has no open tasks.'}</p></div>`}
-          ${closed.length || doneBatches.length ? `<h3 class="sec-title" style="margin:24px 0 8px;font-size:15px;">Finished (${closed.length + doneBatches.length})</h3><div class="task-list">${doneBatches.map(batchRowHtml).join('')}${closed.map(row).join('')}</div>` : ''}`;
+          ${open.length || openBatches.length ? `<div class="task-list">${openBatches.map(b => batchRowHtml(b, src)).join('')}${open.map(row).join('')}</div>` : `<div class="dash-empty"><h3>Nothing open</h3><p>${canTasks(src) ? 'Add a task to start tracking deadlines for this team.' : 'This team has no open tasks.'}</p></div>`}
+          ${closed.length || doneBatches.length ? `<h3 class="sec-title" style="margin:24px 0 8px;font-size:15px;">Finished (${closed.length + doneBatches.length})</h3><div class="task-list">${doneBatches.map(b => batchRowHtml(b, src)).join('')}${closed.map(row).join('')}</div>` : ''}`;
       }
 
       function paint() {
@@ -12889,18 +12983,32 @@
         let body;
         if (loading) body = `<div class="dash-loading">Loading teams...</div>`;
         else if (loadError) body = `<div class="dash-empty"><h3>Could not load teams</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryTeamsBtn">Try again</button></div>`;
-        else if (!detail) body = view === 'org' ? orgHtml() : overviewHtml();
+        else if (gameDetail) body = tab === 'deadlines' ? deadlinesHtml(gameDetail) : tab === 'analytics' ? gameAnalyticsHtml() : gameMembersHtml();
+        else if (!detail) body = view === 'org' ? orgHtml() : view === 'games' ? gamesListHtml() : overviewHtml();
         else body = tab === 'games' ? gamesHtml() : tab === 'deadlines' ? deadlinesHtml() : membersHtml();
 
-        const head = detail
+        const head = gameDetail
           ? `<div>
+              <a class="pp-linkbtn" href="#/teams?view=games" id="backToGames">Back to all games</a>
+              <h1 style="margin:6px 0 4px;display:flex;align-items:center;gap:10px;">
+                ${gameDetail.game.iconUrl ? `<img src="${esc(gameDetail.game.iconUrl)}" alt="" class="game-icon" style="width:34px;height:34px;border-radius:8px;">` : ''}
+                ${esc(gameDetail.game.name)}
+              </h1>
+              <p class="sub">${esc(gameDetail.members.length)} people &middot; ${gameDetail.teams.length ? gameDetail.teams.map(t => esc(t.name)).join(', ') : 'No team yet'} &middot; ${gameDetail.taskSummary.open} open tasks${gameDetail.taskSummary.overdue ? `, ${gameDetail.taskSummary.overdue} overdue` : ''}</p>
+            </div>`
+          : detail
+            ? `<div>
               <a class="pp-linkbtn" href="#/teams" id="backToTeams">Back to all teams</a>
               <h1 style="margin:6px 0 4px;display:flex;align-items:center;gap:10px;"><span class="pp-dot" style="background:${esc(detail.team.color || 'var(--muted)')};width:14px;height:14px;"></span>${esc(detail.team.name)}</h1>
               <p class="sub">${esc(detail.members.length)} members &middot; ${esc(detail.games.length)} games &middot; ${detail.taskSummary.open} open tasks${detail.taskSummary.overdue ? `, ${detail.taskSummary.overdue} overdue` : ''}${spendText(detail.spend, true) ? ` &middot; ${esc(spendText(detail.spend, true))} paid out this month` : ''}</p>
             </div>`
-          : `<div>
-              <h1 style="margin-bottom:4px;">Teams</h1>
-              <p class="sub">Who is on each team, which games they look after, and how they are doing against their deadlines.</p>
+            : `<div>
+              <h1 style="margin-bottom:4px;">${view === 'games' ? 'Games' : view === 'org' ? 'Organisation' : 'Teams'}</h1>
+              <p class="sub">${view === 'games'
+              ? 'Every game, who works on it, its deadlines and how it is growing.'
+              : view === 'org'
+                ? 'Everyone at PlayVerse, built from teams, skills and roles as they are right now.'
+                : 'Who is on each team, which games they look after, and how they are doing against their deadlines.'}</p>
             </div>`;
 
         app.innerHTML = `
@@ -12910,19 +13018,26 @@
         ${head}
         <div class="dash-toolbar">
           <button type="button" class="btn btn-ghost btn-sm" id="reloadTeamsBtn">Refresh</button>
-          ${!detail && view === 'org' ? `<button type="button" class="btn btn-ghost btn-sm" id="printOrgBtn">Print or save as PDF</button>` : ''}
+          ${!detail && !gameDetail && view === 'org' ? `<button type="button" class="btn btn-ghost btn-sm" id="printOrgBtn">Print or save as PDF</button>` : ''}
+          ${gameDetail ? `<button type="button" class="btn btn-ghost btn-sm" id="refreshGameStatsBtn">Refresh now</button>` : ''}
+          ${gameDetail && gameDetail.game.placeId ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/games/${esc(gameDetail.game.placeId)}" target="_blank" rel="noopener">Open on Roblox</a>` : ''}
           ${detail && detail.canManage ? `<a class="btn btn-ghost btn-sm" href="#/manage?tab=teams">Team settings</a>` : ''}
         </div>
       </div>
-      ${!detail ? `
+      ${!detail && !gameDetail ? `
       <div class="tabs" style="margin-bottom:18px;" role="tablist">
-        <button type="button" role="tab" aria-selected="${view === 'teams'}" class="tab-btn ${view === 'teams' ? 'active' : ''}" data-teams-view="teams">Teams</button>
-        <button type="button" role="tab" aria-selected="${view === 'org'}" class="tab-btn ${view === 'org' ? 'active' : ''}" data-teams-view="org">Org chart</button>
+        ${[['teams', 'Teams'], ['games', 'Games'], ['org', 'Org chart']].map(([id, label]) =>
+          `<button type="button" role="tab" aria-selected="${view === id}" class="tab-btn ${view === id ? 'active' : ''}" data-teams-view="${id}">${label}</button>`).join('')}
       </div>` : ''}
       ${detail ? `
       <div class="tabs" style="margin-bottom:18px;" role="tablist">
         ${[['members', 'Members'], ['games', 'Games'], ['deadlines', 'Deadlines']].map(([id, label]) =>
-          `<button type="button" role="tab" aria-selected="${tab === id}" class="tab-btn ${tab === id ? 'active' : ''}" data-team-tab="${id}">${label}</button>`).join('')}
+            `<button type="button" role="tab" aria-selected="${tab === id}" class="tab-btn ${tab === id ? 'active' : ''}" data-team-tab="${id}">${label}</button>`).join('')}
+      </div>` : ''}
+      ${gameDetail ? `
+      <div class="tabs" style="margin-bottom:18px;" role="tablist">
+        ${[['members', 'Members'], ['deadlines', 'Deadlines'], ['analytics', 'Analytics']].map(([id, label]) =>
+              `<button type="button" role="tab" aria-selected="${tab === id}" class="tab-btn ${tab === id ? 'active' : ''}" data-game-tab="${id}">${label}</button>`).join('')}
       </div>` : ''}
       ${body}
     </div>`;
@@ -12934,10 +13049,21 @@
         const back = document.getElementById('backToTeams');
         if (back) back.addEventListener('click', (e) => { e.preventDefault(); go(null); });
         document.querySelectorAll('[data-open-team]').forEach(el => el.addEventListener('click', () => go(el.dataset.openTeam)));
+        document.querySelectorAll('[data-open-game]').forEach(el => el.addEventListener('click', () => goGame(el.dataset.openGame)));
+        const backGames = document.getElementById('backToGames');
+        if (backGames) backGames.addEventListener('click', (e) => { e.preventDefault(); goGame(null); });
+        document.querySelectorAll('[data-game-tab]').forEach(el => el.addEventListener('click', () => {
+          tab = el.dataset.gameTab;
+          history.replaceState(null, '', `#/teams?view=games&game=${encodeURIComponent(gameId)}&tab=${tab}`);
+          paint();
+        }));
+        const refreshGame = document.getElementById('refreshGameStatsBtn');
+        if (refreshGame) refreshGame.addEventListener('click', () => load(true));
         document.querySelectorAll('[data-teams-view]').forEach(el => el.addEventListener('click', () => {
           view = el.dataset.teamsView;
-          history.replaceState(null, '', view === 'org' ? '#/teams?view=org' : '#/teams');
-          if (view === 'org' && !org) load(); else paint();
+          gameId = null; gameDetail = null;
+          history.replaceState(null, '', view === 'teams' ? '#/teams' : `#/teams?view=${view}`);
+          if ((view === 'org' && !org) || (view === 'games' && !gamesList)) load(); else paint();
         }));
         const orgSearchInput = document.getElementById('orgSearchInput');
         if (orgSearchInput) orgSearchInput.addEventListener('input', debounce(() => { orgSearch = orgSearchInput.value; paint(); const el = document.getElementById('orgSearchInput'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 150));
@@ -13012,16 +13138,20 @@
           if (!title) { toast('Give the task a name.', 'err'); return; }
           const due = document.getElementById('taskDue').value;
           const assignee = document.getElementById('taskAssignee').value;
+          const source = gameDetail || detail;
+          const teamField = document.getElementById('taskTeam');
+          const effectiveTeamId = teamId || (teamField ? teamField.value : null) || (gameDetail && gameDetail.teams[0] ? gameDetail.teams[0].id : null);
+          if (!effectiveTeamId) { toast('Assign this game to a team first, then it can have deadlines.', 'err'); return; }
           const everyone = assignee === '__all__';
-          if (everyone && !detail.members.length) { toast('Nobody is on this team yet.', 'err'); return; }
-          const member = detail.members.find(m => String(m.robloxUserId) === String(assignee));
+          if (everyone && !source.members.length) { toast('Nobody works on this yet.', 'err'); return; }
+          const member = source.members.find(m => String(m.robloxUserId) === String(assignee));
           const detailsVal = document.getElementById('taskDetails').value.trim();
           const gameIdVal = document.getElementById('taskGame').value || null;
           const repeatVal = document.getElementById('taskRepeat').value || null;
           const paymentVal = document.getElementById('taskPayment').value || null;
           const currencyVal = document.getElementById('taskCurrency').value;
           const saved = await run(() => callHrData('save_team_task', {
-            id: taskDraft.id, batchId: taskDraft.batch_id || null, teamId, title,
+            id: taskDraft.id, batchId: taskDraft.batch_id || null, teamId: effectiveTeamId, title,
             details: detailsVal,
             dueAt: due ? new Date(due + 'T23:59:59').toISOString() : null,
             gameId: gameIdVal,
@@ -13031,7 +13161,7 @@
             repeatEvery: repeatVal,
             payment: paymentVal,
             currency: currencyVal
-          }), taskDraft.id || taskDraft.batch_id ? 'Task updated' : (everyone ? `Task given to ${detail.members.length} people` : 'Task added'), () => { taskDraft = null; });
+          }), taskDraft.id || taskDraft.batch_id ? 'Task updated' : (everyone ? `Task given to ${source.members.length} people` : 'Task added'), () => { taskDraft = null; });
           if (saved && saved.created > 1) toast(saved.notified ? `${saved.notified} of ${saved.created} got a Discord message.` : 'Nobody had Discord linked, so no messages were sent.', saved.notified ? undefined : 'err');
         });
         document.querySelectorAll('[data-batch-toggle]').forEach(el => el.addEventListener('click', () => {
@@ -13040,7 +13170,7 @@
           paint();
         }));
         document.querySelectorAll('[data-batch-edit]').forEach(el => el.addEventListener('click', () => {
-          taskDraft = detail.tasks.find(t => String(t.batch_id) === String(el.dataset.batchEdit)) || null;
+          taskDraft = (gameDetail || detail).tasks.find(t => String(t.batch_id) === String(el.dataset.batchEdit)) || null;
           paint();
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }));
@@ -13049,7 +13179,7 @@
           await run(() => callHrData('delete_team_task', { batchId: el.dataset.batchDelete }), 'Task deleted for everyone');
         }));
         document.querySelectorAll('[data-task-edit]').forEach(el => el.addEventListener('click', () => {
-          taskDraft = detail.tasks.find(t => String(t.id) === String(el.dataset.taskEdit)) || null;
+          taskDraft = (gameDetail || detail).tasks.find(t => String(t.id) === String(el.dataset.taskEdit)) || null;
           paint();
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }));
@@ -13064,10 +13194,14 @@
 
       function drawHistoryChart() {
         const canvas = document.getElementById('gameHistoryChart');
-        if (!canvas || typeof Chart === 'undefined' || !detail) return;
+        if (!canvas || typeof Chart === 'undefined') return;
+        const source = gameDetail
+          ? { games: [{ name: gameDetail.game.name, stats: gameDetail.stats }] }
+          : detail;
+        if (!source) return;
         if (historyChart) { historyChart.destroy(); historyChart = null; }
         const palette = ['#4F46E5', '#178A4C', '#DB2777', '#EA580C', '#0EA5E9', '#B45309'];
-        const withHistory = detail.games.filter(g => g.stats && g.stats.series.length > 1);
+        const withHistory = source.games.filter(g => g.stats && g.stats.series.length > 1);
         const labels = [...new Set(withHistory.flatMap(g => g.stats.series.map(p => p.at)))].sort();
         const dark = getTheme() === 'dark';
         historyChart = new Chart(canvas.getContext('2d'), {
@@ -13119,11 +13253,20 @@
       }
 
       async function load(refreshStats) {
-        loading = !overview && !detail;
+        loading = !overview && !detail && !gamesList && !gameDetail;
         loadError = null;
         paint();
         try {
-          if (teamId) {
+          if (gameId) {
+            const json = await callHrData('game_detail', { gameId, refreshStats: !!refreshStats });
+            gameDetail = json.data;
+            gameDetail.games = [{ id: gameDetail.game.id, name: gameDetail.game.name }];
+            detail = null;
+          } else if (view === 'games') {
+            const json = await callHrData('games_overview');
+            gamesList = json.data;
+            detail = null; gameDetail = null;
+          } else if (teamId) {
             const json = await callHrData('team_detail', { teamId, refreshStats: !!refreshStats });
             detail = json.data;
           } else if (view === 'org') {
@@ -13141,6 +13284,7 @@
         } catch (e) {
           loadError = e.message || 'Could not load teams.';
           if (e.code === 'team_not_found') { teamId = null; loadError = null; history.replaceState(null, '', '#/teams'); }
+          if (e.code === 'game_not_found') { gameId = null; gameDetail = null; loadError = null; history.replaceState(null, '', '#/teams?view=games'); }
         }
         if (myGen !== renderGen) return;
         loading = false;
