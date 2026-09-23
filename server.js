@@ -4713,7 +4713,8 @@ app.post('/hr-data', async (req, res) => {
                 assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
                 assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null
             };
-            const { data: updatedRows, error } = await supabase.from('team_tasks').update(row).eq('id', payload.id).select('id');
+            const { data: updatedRows, error } = await supabase.from('team_tasks').update(row).eq('id', payload.id).select('id, payment, currency, game_id');
+            console.log('[save_team_task] update payload:', row, '-> result:', updatedRows, error);
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
             if (!updatedRows || !updatedRows.length) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
             let notified = false;
