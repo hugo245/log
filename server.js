@@ -1047,7 +1047,7 @@ async function getRoleForSync(roleId) {
 }
 
 const GAME_SNAPSHOT_INTERVAL_MS = 3 * 60 * 60 * 1000;
-const TASK_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+const TASK_REMINDER_INTERVAL_MS = 60 * 60 * 1000;
 
 async function runScheduledGameSnapshots() {
     const { data: games } = await supabase.from('games').select('*').not('roblox_universe_id', 'is', null);
@@ -1056,15 +1056,10 @@ async function runScheduledGameSnapshots() {
     if (result.captured) console.log(`[games] stored ${result.captured} stat snapshot(s)`);
 }
 
-function reminderStage(task) {
-    if (!task.due_at) return null;
+function reminderNeeded(task) {
+    if (!task.due_at) return false;
     const due = new Date(task.due_at).getTime();
-    const now = Date.now();
-    const hoursLeft = (due - now) / (60 * 60 * 1000);
-    if (hoursLeft < 0) return 'overdue';
-    if (hoursLeft <= 24) return 'due_today';
-    if (hoursLeft <= 72) return 'due_soon';
-    return null;
+    return due - Date.now() < 3 * 24 * 60 * 60 * 1000; // overdue, or due within 3 days
 }
 
 async function runTaskReminders() {
@@ -1081,18 +1076,16 @@ async function runTaskReminders() {
     const teamName = {};
     (teams || []).forEach(t => { teamName[String(t.id)] = t.name; });
 
+    const today = new Date().toISOString().slice(0, 10);
+
     for (const task of tasks) {
-        const stage = reminderStage(task);
-        if (!stage) continue;
+        if (!reminderNeeded(task)) continue;
         const sent = Array.isArray(task.reminders_sent) ? task.reminders_sent : [];
-        if (sent.includes(stage)) continue;
+        if (sent[sent.length - 1] === today) continue; // already reminded today
         const due = new Date(task.due_at);
-        const when = stage === 'overdue'
-            ? `was due ${due.toUTCString()}`
-            : stage === 'due_today'
-                ? `is due within 24 hours (${due.toUTCString()})`
-                : `is due on ${due.toUTCString()}`;
-        const text = stage === 'overdue'
+        const overdue = due.getTime() < Date.now();
+        const when = overdue ? `was due ${due.toUTCString()}` : `is due on ${due.toUTCString()}`;
+        const text = overdue
             ? `Your ${teamName[String(task.team_id)] || 'team'} task "${task.title}" ${when}. Mark it done on PlayVerse, or tell your lead if it needs moving.`
             : `Reminder: your ${teamName[String(task.team_id)] || 'team'} task "${task.title}" ${when}.`;
         let delivered = false;
@@ -1102,8 +1095,8 @@ async function runTaskReminders() {
             console.error('runTaskReminders: could not message', task.assigned_to_user_id, e.message);
             if (discordPaused()) return;
         }
-        await supabase.from('team_tasks').update({ reminders_sent: [...sent, stage] }).eq('id', task.id);
-        if (delivered) console.log(`[tasks] reminded ${task.assigned_to_username || task.assigned_to_user_id} about "${task.title}" (${stage})`);
+        await supabase.from('team_tasks').update({ reminders_sent: [today] }).eq('id', task.id);
+        if (delivered) console.log(`[tasks] reminded ${task.assigned_to_username || task.assigned_to_user_id} about "${task.title}"`);
     }
 }
 
