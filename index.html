@@ -12979,17 +12979,26 @@
           const everyone = assignee === '__all__';
           if (everyone && !detail.members.length) { toast('Nobody is on this team yet.', 'err'); return; }
           const member = detail.members.find(m => String(m.robloxUserId) === String(assignee));
+          // Capture every field BEFORE run() flips busy=true and repaints the form —
+          // reading them lazily inside the payload object meant they were read from
+          // freshly-rebuilt (stale) DOM elements after the repaint, losing whatever
+          // was just typed/selected.
+          const detailsVal = document.getElementById('taskDetails').value.trim();
+          const gameIdVal = document.getElementById('taskGame').value || null;
+          const repeatVal = document.getElementById('taskRepeat').value || null;
+          const paymentVal = document.getElementById('taskPayment').value || null;
+          const currencyVal = document.getElementById('taskCurrency').value;
           const saved = await run(() => callHrData('save_team_task', {
             id: taskDraft.id, batchId: taskDraft.batch_id || null, teamId, title,
-            details: document.getElementById('taskDetails').value.trim(),
+            details: detailsVal,
             dueAt: due ? new Date(due + 'T23:59:59').toISOString() : null,
-            gameId: document.getElementById('taskGame').value || null,
+            gameId: gameIdVal,
             assignToEveryone: everyone,
             assignedToUserId: everyone ? null : (assignee || null),
             assignedToUsername: everyone ? null : (member ? member.robloxUsername : null),
-            repeatEvery: document.getElementById('taskRepeat').value || null,
-            payment: document.getElementById('taskPayment').value || null,
-            currency: document.getElementById('taskCurrency').value
+            repeatEvery: repeatVal,
+            payment: paymentVal,
+            currency: currencyVal
           }), taskDraft.id || taskDraft.batch_id ? 'Task updated' : (everyone ? `Task given to ${detail.members.length} people` : 'Task added'), () => { taskDraft = null; });
           if (saved && saved.created > 1) toast(saved.notified ? `${saved.notified} of ${saved.created} got a Discord message.` : 'Nobody had Discord linked, so no messages were sent.', saved.notified ? undefined : 'err');
         });

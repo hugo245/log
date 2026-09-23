@@ -4718,7 +4718,6 @@ app.post('/hr-data', async (req, res) => {
             };
             if (!before || before.due_at !== newDueAt) row.reminders_sent = [];
             const { data: updatedRows, error } = await supabase.from('team_tasks').update(row).eq('id', payload.id).select('id, payment, currency, game_id, due_at');
-            console.log('[save_team_task] update payload:', row, '-> result:', updatedRows, error);
             if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
             if (!updatedRows || !updatedRows.length) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
             let notified = false;
