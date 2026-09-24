@@ -3979,9 +3979,32 @@ async function handleHrData(req, res) {
             const { data: holders } = await supabase.from('user_role_assignments').select('roblox_user_id').eq('role_id', id).limit(100);
             for (const holder of (holders || [])) await syncDiscordRole(holder.roblox_user_id, roleForSync.discord_role_id, 'remove');
         }
+        const { error: assignErr } = await supabase.from('user_role_assignments').delete().eq('role_id', id);
+        if (assignErr) { res.status(500).json({ ok: false, error: assignErr.message }); return; }
         const { error } = await supabase.from('roles').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        await logAudit(session, { category: 'roles', action: 'delete_role', details: { id, name: roleForSync ? roleForSync.name : null } });
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'cleanup_orphan_role_assignments') {
+        if (!requirePermission(res, session, 'roles.manage')) return;
+        const robloxUserId = payload.robloxUserId ? Number(payload.robloxUserId) : null;
+        let query = supabase.from('user_role_assignments').select('id, role_id, roblox_user_id, roblox_username');
+        if (robloxUserId) query = query.eq('roblox_user_id', robloxUserId);
+        const { data: assignments } = await query;
+        const roleIds = [...new Set((assignments || []).map(a => a.role_id))];
+        const { data: roles } = roleIds.length
+            ? await supabase.from('roles').select('id').in('id', roleIds)
+            : { data: [] };
+        const live = new Set((roles || []).map(r => String(r.id)));
+        const orphans = (assignments || []).filter(a => !live.has(String(a.role_id)));
+        if (orphans.length) {
+            await supabase.from('user_role_assignments').delete().in('id', orphans.map(o => o.id));
+            await logAudit(session, { category: 'roles', action: 'cleanup_roles', details: { removed: orphans.length, robloxUserId } });
+        }
+        res.json({ ok: true, removed: orphans.length });
         return;
     }
 
@@ -5495,6 +5518,95 @@ async function handleHrData(req, res) {
         } catch (e) {
             res.status(500).json({ ok: false, error: 'search_failed' });
         }
+        return;
+    }
+
+    if (action === 'list_people_for_team') {
+        if (!requireTeamManage(res, session) && !hasPermission(session, 'settings.manage_onboarding')) {
+            res.status(403).json({ ok: false, error: 'missing_permission' });
+            return;
+        }
+        const teamId = payload.teamId || null;
+        const [sessionsRes, assignRes, teamsRes] = await Promise.all([
+            supabase.from('hr_sessions').select('roblox_user_id, roblox_username, roles, last_synced_at'),
+            supabase.from('user_assignments').select('roblox_user_id, roblox_username, team_id'),
+            supabase.from('teams').select('id, name')
+        ]);
+        const teamName = {};
+        (teamsRes.data || []).forEach(t => { teamName[String(t.id)] = t.name; });
+        const people = {};
+        const touch = (id, username) => {
+            const key = String(id);
+            if (!people[key]) people[key] = { robloxUserId: Number(id), robloxUsername: username || null, roles: [], teams: [], lastActive: null, onThisTeam: false };
+            if (username && !people[key].robloxUsername) people[key].robloxUsername = username;
+            return people[key];
+        };
+        (sessionsRes.data || []).forEach(r => {
+            const p = touch(r.roblox_user_id, r.roblox_username);
+            (r.roles || []).forEach(name => { if (!p.roles.includes(name)) p.roles.push(name); });
+            if (!p.lastActive || new Date(r.last_synced_at || 0) > new Date(p.lastActive)) p.lastActive = r.last_synced_at;
+        });
+        (assignRes.data || []).forEach(a => {
+            const p = touch(a.roblox_user_id, a.roblox_username);
+            if (a.team_id != null) {
+                const name = teamName[String(a.team_id)];
+                if (name && !p.teams.includes(name)) p.teams.push(name);
+                if (teamId != null && String(a.team_id) === String(teamId)) p.onThisTeam = true;
+            }
+        });
+        res.json({
+            ok: true,
+            data: Object.values(people)
+                .filter(p => p.robloxUsername)
+                .sort((a, b) => a.robloxUsername.localeCompare(b.robloxUsername, undefined, { sensitivity: 'base' }))
+        });
+        return;
+    }
+
+    if (action === 'bulk_assign_team') {
+        if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
+        const teamId = payload.teamId;
+        const ids = Array.isArray(payload.robloxUserIds) ? payload.robloxUserIds.map(Number).filter(Boolean) : [];
+        const skillsetId = payload.skillsetId || null;
+        if (!teamId || !ids.length) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        if (ids.length > 200) { res.status(400).json({ ok: false, error: 'too_many_people' }); return; }
+        const { data: team } = await supabase.from('teams').select('id, name').eq('id', teamId).maybeSingle();
+        if (!team) { res.status(404).json({ ok: false, error: 'team_not_found' }); return; }
+        const { data: known } = await supabase.from('user_assignments').select('roblox_user_id, roblox_username').in('roblox_user_id', ids);
+        const nameById = {};
+        (known || []).forEach(k => { if (k.roblox_username) nameById[String(k.roblox_user_id)] = k.roblox_username; });
+        const { data: sessionNames } = await supabase.from('hr_sessions').select('roblox_user_id, roblox_username').in('roblox_user_id', ids);
+        (sessionNames || []).forEach(k => { if (k.roblox_username && !nameById[String(k.roblox_user_id)]) nameById[String(k.roblox_user_id)] = k.roblox_username; });
+
+        const { data: alreadyOn } = await supabase
+            .from('user_assignments')
+            .select('roblox_user_id')
+            .eq('team_id', teamId)
+            .in('roblox_user_id', ids);
+        const existing = new Set((alreadyOn || []).map(a => String(a.roblox_user_id)));
+        const toInsert = ids.filter(id => !existing.has(String(id))).map(id => ({
+            roblox_user_id: id,
+            roblox_username: nameById[String(id)] || null,
+            team_id: teamId,
+            skillset_id: skillsetId,
+            assigned_at: new Date().toISOString()
+        }));
+        if (toInsert.length) {
+            const { error } = await supabase.from('user_assignments').insert(toInsert);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        }
+        if (skillsetId && existing.size) {
+            await supabase.from('user_assignments')
+                .update({ skillset_id: skillsetId })
+                .eq('team_id', teamId)
+                .in('roblox_user_id', [...existing].map(Number));
+        }
+        await supabase.from('hr_sessions').delete().in('roblox_user_id', ids);
+        await logAudit(session, {
+            category: 'teams', action: 'bulk_assign_team',
+            details: { teamId, teamName: team.name, added: toInsert.length, alreadyOn: existing.size, skillsetId }
+        });
+        res.json({ ok: true, added: toInsert.length, alreadyOn: existing.size, teamName: team.name });
         return;
     }
 

@@ -4699,6 +4699,13 @@
       margin-top: 5px;
     }
 
+    #addPeopleBtn,
+    .pp-foot .btn {
+      width: auto;
+      flex: 0 0 auto;
+      align-self: flex-start;
+    }
+
     .task-page {
       max-width: 780px;
     }
@@ -6553,7 +6560,25 @@
             </span>
           </label>`;
       }).join('');
+      const orphans = st.assignments.filter(a => !(catalog.roles || []).some(r => String(r.id) === String(a.role_id)));
+      const orphanHtml = orphans.length ? `
+        <div class="pp-section">
+          <h3>Roles that no longer exist (${orphans.length})</h3>
+          <p class="hint" style="margin:-4px 0 10px;">These roles were deleted, but the person still has the entry. Removing it tidies their record and takes away anything it still grants.</p>
+          <div class="pp-list">
+            ${orphans.map(a => `
+              <div class="pp-item">
+                <div class="pp-item-main">
+                  <div class="pp-item-title">Deleted role</div>
+                  <div class="pp-role-meta">Reference ${esc(a.role_id)}</div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" data-remove-orphan-role="${esc(a.id)}" ${umPendingKeys.has('role:' + a.id) ? 'disabled' : ''}>Remove</button>
+              </div>`).join('')}
+          </div>
+        </div>` : '';
+
       return `
+        ${orphanHtml}
         <div class="pp-section">
           <h3>Roles given directly</h3>
           <p class="hint" style="margin:-4px 0 10px;">Switch a role on to give it to them, on top of anything they get from Roblox groups. Changes save straight away. You can only change roles below your own level.</p>
@@ -6784,6 +6809,14 @@
         }, on ? 'Skill removed' : 'Skill added');
       }));
 
+      q('[data-remove-orphan-role]').forEach(b => b.addEventListener('click', () => {
+        const id = b.dataset.removeOrphanRole;
+        panelAction('role:' + id, async () => {
+          await deleteRoleAssignment(id);
+          umRolesState.assignments = await listRoleAssignments(umTarget.id);
+          refreshUserMenuData();
+        }, 'Deleted role removed from their record');
+      }));
       q('[data-role-toggle]').forEach(cb => cb.addEventListener('change', () => {
         const roleId = cb.dataset.roleToggle;
         const existing = umRolesState.assignments.find(a => String(a.role_id) === String(roleId));
@@ -12490,6 +12523,13 @@
       let taskDraft = null;
       let linkingGameId = null;
       let chartMetric = 'playing';
+      let addPeopleOpen = false;
+      let addPeopleList = null;
+      let addPeopleLoading = false;
+      let addPeopleError = null;
+      let addPeopleSearch = '';
+      let addPeopleChosen = new Set();
+      let addPeopleSkillset = '';
       let historyChart = null;
       let openTaskBatches = new Set();
 
@@ -12747,10 +12787,75 @@
           </div>`;
       }
 
+      function addPeopleHtml() {
+        const q = addPeopleSearch.trim().toLowerCase();
+        const all = addPeopleList || [];
+        const available = all.filter(p => !p.onThisTeam);
+        const shown = available.filter(p => !q
+          || (p.robloxUsername || '').toLowerCase().includes(q)
+          || String(p.robloxUserId) === q
+          || (p.roles || []).some(r => r.toLowerCase().includes(q))
+          || (p.teams || []).some(t => t.toLowerCase().includes(q)));
+        return `
+        <div class="pp-scrim" id="addPeopleScrim">
+          <aside class="pp" role="dialog" aria-modal="true" aria-labelledby="addPeopleTitle">
+            <div class="pp-head">
+              <div style="flex:1;min-width:0;">
+                <h2 id="addPeopleTitle">Add people to ${esc(detail.team.name)}</h2>
+                <div class="pp-sub">Tick everyone you want on the team, then add them in one go.</div>
+              </div>
+              <button type="button" class="modal-close" id="addPeopleClose" aria-label="Close">&times;</button>
+            </div>
+            <div style="padding:14px 22px 0;">
+              <div class="search-input-wrap" style="margin-bottom:10px;">
+                <input type="text" id="addPeopleSearchInput" placeholder="Search name, role or team" value="${esc(addPeopleSearch)}" aria-label="Search people">
+              </div>
+              ${(catalog.skillsets || []).length ? `
+              <div class="field" style="margin-bottom:6px;">
+                <label for="addPeopleSkill">Give them all a skill <span class="hint">(optional)</span></label>
+                <select id="addPeopleSkill" class="pp-select">
+                  <option value="">No specific skill</option>
+                  ${(catalog.skillsets || []).map(k => `<option value="${esc(k.id)}" ${String(addPeopleSkillset) === String(k.id) ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}
+                </select>
+              </div>` : ''}
+            </div>
+            <div class="pp-body">
+              ${addPeopleLoading && !addPeopleList ? `<div class="dash-loading">Loading people...</div>` : ''}
+              ${addPeopleError ? `<div class="error-box"><span>${esc(addPeopleError)}</span></div>` : ''}
+              ${addPeopleList && !available.length ? `<p class="hint" style="margin:0;">Everyone is already on this team.</p>` : ''}
+              ${addPeopleList && available.length && !shown.length ? `<p class="hint" style="margin:0;">Nobody matches "${esc(addPeopleSearch.trim())}".</p>` : ''}
+              ${shown.length ? `
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span class="hint">${esc(shown.length)} of ${esc(available.length)} shown</span>
+                <button type="button" class="pp-linkbtn" id="addPeopleToggleAll">${shown.every(p => addPeopleChosen.has(String(p.robloxUserId))) ? 'Clear these' : 'Select these'}</button>
+              </div>
+              <div class="pp-list">
+                ${shown.map(p => `
+                  <label class="pp-role">
+                    <input type="checkbox" data-add-person="${esc(p.robloxUserId)}" ${addPeopleChosen.has(String(p.robloxUserId)) ? 'checked' : ''}>
+                    ${avatarImg(p.robloxUserId, '', 'class="org-avatar"')}
+                    <span class="pp-role-main">
+                      <span class="pp-item-title">${esc(p.robloxUsername)}</span>
+                      <span class="pp-role-meta">${(p.roles || []).join(', ') || 'No roles'}${p.teams && p.teams.length ? ` &middot; already on ${esc(p.teams.join(', '))}` : ''}</span>
+                    </span>
+                  </label>`).join('')}
+              </div>` : ''}
+            </div>
+            <div class="pp-foot">
+              <button type="button" class="btn btn-primary btn-sm" id="addPeopleConfirm" ${addPeopleChosen.size && !busy ? '' : 'disabled'}>${busy ? 'Adding...' : `Add ${addPeopleChosen.size || ''}`.trim()}</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="addPeopleCancel">Cancel</button>
+            </div>
+          </aside>
+        </div>`;
+      }
+
       function membersHtml() {
         const members = detail.members.slice().sort((a, b) => (b.openTasks - a.openTasks) || (a.robloxUsername || '').localeCompare(b.robloxUsername || ''));
-        if (!members.length) return `<div class="dash-empty"><h3>Nobody on this team yet</h3><p>Add people from the Staff page, or send them an invite link.</p></div>`;
-        return `<div class="table-scroll"><table class="req-table">
+        const addBtn = detail.canManage
+          ? `<button type="button" class="btn btn-primary btn-sm" id="addPeopleBtn" style="margin-bottom:14px;">+ Add people</button>`
+          : '';
+        if (!members.length) return `${addBtn}<div class="dash-empty"><h3>Nobody on this team yet</h3><p>${detail.canManage ? 'Use Add people to put developers on this team, or send them an invite link.' : 'Ask a lead to add people to this team.'}</p></div>`;
+        return `${addBtn}<div class="table-scroll"><table class="req-table">
           <thead><tr><th>Member</th><th>Skill</th><th>Open tasks</th><th>Requests</th><th>Last active</th></tr></thead>
           <tbody>
             ${members.map(m => `
@@ -13017,6 +13122,7 @@
 
         app.innerHTML = `
     ${topbar()}
+    ${addPeopleOpen && detail ? addPeopleHtml() : ''}
     <div class="dash-shell">
       <div class="dash-head">
         ${head}
@@ -13097,6 +13203,67 @@
         }));
         document.querySelectorAll('[data-team-tab]').forEach(el => el.addEventListener('click', () => { tab = el.dataset.teamTab; history.replaceState(null, '', `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}`); paint(); }));
 
+        const addPeopleBtn = document.getElementById('addPeopleBtn');
+        if (addPeopleBtn) addPeopleBtn.addEventListener('click', () => {
+          addPeopleOpen = true;
+          addPeopleChosen = new Set();
+          addPeopleSearch = '';
+          addPeopleSkillset = '';
+          paint();
+          loadAddPeople();
+        });
+        const closeAddPeople = () => { addPeopleOpen = false; paint(); };
+        ['addPeopleClose', 'addPeopleCancel'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.addEventListener('click', closeAddPeople);
+        });
+        const addScrim = document.getElementById('addPeopleScrim');
+        if (addScrim) addScrim.addEventListener('click', (e) => { if (e.target === addScrim) closeAddPeople(); });
+        const addSearch = document.getElementById('addPeopleSearchInput');
+        if (addSearch) addSearch.addEventListener('input', debounce(() => {
+          addPeopleSearch = addSearch.value;
+          paint();
+          const again = document.getElementById('addPeopleSearchInput');
+          if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+        }, 120));
+        const addSkill = document.getElementById('addPeopleSkill');
+        if (addSkill) addSkill.addEventListener('change', () => { addPeopleSkillset = addSkill.value; });
+        document.querySelectorAll('[data-add-person]').forEach(cb => cb.addEventListener('change', () => {
+          const id = cb.dataset.addPerson;
+          if (cb.checked) addPeopleChosen.add(id); else addPeopleChosen.delete(id);
+          const confirmBtn = document.getElementById('addPeopleConfirm');
+          if (confirmBtn) {
+            confirmBtn.disabled = !addPeopleChosen.size;
+            confirmBtn.textContent = `Add ${addPeopleChosen.size || ''}`.trim();
+          }
+        }));
+        const toggleAll = document.getElementById('addPeopleToggleAll');
+        if (toggleAll) toggleAll.addEventListener('click', () => {
+          const shown = [...document.querySelectorAll('[data-add-person]')].map(cb => cb.dataset.addPerson);
+          const allChosen = shown.every(id => addPeopleChosen.has(id));
+          shown.forEach(id => { if (allChosen) addPeopleChosen.delete(id); else addPeopleChosen.add(id); });
+          paint();
+        });
+        const addConfirm = document.getElementById('addPeopleConfirm');
+        if (addConfirm) addConfirm.addEventListener('click', async () => {
+          const ids = [...addPeopleChosen];
+          const skillsetId = addPeopleSkillset || null;
+          if (!ids.length) return;
+          busy = true; paint();
+          try {
+            const r = await callHrData('bulk_assign_team', { teamId, robloxUserIds: ids, skillsetId });
+            addPeopleOpen = false;
+            addPeopleChosen = new Set();
+            busy = false;
+            toast(`${r.added} ${r.added === 1 ? 'person' : 'people'} added to ${r.teamName}.`);
+            peopleCache.at = 0;
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.message || 'Could not add those people.', 'err');
+            paint();
+          }
+        });
         const addGameBtn = document.getElementById('addGameBtn');
         if (addGameBtn) addGameBtn.addEventListener('click', async () => {
           const sel = document.getElementById('addGameSelect');
@@ -13237,6 +13404,22 @@
             }
           }
         });
+      }
+
+      async function loadAddPeople() {
+        addPeopleLoading = true;
+        addPeopleError = null;
+        try {
+          const [json] = await Promise.all([
+            callHrData('list_people_for_team', { teamId }),
+            loadCatalog('skillsets').catch(() => [])
+          ]);
+          addPeopleList = json.data || [];
+        } catch (e) {
+          addPeopleError = e.message || 'Could not load the list of people.';
+        }
+        addPeopleLoading = false;
+        if (myGen === renderGen && addPeopleOpen) paint();
       }
 
       async function run(fn, successText, after) {
