@@ -90,6 +90,7 @@ const PERMISSIONS = [
     'recruitment.signoff',
     'recruitment.finalise',
     'recruitment.analytics',
+    'payouts.view_bank_details',
     'teams.view',
     'teams.manage'
 ];
@@ -195,8 +196,39 @@ const ONBOARDING_STEP_IDS = new Set(ONBOARDING_STEPS.map(s => s.id));
 const PAYMENT_METHOD_TYPES = {
     PAYPAL: { fields: ['paypalEmail'] },
     DEVEX_ROBUX: { fields: ['robloxUsername'] },
-    VENMO: { fields: ['venmoUsername'] }
+    VENMO: { fields: ['venmoUsername'] },
+    BANK_TRANSFER: {
+        fields: ['fullName', 'country', 'city', 'address', 'postalCode', 'swift', 'iban'],
+        sensitive: true
+    }
 };
+
+const USD_PAYMENT_METHODS = ['PAYPAL', 'VENMO', 'BANK_TRANSFER'];
+const USD_METHOD_LABELS = { PAYPAL: 'PayPal', VENMO: 'Venmo', BANK_TRANSFER: 'bank transfer' };
+
+function canSeeSensitivePayoutDetails(session) {
+    return hasPermission(session, 'payouts.view_bank_details');
+}
+
+function redactPayoutMethod(method, session) {
+    if (!method) return method;
+    const def = PAYMENT_METHOD_TYPES[method.method];
+    if (!def || !def.sensitive) return method;
+    const ownIt = String(method.roblox_user_id || '') === String(session.roblox_user_id);
+    if (ownIt || canSeeSensitivePayoutDetails(session)) return method;
+    const details = method.details || {};
+    const iban = String(details.iban || '');
+    return {
+        ...method,
+        details: {
+            fullName: details.fullName || '',
+            country: details.country || '',
+            iban: iban ? `${'•'.repeat(Math.max(0, iban.length - 4))}${iban.slice(-4)}` : '',
+            hidden: true
+        },
+        detailsHidden: true
+    };
+}
 
 const app = express();
 app.use(cors({
@@ -1806,7 +1838,7 @@ async function enforceUsdMinimumThreshold(filter) {
         const threshold = await getUsdMinimumPending();
         if (!(threshold > 0)) return;
 
-        let methodQuery = supabase.from('payment_methods').select('*').in('method', ['PAYPAL', 'VENMO']);
+        let methodQuery = supabase.from('payment_methods').select('*').in('method', USD_PAYMENT_METHODS);
         if (filter && filter.robloxUserId != null) methodQuery = methodQuery.eq('roblox_user_id', filter.robloxUserId);
         const { data: methods, error: methodsErr } = await methodQuery;
         if (methodsErr || !methods || !methods.length) return;
@@ -1926,7 +1958,7 @@ async function runPaymentMethodConversionSweep(filter) {
             if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m.method;
         });
 
-        const methodToCurrency = { PAYPAL: 'USD', VENMO: 'USD', DEVEX_ROBUX: 'ROBUX' };
+        const methodToCurrency = { PAYPAL: 'USD', VENMO: 'USD', BANK_TRANSFER: 'USD', DEVEX_ROBUX: 'ROBUX' };
 
         const toConvert = pendingRows
             .map(r => {
@@ -1977,6 +2009,23 @@ async function hasActiveInvite(robloxUserId) {
     if (!tokens.length) return false;
     const { data: links } = await supabase.from('onboarding_links').select('token').in('token', tokens).limit(1);
     return !!(links && links.length);
+}
+
+async function isOnTeam(session, teamId) {
+    if (!session || !teamId) return false;
+    const { data } = await supabase
+        .from('user_assignments')
+        .select('roblox_user_id')
+        .eq('team_id', teamId)
+        .eq('roblox_user_id', session.roblox_user_id)
+        .maybeSingle();
+    return !!data;
+}
+
+async function canUseBoard(session, teamId) {
+    if (canManageTeams(session)) return true;
+    if (canViewTeams(session) && await isOnTeam(session, teamId)) return true;
+    return await isOnTeam(session, teamId);
 }
 
 async function checkBaseAccess(robloxUserId) {
@@ -2190,6 +2239,7 @@ async function getUserTeamAssignments(robloxUserId) {
     return list.map(r => ({
         teamId: r.team_id,
         skillsetId: r.skillset_id,
+        removed: r.team_id == null || !teamById[r.team_id],
         team: r.team_id != null ? (teamById[r.team_id] || null) : null,
         skillset: r.skillset_id != null ? (skillsetById[r.skillset_id] || null) : null,
         assignedAt: r.assigned_at
@@ -3255,7 +3305,8 @@ async function handleHrData(req, res) {
             const m = (r.roblox_user_id != null ? methodByUserId[r.roblox_user_id] : null)
                 || (r.roblox_username ? methodByUsername[r.roblox_username.toLowerCase()] : null)
                 || null;
-            r.payment_method = m ? { method: m.method, details: m.details || {} } : null;
+            const safeMethod = m ? redactPayoutMethod({ method: m.method, details: m.details || {}, roblox_user_id: m.roblox_user_id }, session) : null;
+            r.payment_method = safeMethod ? { method: safeMethod.method, details: safeMethod.details || {}, detailsHidden: !!safeMethod.detailsHidden } : null;
 
             r.requester_roles = r.roblox_user_id != null ? (rolesByUserId[r.roblox_user_id] || []) : [];
             const assigns = r.roblox_user_id != null ? (assignsByUserId[r.roblox_user_id] || []) : [];
@@ -3412,7 +3463,8 @@ async function handleHrData(req, res) {
             .eq('roblox_user_id', session.roblox_user_id)
             .maybeSingle();
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        res.json({ ok: true, data: data ? { method: data.method, details: data.details || {} } : null });
+        const safe = data ? redactPayoutMethod({ method: data.method, details: data.details || {}, roblox_user_id: data.roblox_user_id }, session) : null;
+        res.json({ ok: true, data: safe ? { method: safe.method, details: safe.details || {}, detailsHidden: !!safe.detailsHidden } : null });
         return;
     }
 
@@ -3429,7 +3481,8 @@ async function handleHrData(req, res) {
             .ilike('roblox_username', robloxUsername)
             .maybeSingle();
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        res.json({ ok: true, data: data ? { method: data.method, details: data.details || {} } : null });
+        const safe = data ? redactPayoutMethod({ method: data.method, details: data.details || {}, roblox_user_id: data.roblox_user_id }, session) : null;
+        res.json({ ok: true, data: safe ? { method: safe.method, details: safe.details || {}, detailsHidden: !!safe.detailsHidden } : null });
         return;
     }
 
@@ -3445,12 +3498,12 @@ async function handleHrData(req, res) {
         const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
         if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
 
-        if (method === 'PAYPAL' || method === 'VENMO') {
+        if (USD_PAYMENT_METHODS.includes(method)) {
             const threshold = await getUsdMinimumPending();
             if (threshold > 0) {
                 const pendingUsdEquivalent = await getPendingUsdEquivalent(robloxUserId, null);
                 if (pendingUsdEquivalent < threshold) {
-                    res.status(400).json({ ok: false, error: `This person needs $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before ${method === 'PAYPAL' ? 'PayPal' : 'Venmo'} can be selected.` });
+                    res.status(400).json({ ok: false, error: `This person needs $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before ${USD_METHOD_LABELS[method] || method} can be selected.` });
                     return;
                 }
             }
@@ -3487,12 +3540,12 @@ async function handleHrData(req, res) {
         const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
         if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
 
-        if (method === 'PAYPAL' || method === 'VENMO') {
+        if (USD_PAYMENT_METHODS.includes(method)) {
             const threshold = await getUsdMinimumPending();
             if (threshold > 0) {
                 const pendingUsdEquivalent = await getPendingUsdEquivalent(session.roblox_user_id, session.roblox_username);
                 if (pendingUsdEquivalent < threshold) {
-                    res.status(400).json({ ok: false, error: `You need $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before you can select ${method === 'PAYPAL' ? 'PayPal' : 'Venmo'}.` });
+                    res.status(400).json({ ok: false, error: `You need $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before you can select ${USD_METHOD_LABELS[method] || method}.` });
                     return;
                 }
             }
@@ -4586,6 +4639,150 @@ async function handleHrData(req, res) {
         return;
     }
 
+    if (action === 'board_get') {
+        const teamId = payload.teamId;
+        if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
+        if (!(await canUseBoard(session, teamId))) { res.status(403).json({ ok: false, error: 'not_on_this_team' }); return; }
+        const [teamRes, listsRes, cardsRes, membersRes] = await Promise.all([
+            supabase.from('teams').select('id, name, color').eq('id', teamId).maybeSingle(),
+            supabase.from('board_lists').select('*').eq('team_id', teamId).order('position', { ascending: true }),
+            supabase.from('board_cards').select('*').eq('team_id', teamId).eq('archived', false).order('position', { ascending: true }),
+            supabase.from('user_assignments').select('roblox_user_id, roblox_username').eq('team_id', teamId)
+        ]);
+        if (!teamRes.data) { res.status(404).json({ ok: false, error: 'team_not_found' }); return; }
+        let lists = listsRes.data || [];
+        if (!lists.length) {
+            const starter = ['To do', 'In progress', 'Needs review', 'Done'].map((title, i) => ({
+                team_id: teamId, title, position: i * 100, created_by: session.roblox_username, created_at: new Date().toISOString()
+            }));
+            const { data: made } = await supabase.from('board_lists').insert(starter).select('*');
+            lists = made || [];
+        }
+        res.json({
+            ok: true,
+            data: {
+                team: teamRes.data,
+                lists,
+                cards: cardsRes.data || [],
+                members: (membersRes.data || []).filter(m => m.roblox_username),
+                canEdit: true,
+                canManageLists: true,
+                me: { robloxUserId: session.roblox_user_id, robloxUsername: session.roblox_username }
+            }
+        });
+        return;
+    }
+
+    if (action === 'board_save_list') {
+        const teamId = payload.teamId;
+        if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
+        if (!(await canUseBoard(session, teamId))) { res.status(403).json({ ok: false, error: 'not_on_this_team' }); return; }
+        const mode = payload.mode || 'create';
+        if (mode === 'create') {
+            const title = String(payload.title || '').trim();
+            if (!title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+            const { data: last } = await supabase.from('board_lists').select('position').eq('team_id', teamId).order('position', { ascending: false }).limit(1);
+            const position = ((last || [])[0] ? Number((last || [])[0].position) : 0) + 100;
+            const { data, error } = await supabase.from('board_lists').insert({
+                team_id: teamId, title, position, created_by: session.roblox_username, created_at: new Date().toISOString()
+            }).select('*').maybeSingle();
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            res.json({ ok: true, data });
+            return;
+        }
+        if (mode === 'rename') {
+            const title = String(payload.title || '').trim();
+            if (!payload.id || !title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+            const { error } = await supabase.from('board_lists').update({ title }).eq('id', payload.id).eq('team_id', teamId);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            res.json({ ok: true });
+            return;
+        }
+        if (mode === 'delete') {
+            if (!payload.id) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+            const { count } = await supabase.from('board_cards').select('id', { count: 'exact', head: true }).eq('list_id', payload.id).eq('archived', false);
+            if (count && !payload.force) { res.status(400).json({ ok: false, error: 'list_not_empty' }); return; }
+            await supabase.from('board_cards').delete().eq('list_id', payload.id).eq('team_id', teamId);
+            const { error } = await supabase.from('board_lists').delete().eq('id', payload.id).eq('team_id', teamId);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            res.json({ ok: true });
+            return;
+        }
+        if (mode === 'reorder') {
+            const order = Array.isArray(payload.order) ? payload.order : [];
+            for (let i = 0; i < order.length; i++) {
+                await supabase.from('board_lists').update({ position: i * 100 }).eq('id', order[i]).eq('team_id', teamId);
+            }
+            res.json({ ok: true });
+            return;
+        }
+        res.status(400).json({ ok: false, error: 'invalid_fields' });
+        return;
+    }
+
+    if (action === 'board_save_card') {
+        const teamId = payload.teamId;
+        if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
+        if (!(await canUseBoard(session, teamId))) { res.status(403).json({ ok: false, error: 'not_on_this_team' }); return; }
+        const mode = payload.mode || 'create';
+
+        if (mode === 'delete') {
+            if (!payload.id) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+            const { error } = await supabase.from('board_cards').delete().eq('id', payload.id).eq('team_id', teamId);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            res.json({ ok: true });
+            return;
+        }
+
+        if (mode === 'move') {
+            const { id, listId, order } = payload;
+            if (!id || !listId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+            const { error } = await supabase.from('board_cards').update({ list_id: listId }).eq('id', id).eq('team_id', teamId);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            const ids = Array.isArray(order) ? order : [];
+            for (let i = 0; i < ids.length; i++) {
+                await supabase.from('board_cards').update({ position: i * 100 }).eq('id', ids[i]).eq('team_id', teamId);
+            }
+            res.json({ ok: true });
+            return;
+        }
+
+        const title = String(payload.title || '').trim();
+        if (!title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const row = {
+            title,
+            description: payload.description ? String(payload.description).trim() : null,
+            assigned_to_user_id: payload.assignedToUserId ? Number(payload.assignedToUserId) : null,
+            assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null,
+            due_at: payload.dueAt ? new Date(payload.dueAt).toISOString() : null,
+            label: payload.label ? String(payload.label).trim() : null
+        };
+
+        if (mode === 'update') {
+            if (!payload.id) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+            const { error } = await supabase.from('board_cards').update(row).eq('id', payload.id).eq('team_id', teamId);
+            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            res.json({ ok: true });
+            return;
+        }
+
+        if (!payload.listId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: last } = await supabase.from('board_cards').select('position').eq('list_id', payload.listId).order('position', { ascending: false }).limit(1);
+        const position = ((last || [])[0] ? Number((last || [])[0].position) : 0) + 100;
+        const { data, error } = await supabase.from('board_cards').insert({
+            ...row,
+            team_id: teamId,
+            list_id: payload.listId,
+            position,
+            archived: false,
+            created_by: session.roblox_username,
+            created_at: new Date().toISOString()
+        }).select('*').maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, data });
+        return;
+    }
+
     if (action === 'team_detail') {
         if (!requireTeamView(res, session)) return;
         const teamId = payload.teamId;
@@ -5639,8 +5836,10 @@ async function handleHrData(req, res) {
         const robloxUserId = Number(payload.robloxUserId);
         const teamId = payload.teamId === '' || payload.teamId == null ? null : Number(payload.teamId);
         if (!robloxUserId) { res.status(400).json({ ok: false, error: 'missing_user_id' }); return; }
-        if (!teamId) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
-        const { error } = await supabase.from('user_assignments').delete().eq('roblox_user_id', robloxUserId).eq('team_id', teamId);
+        if (!teamId && payload.clearRemoved !== true) { res.status(400).json({ ok: false, error: 'missing_team_id' }); return; }
+        const { error } = teamId
+            ? await supabase.from('user_assignments').delete().eq('roblox_user_id', robloxUserId).eq('team_id', teamId)
+            : await supabase.from('user_assignments').delete().eq('roblox_user_id', robloxUserId).is('team_id', null);
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true });
         return;

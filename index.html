@@ -2970,6 +2970,11 @@
       animation: ppIn .18s ease;
     }
 
+    .pp-body {
+      flex: 1;
+      overflow-y: auto;
+    }
+
     .pp-tabs {
       display: flex;
       gap: 2px;
@@ -3369,8 +3374,6 @@
     }
 
     .pp-body {
-      flex: 1;
-      overflow-y: auto;
       padding: 18px 22px 28px;
       display: flex;
       flex-direction: column;
@@ -4703,6 +4706,227 @@
       align-self: flex-start;
     }
 
+    .privacy-note {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      border: 1px solid var(--accent);
+      background: var(--accent-soft);
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 11px 13px;
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 12px 0;
+    }
+
+    .privacy-icon {
+      flex-shrink: 0;
+    }
+
+    .perm-presets {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .perm-group {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .perm-group-head {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+
+    .perm-group-head strong {
+      font-size: 13.5px;
+    }
+
+    .perm-group-head .pp-linkbtn {
+      margin-left: auto;
+    }
+
+    .bd-board {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      overflow-x: auto;
+      padding-bottom: 14px;
+    }
+
+    .bd-list {
+      flex: 0 0 280px;
+      background: var(--row-alt);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: 70vh;
+    }
+
+    .bd-list.bd-new {
+      background: none;
+      border-style: dashed;
+    }
+
+    .bd-list-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bd-list-head h3 {
+      margin: 0;
+      font-size: 14px;
+      flex: 1;
+      min-width: 0;
+      cursor: text;
+      overflow-wrap: anywhere;
+    }
+
+    .bd-count {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--muted);
+      background: var(--surface);
+      border-radius: 999px;
+      padding: 1px 8px;
+    }
+
+    .bd-list .pp-icon-btn {
+      width: 26px;
+      height: 26px;
+      font-size: 15px;
+    }
+
+    .bd-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 40px;
+      overflow-y: auto;
+      border-radius: 8px;
+    }
+
+    .bd-cards.drop-target {
+      outline: 2px dashed var(--accent);
+      outline-offset: 3px;
+    }
+
+    .bd-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 11px;
+      cursor: grab;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .bd-card:hover {
+      border-color: var(--accent);
+    }
+
+    .bd-card.dragging {
+      opacity: .45;
+    }
+
+    .bd-card-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .bd-card-desc {
+      font-size: 12.5px;
+      color: var(--ink-soft);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .bd-card-foot {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .bd-assignee {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .bd-label {
+      align-self: flex-start;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 2px 9px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .bd-label-urgent,
+    .bd-label-blocked {
+      background: var(--err-bg);
+      color: var(--err-text);
+    }
+
+    .bd-label-bug {
+      background: var(--warn-bg);
+      color: var(--warn-text);
+    }
+
+    .bd-label-feature {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+    }
+
+    .bd-add {
+      border: none;
+      background: none;
+      color: var(--ink-soft);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: left;
+      padding: 6px 4px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .bd-add:hover {
+      background: var(--surface);
+      color: var(--accent);
+    }
+
+    .bd-new input {
+      width: 100%;
+      font: inherit;
+      font-size: 13px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--input-bg);
+      color: var(--ink);
+    }
+
     .task-page {
       max-width: 780px;
     }
@@ -4883,6 +5107,56 @@
         : '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7Z"></path></svg>';
     }
 
+    const PERMISSION_GROUPS = [
+      { id: 'payments', label: 'Payments', hint: 'Logging and paying out work', match: p => p.startsWith('dashboard.') },
+      { id: 'people', label: 'People', hint: 'Staff records and moderation', match: p => p.startsWith('staff.') || p.startsWith('payouts.') },
+      { id: 'teams', label: 'Teams & games', hint: 'Teams, games, boards and deadlines', match: p => p.startsWith('teams.') },
+      { id: 'recruitment', label: 'Recruitment', hint: 'Applications and hiring', match: p => p.startsWith('recruitment.') },
+      { id: 'settings', label: 'Settings', hint: 'Configuration that affects everyone', match: p => p.startsWith('settings.') || p.startsWith('roles.') || p.startsWith('broadcasts.') },
+      { id: 'records', label: 'Records', hint: 'Audit log and backups', match: p => p.startsWith('audit.') || p.startsWith('backups.') }
+    ];
+
+    const PERMISSION_PRESETS = {
+      Developer: ['teams.view'],
+      Lead: ['dashboard.view', 'dashboard.submit_request', 'staff.view_database', 'teams.view', 'teams.manage'],
+      Producer: ['dashboard.view', 'dashboard.submit_request', 'dashboard.mark_paid', 'dashboard.export', 'staff.view_database', 'staff.moderate', 'teams.view', 'teams.manage', 'recruitment.view', 'audit.view'],
+      Everything: null
+    };
+
+    function groupPermissions(list) {
+      const seen = new Set();
+      const groups = PERMISSION_GROUPS.map(g => {
+        const items = list.filter(p => !seen.has(p) && g.match(p));
+        items.forEach(p => seen.add(p));
+        return { ...g, items };
+      }).filter(g => g.items.length);
+      const rest = list.filter(p => !seen.has(p));
+      if (rest.length) groups.push({ id: 'other', label: 'Other', hint: '', items: rest });
+      return groups;
+    }
+
+    function permissionPickerHtml(cls, chosen, roleId) {
+      const has = (p) => (chosen || []).includes(p);
+      return `
+        <div class="perm-presets">
+          <span class="hint">Quick set:</span>
+          ${Object.keys(PERMISSION_PRESETS).map(name => `<button type="button" class="chip-filter" data-perm-preset="${esc(name)}" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">${esc(name)}</button>`).join('')}
+          <button type="button" class="chip-filter" data-perm-preset="None" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">Clear</button>
+        </div>
+        ${groupPermissions(ALL_PERMISSIONS).map(g => `
+          <div class="perm-group">
+            <div class="perm-group-head">
+              <strong>${esc(g.label)}</strong>
+              ${g.hint ? `<span class="hint">${esc(g.hint)}</span>` : ''}
+              <button type="button" class="pp-linkbtn" data-perm-group="${esc(g.id)}" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">${g.items.every(has) ? 'None' : 'All'}</button>
+            </div>
+            <div class="perm-check-grid">
+              ${g.items.map(p => `
+                <label class="perm-check-item" title="${esc(p)}"><input type="checkbox" class="${esc(cls)}" ${roleId ? `data-role-id="${esc(roleId)}"` : ''} data-perm-group-id="${esc(g.id)}" value="${p}" ${has(p) ? 'checked' : ''}> ${esc(PERMISSION_LABELS[p] || p)}</label>`).join('')}
+            </div>
+          </div>`).join('')}`;
+    }
+
     const PERMISSION_LABELS = {
       'dashboard.view': 'View dashboard',
       'dashboard.mark_paid': 'Mark requests paid',
@@ -4922,8 +5196,24 @@
     const PAYMENT_METHODS = {
       PAYPAL: { label: 'PayPal', sub: 'Paid to your PayPal email address', fields: [{ key: 'paypalEmail', label: 'PayPal email', type: 'text', placeholder: 'you@example.com' }] },
       DEVEX_ROBUX: { label: 'Robux', sub: 'Paid in Robux via the Roblox group(s)', fields: [{ key: 'robloxUsername', label: 'Roblox username to receive Robux', type: 'text', placeholder: 'Builderman' }] },
-      VENMO: { label: 'Venmo', sub: 'Paid to your Venmo username', fields: [{ key: 'venmoUsername', label: 'Venmo username', type: 'text', placeholder: '@your-venmo' }] }
+      VENMO: { label: 'Venmo', sub: 'Paid to your Venmo username', fields: [{ key: 'venmoUsername', label: 'Venmo username', type: 'text', placeholder: '@your-venmo' }] },
+      BANK_TRANSFER: {
+        label: 'Bank transfer',
+        sub: 'Paid straight into your bank account',
+        confidential: true,
+        fields: [
+          { key: 'fullName', label: 'First and last name', type: 'text', placeholder: 'As it appears on the account' },
+          { key: 'country', label: 'Country', type: 'text', placeholder: 'Netherlands' },
+          { key: 'city', label: 'City', type: 'text', placeholder: 'Amsterdam' },
+          { key: 'address', label: 'Address', type: 'text', placeholder: 'Street and house number' },
+          { key: 'postalCode', label: 'Postal code', type: 'text', placeholder: '1011 AB' },
+          { key: 'swift', label: 'SWIFT / BIC', type: 'text', placeholder: 'ABNANL2A' },
+          { key: 'iban', label: 'IBAN or account number', type: 'text', placeholder: 'NL00 BANK 0123 4567 89' }
+        ]
+      }
     };
+
+    const PAYOUT_PRIVACY_NOTE = 'Your personal details are strictly confidential and we respect your privacy. Normal staff can NOT view these details. Only the Executive Team (Lead) can view them.';
 
     let supabaseClient = null;
     let configError = null;
@@ -5193,6 +5483,10 @@
       if (!pm) return null;
       const def = PAYMENT_METHODS[pm.method];
       if (!def) return null;
+      if (def.confidential) {
+        const who = (pm.details || {}).fullName;
+        return pm.detailsHidden || !who ? `${def.label} (details hidden)` : `${def.label}: ${who}`;
+      }
       const key = def.fields[0].key;
       const val = (pm.details || {})[key] || '';
       return `${def.label}: ${val}`;
@@ -6469,7 +6763,7 @@
         const ids = team && team.skillsetIds && team.skillsetIds.length ? team.skillsetIds.map(String) : null;
         return ids ? skills.filter(k => ids.includes(String(k.id))) : skills;
       };
-      const joined = new Set(st.assignments.map(a => String(a.teamId)));
+      const joined = new Set(liveAssignments.map(a => String(a.teamId)));
       const available = teams.filter(t => !joined.has(String(t.id)));
       const teamSkillIds = new Set(st.assignments.map(a => a.skillset && String(a.skillset.id)).filter(Boolean));
       const hasSkill = new Set(st.userSkillsets.map(k => String(k.id)));
@@ -6478,7 +6772,19 @@
         return a && a.team ? a.team.name : 'a team';
       };
 
-      const teamRows = st.assignments.length ? st.assignments.map(a => {
+      const removedRows = st.assignments.filter(a => a.removed);
+      const liveAssignments = st.assignments.filter(a => !a.removed);
+      const removedHtml = removedRows.length ? `
+        <div class="pp-item">
+          ${colorDot('var(--err-text)')}
+          <div class="pp-item-main">
+            <div class="pp-item-title">${removedRows.length === 1 ? 'A team that was deleted' : `${removedRows.length} teams that were deleted`}</div>
+            <div class="pp-role-meta">Left over from a team that no longer exists. Clearing it tidies their record.</div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" data-clear-removed-teams="1" ${umPendingKeys.has('team:removed') ? 'disabled' : ''}>Clear</button>
+        </div>` : '';
+
+      const teamRows = liveAssignments.length ? liveAssignments.map(a => {
         const key = 'team:' + a.teamId;
         const busy = umPendingKeys.has(key);
         const opts = skillsForTeam(a.teamId);
@@ -6495,7 +6801,7 @@
             </div>
             <button type="button" class="pp-icon-btn" data-remove-team="${esc(a.teamId)}" ${busy ? 'disabled' : ''} aria-label="Remove from ${esc(a.team ? a.team.name : 'team')}" title="Remove from team">&times;</button>
           </div>`;
-      }).join('') : `<p class="hint" style="margin:0 0 4px;">Not on any team yet.</p>`;
+      }).join('') : (removedRows.length ? '' : `<p class="hint" style="margin:0 0 4px;">Not on any team yet.</p>`);
 
       const addBusy = umPendingKeys.has('team:add');
       const addRow = teams.length ? (available.length ? `
@@ -6526,7 +6832,7 @@
       return `
         <div class="pp-section">
           <h3>Teams</h3>
-          <div class="pp-list">${teamRows}</div>
+          <div class="pp-list">${removedHtml}${teamRows}</div>
           ${addRow}
         </div>
         <div class="pp-section">
@@ -6595,13 +6901,15 @@
           <p class="hint" style="margin:-4px 0 12px;">${st.saved ? `Currently ${esc(PAYMENT_METHODS[st.saved.method] ? PAYMENT_METHODS[st.saved.method].label : st.saved.method)}. Saving here replaces what they set themselves.` : 'Nothing on file yet. Their payment requests show as missing a payout method until this is set.'}</p>
           <div class="pp-methods" role="radiogroup" aria-label="Payout method">
             ${Object.entries(PAYMENT_METHODS).map(([key, m]) => {
-        const blocked = (key === 'PAYPAL' || key === 'VENMO') && elig && !elig.eligible;
+        const blocked = ['PAYPAL', 'VENMO', 'BANK_TRANSFER'].includes(key) && elig && !elig.eligible;
         return `<label class="pp-method ${st.method === key ? 'on' : ''} ${blocked ? 'blocked' : ''}">
                 <input type="radio" name="ppMethod" value="${esc(key)}" ${st.method === key ? 'checked' : ''} ${blocked ? 'disabled' : ''}>
                 <span><strong>${esc(m.label)}</strong><span class="hint">${blocked ? `Needs $${Number(elig.amountNeeded || 0).toFixed(2)} more pending first` : esc(m.sub)}</span></span>
               </label>`;
       }).join('')}
           </div>
+          ${def.confidential ? `<div class="privacy-note"><span class="privacy-icon" aria-hidden="true">&#128274;</span><span>${esc(PAYOUT_PRIVACY_NOTE)}</span></div>` : ''}
+          ${st.saved && st.saved.detailsHidden && st.method === st.saved.method ? `<div class="pp-banner neutral">These bank details are hidden from you. Only the Executive Team can see them, and saving here would replace what they entered.</div>` : ''}
           ${def.fields.map(f => `
           <div class="field" style="margin-top:12px;">
             <label for="ppField_${esc(f.key)}">${esc(f.label)}</label>
@@ -6773,6 +7081,13 @@
           await assignUserTeamSkillset(umTarget.id, umTarget.username, teamId, sel.value || null);
           await reloadTeamsTab();
         }, 'Skill on team updated');
+      }));
+      q('[data-clear-removed-teams]').forEach(b => b.addEventListener('click', () => {
+        if (!confirm('Clear the leftover entries for teams that no longer exist?')) return;
+        panelAction('team:removed', async () => {
+          await callHrData('remove_user_team_assignment', { robloxUserId: umTarget.id, teamId: null, clearRemoved: true });
+          await reloadTeamsTab();
+        }, 'Cleared');
       }));
       q('[data-remove-team]').forEach(b => b.addEventListener('click', () => {
         const teamId = b.dataset.removeTeam;
@@ -7283,11 +7598,27 @@
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
              </details>`
-            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeStaff ? pill('#/staff', 'Staff') : ''}${canSeeTeams() ? pill('#/teams', 'Teams') : ''}${canSeeRecruitment ? pill('#/recruitment', 'Recruitment', ['#/recruitment', '#/recruitment-analytics']) : ''}${canSeeAnalytics() ? pill('#/analytics', 'Analytics') : ''}${hasPermission('audit.view') ? pill('#/audit', 'Audit logs') : ''}
+            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeTeams() ? pill('#/teams', 'Teams', ['#/teams']) : ''}${(() => {
+              const more = [
+                canSeeStaff ? { href: '#/staff', label: 'Staff', paths: ['#/staff'] } : null,
+                canSeeRecruitment ? { href: '#/recruitment', label: 'Recruitment', paths: ['#/recruitment', '#/recruitment-analytics'] } : null,
+                canSeeAnalytics() ? { href: '#/analytics', label: 'Analytics', paths: ['#/analytics'] } : null,
+                hasPermission('audit.view') ? { href: '#/audit', label: 'Audit logs', paths: ['#/audit'] } : null,
+                canSeeManage() ? { href: '#/manage', label: 'Manage', paths: ['#/manage'] } : null
+              ].filter(Boolean);
+              if (!more.length) return '';
+              if (more.length === 1) return pill(more[0].href, more[0].label, more[0].paths);
+              const activeOne = more.find(m => m.paths.includes(path));
+              return `<details class="acct-menu">
+                <summary class="hr-pill${activeOne ? ' active' : ''}">${activeOne ? esc(activeOne.label) : 'More'} <span style="opacity:.6;">&#9662;</span></summary>
+                <div class="acct-menu-list">
+                  ${more.map(m => `<a href="${m.href}"${m.paths.includes(path) ? ' aria-current="page"' : ''}>${esc(m.label)}</a>`).join('')}
+                </div>
+              </details>`;
+            })()}
              <details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
-                 ${canSeeManage() ? `<a href="#/manage">Manage</a><div class="acct-menu-divider"></div>` : ''}
                  <a href="#/my">My teams &amp; skillsets</a>
                  <a href="#/tos">Terms of Service</a>
                  <a href="#/aup">Acceptable Use Policy</a>
@@ -10047,7 +10378,7 @@
             <div class="field">
               <label>How would you like to be paid?</label>
               ${Object.keys(PAYMENT_METHODS).map(key => {
-          const isUsdMethod = key === 'PAYPAL' || key === 'VENMO';
+          const isUsdMethod = key === 'PAYPAL' || key === 'VENMO' || key === 'BANK_TRANSFER';
           const blocked = isUsdMethod && usdEligibility && !usdEligibility.eligible;
           return `
                 <label class="method-option ${selectedMethod === key ? 'active' : ''}" style="${blocked ? 'opacity:0.5;cursor:not-allowed;' : ''}">
@@ -10170,7 +10501,7 @@
         const slot = document.getElementById('methodFieldsSlot');
         if (!slot) return;
         const def = PAYMENT_METHODS[selectedMethod];
-        slot.innerHTML = def.fields.map(f => `
+        slot.innerHTML = (def.confidential ? `<div class="privacy-note"><span class="privacy-icon" aria-hidden="true">&#128274;</span><span>${esc(PAYOUT_PRIVACY_NOTE)}</span></div>` : '') + def.fields.map(f => `
           <div class="field">
             <label>${esc(f.label)}</label>
             <input type="${f.type}" data-method-field="${f.key}" placeholder="${esc(f.placeholder || '')}" value="${esc(methodDetails[f.key] || '')}">
@@ -10744,10 +11075,7 @@
                 <div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" class="editRoleDiscordRoleId" data-role-id="${esc(r.id)}" placeholder="e.g. 123456789012345678" value="${r.discord_role_id ? esc(r.discord_role_id) : ''}"></div>
                 <div class="field">
                   <label>Permissions</label>
-                  <div class="perm-check-grid">
-                    ${ALL_PERMISSIONS.map(p => `
-                      <label class="perm-check-item"><input type="checkbox" class="editRolePerm" data-role-id="${esc(r.id)}" value="${p}" ${(r.permissions || []).includes(p) ? 'checked' : ''}> ${esc(PERMISSION_LABELS[p])}</label>`).join('')}
-                  </div>
+                  ${permissionPickerHtml('editRolePerm', r.permissions || [], r.id)}
                 </div>
                 <button type="button" class="btn btn-primary btn-sm" data-save-role="${esc(r.id)}" ${savingRoleEdit ? 'disabled' : ''}>${savingRoleEdit ? 'Saving...' : 'Save role'}</button>
               </div>` : ''}
@@ -10772,10 +11100,7 @@
             <div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" id="newRoleDiscordRoleId" placeholder="e.g. 123456789012345678"></div>
             <div class="field">
               <label>Permissions</label>
-              <div class="perm-check-grid">
-                ${ALL_PERMISSIONS.map(p => `
-                  <label class="perm-check-item"><input type="checkbox" class="newRolePerm" value="${p}"> ${esc(PERMISSION_LABELS[p])}</label>`).join('')}
-              </div>
+              ${permissionPickerHtml('newRolePerm', [], '')}
             </div>
             <button type="button" class="btn btn-ok" id="addRoleBtn" ${addingRole ? 'disabled' : ''}>${addingRole ? 'Adding...' : 'Add role'}</button>
           </div>
@@ -11472,6 +11797,19 @@
             paint();
           }));
 
+          const permBoxes = (cls, roleId) => [...document.querySelectorAll('.' + cls + (roleId ? `[data-role-id="${roleId}"]` : ''))];
+          document.querySelectorAll('[data-perm-preset]').forEach(el => el.addEventListener('click', () => {
+            const preset = el.dataset.permPreset;
+            const boxes = permBoxes(el.dataset.permTarget, el.dataset.roleId);
+            const list = preset === 'None' ? [] : (PERMISSION_PRESETS[preset] || ALL_PERMISSIONS);
+            boxes.forEach(b => { b.checked = preset === 'Everything' ? true : list.includes(b.value); });
+          }));
+          document.querySelectorAll('[data-perm-group]').forEach(el => el.addEventListener('click', () => {
+            const boxes = permBoxes(el.dataset.permTarget, el.dataset.roleId).filter(b => b.dataset.permGroupId === el.dataset.permGroup);
+            const allOn = boxes.every(b => b.checked);
+            boxes.forEach(b => { b.checked = !allOn; });
+            el.textContent = allOn ? 'All' : 'None';
+          }));
           document.querySelectorAll('[data-save-role]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.saveRole;
             const name = document.querySelector(`.editRoleName[data-role-id="${id}"]`).value.trim();
@@ -12527,6 +12865,11 @@
       let addPeopleSearch = '';
       let addPeopleChosen = new Set();
       let addPeopleSkillset = '';
+      let board = null;
+      let boardError = null;
+      let boardCard = null;
+      let boardBusy = false;
+      let boardDragId = null;
       let historyChart = null;
       let openTaskBatches = new Set();
 
@@ -12846,6 +13189,92 @@
         </div>`;
       }
 
+      function boardCardHtml(card) {
+        const due = card.due_at ? taskState({ due_at: card.due_at, status: 'open' }) : null;
+        return `
+          <div class="bd-card" draggable="true" data-card="${esc(card.id)}" tabindex="0" role="button" aria-label="${esc(card.title)}">
+            ${card.label ? `<span class="bd-label bd-label-${esc(String(card.label).toLowerCase().replace(/[^a-z]/g, ''))}">${esc(card.label)}</span>` : ''}
+            <div class="bd-card-title">${esc(card.title)}</div>
+            ${card.description ? `<div class="bd-card-desc">${esc(card.description)}</div>` : ''}
+            <div class="bd-card-foot">
+              ${card.due_at ? `<span class="pp-state ${due.cls}">${esc(due.label)}</span>` : ''}
+              ${card.assigned_to_user_id ? `<span class="bd-assignee">${avatarImg(card.assigned_to_user_id, '', 'style="width:20px;height:20px;border-radius:50%;"')}${esc(card.assigned_to_username || '')}</span>` : ''}
+            </div>
+          </div>`;
+      }
+
+      function boardHtml() {
+        if (!board) return `<div class="dash-loading">Loading the board...</div>`;
+        if (boardError) return `<div class="dash-empty"><h3>Could not open the board</h3><p>${esc(boardError)}</p></div>`;
+        const cardsFor = (listId) => board.cards.filter(c => String(c.list_id) === String(listId));
+        return `
+        <p class="sub" style="margin:-6px 0 14px;">Everyone on this team can add, move and edit cards. Drag a card to another column, or click it to open.</p>
+        <div class="bd-board">
+          ${board.lists.map(list => {
+          const cards = cardsFor(list.id);
+          return `
+            <section class="bd-list" data-list="${esc(list.id)}">
+              <header class="bd-list-head">
+                <h3 data-rename-list="${esc(list.id)}" title="Click to rename">${esc(list.title)}</h3>
+                <span class="bd-count">${cards.length}</span>
+                <button type="button" class="pp-icon-btn" data-delete-list="${esc(list.id)}" aria-label="Delete ${esc(list.title)}">&times;</button>
+              </header>
+              <div class="bd-cards" data-drop="${esc(list.id)}">
+                ${cards.map(boardCardHtml).join('')}
+              </div>
+              <button type="button" class="bd-add" data-add-card="${esc(list.id)}">+ Add a card</button>
+            </section>`;
+        }).join('')}
+          <section class="bd-list bd-new">
+            <input type="text" id="bdNewListInput" placeholder="New column name" aria-label="New column name">
+            <button type="button" class="btn btn-ghost btn-sm" id="bdAddListBtn">Add column</button>
+          </section>
+        </div>`;
+      }
+
+      function boardCardModalHtml() {
+        const c = boardCard;
+        if (!c) return '';
+        const isNew = !c.id;
+        return `
+        <div class="pp-scrim" id="bdCardScrim">
+          <aside class="pp" role="dialog" aria-modal="true" aria-labelledby="bdCardTitle">
+            <div class="pp-head">
+              <div style="flex:1;min-width:0;">
+                <h2 id="bdCardTitle">${isNew ? 'New card' : 'Card'}</h2>
+                <div class="pp-sub">${esc((board.lists.find(l => String(l.id) === String(c.list_id)) || {}).title || '')}${c.created_by ? ` &middot; added by ${esc(c.created_by)}` : ''}</div>
+              </div>
+              <button type="button" class="modal-close" id="bdCardClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="pp-body">
+              <div class="field"><label for="bdTitle">What needs doing</label>
+                <input type="text" id="bdTitle" value="${esc(c.title || '')}" placeholder="e.g. Fix the spawn lighting"></div>
+              <div class="field"><label for="bdDesc">Details <span class="hint">(optional)</span></label>
+                <textarea id="bdDesc" rows="4" placeholder="Anything useful for whoever picks this up">${esc(c.description || '')}</textarea></div>
+              <div class="team-form-row">
+                <div class="field"><label for="bdDue">Due <span class="hint">(optional)</span></label>
+                  <input type="date" id="bdDue" value="${c.due_at ? esc(String(c.due_at).slice(0, 10)) : ''}"></div>
+                <div class="field"><label for="bdAssignee">Assigned to</label>
+                  <select id="bdAssignee">
+                    <option value="">Nobody</option>
+                    <option value="${esc(board.me.robloxUserId)}" ${String(c.assigned_to_user_id || '') === String(board.me.robloxUserId) ? 'selected' : ''}>Me (${esc(board.me.robloxUsername)})</option>
+                    ${board.members.filter(m => String(m.roblox_user_id) !== String(board.me.robloxUserId)).map(m => `<option value="${esc(m.roblox_user_id)}" ${String(c.assigned_to_user_id || '') === String(m.roblox_user_id) ? 'selected' : ''}>${esc(m.roblox_username)}</option>`).join('')}
+                  </select></div>
+                <div class="field"><label for="bdLabel">Label <span class="hint">(optional)</span></label>
+                  <select id="bdLabel">
+                    ${['', 'Bug', 'Feature', 'Art', 'Urgent', 'Blocked'].map(l => `<option value="${esc(l)}" ${String(c.label || '') === l ? 'selected' : ''}>${l || 'None'}</option>`).join('')}
+                  </select></div>
+              </div>
+            </div>
+            <div class="pp-foot">
+              <button type="button" class="btn btn-primary btn-sm" id="bdSaveCard" ${boardBusy ? 'disabled' : ''}>${boardBusy ? 'Saving...' : isNew ? 'Add card' : 'Save'}</button>
+              ${!isNew ? `<button type="button" class="btn btn-ghost btn-sm" id="bdDeleteCard">Delete card</button>` : ''}
+              <button type="button" class="btn btn-ghost btn-sm" id="bdCancelCard">Cancel</button>
+            </div>
+          </aside>
+        </div>`;
+      }
+
       function membersHtml() {
         const members = detail.members.slice().sort((a, b) => (b.openTasks - a.openTasks) || (a.robloxUsername || '').localeCompare(b.robloxUsername || ''));
         const addBtn = detail.canManage
@@ -13091,7 +13520,7 @@
         else if (loadError) body = `<div class="dash-empty"><h3>Could not load teams</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryTeamsBtn">Try again</button></div>`;
         else if (gameDetail) body = tab === 'deadlines' ? deadlinesHtml(gameDetail) : tab === 'analytics' ? gameAnalyticsHtml() : gameMembersHtml();
         else if (!detail) body = view === 'org' ? orgHtml() : view === 'games' ? gamesListHtml() : overviewHtml();
-        else body = tab === 'games' ? gamesHtml() : tab === 'deadlines' ? deadlinesHtml() : membersHtml();
+        else body = tab === 'board' ? boardHtml() : tab === 'games' ? gamesHtml() : tab === 'deadlines' ? deadlinesHtml() : membersHtml();
 
         const head = gameDetail
           ? `<div>
@@ -13120,6 +13549,7 @@
         app.innerHTML = `
     ${topbar()}
     ${addPeopleOpen && detail ? addPeopleHtml() : ''}
+    ${boardCard && detail ? boardCardModalHtml() : ''}
     <div class="dash-shell">
       <div class="dash-head">
         ${head}
@@ -13138,7 +13568,7 @@
       </div>` : ''}
       ${detail ? `
       <div class="tabs" style="margin-bottom:18px;" role="tablist">
-        ${[['members', 'Members'], ['games', 'Games'], ['deadlines', 'Deadlines']].map(([id, label]) =>
+        ${[['members', 'Members'], ['board', 'Board'], ['games', 'Games'], ['deadlines', 'Deadlines']].map(([id, label]) =>
             `<button type="button" role="tab" aria-selected="${tab === id}" class="tab-btn ${tab === id ? 'active' : ''}" data-team-tab="${id}">${label}</button>`).join('')}
       </div>` : ''}
       ${gameDetail ? `
@@ -13198,8 +13628,14 @@
         document.querySelectorAll('.org-person').forEach(el => el.addEventListener('keydown', (e) => {
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openUserMenu(el.dataset.userId, el.dataset.username); }
         }));
-        document.querySelectorAll('[data-team-tab]').forEach(el => el.addEventListener('click', () => { tab = el.dataset.teamTab; history.replaceState(null, '', `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}`); paint(); }));
+        document.querySelectorAll('[data-team-tab]').forEach(el => el.addEventListener('click', () => {
+          tab = el.dataset.teamTab;
+          history.replaceState(null, '', `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}`);
+          paint();
+          if (tab === 'board' && !board) loadBoard();
+        }));
 
+        wireBoard();
         const addPeopleBtn = document.getElementById('addPeopleBtn');
         if (addPeopleBtn) addPeopleBtn.addEventListener('click', () => {
           addPeopleOpen = true;
@@ -13403,6 +13839,145 @@
         });
       }
 
+      async function loadBoard() {
+        boardError = null;
+        try {
+          const json = await callHrData('board_get', { teamId });
+          board = json.data;
+        } catch (e) {
+          boardError = e.code === 'not_on_this_team' ? 'Only people on this team can open its board.' : (e.message || 'Could not load the board.');
+        }
+        if (myGen === renderGen) paint();
+      }
+
+      async function boardAction(fn, successText) {
+        boardBusy = true; paint();
+        try {
+          await fn();
+          boardBusy = false;
+          if (successText) toast(successText);
+          await loadBoard();
+        } catch (e) {
+          boardBusy = false;
+          toast(e.message || 'That did not save.', 'err');
+          paint();
+        }
+      }
+
+      function wireBoard() {
+        if (tab !== 'board' || !board) return;
+
+        const addList = document.getElementById('bdAddListBtn');
+        const listInput = document.getElementById('bdNewListInput');
+        if (addList) addList.addEventListener('click', () => {
+          const title = listInput.value.trim();
+          if (!title) { toast('Give the column a name.', 'err'); listInput.focus(); return; }
+          boardAction(() => callHrData('board_save_list', { teamId, mode: 'create', title }), 'Column added');
+        });
+        if (listInput) listInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && addList) addList.click(); });
+
+        document.querySelectorAll('[data-rename-list]').forEach(el => el.addEventListener('click', () => {
+          const current = el.textContent.trim();
+          const title = prompt('Rename this column', current);
+          if (title === null || !title.trim() || title.trim() === current) return;
+          boardAction(() => callHrData('board_save_list', { teamId, mode: 'rename', id: el.dataset.renameList, title: title.trim() }), 'Column renamed');
+        }));
+
+        document.querySelectorAll('[data-delete-list]').forEach(el => el.addEventListener('click', () => {
+          const id = el.dataset.deleteList;
+          const count = board.cards.filter(c => String(c.list_id) === String(id)).length;
+          const msg = count
+            ? `Delete this column and its ${count} card${count === 1 ? '' : 's'}? This cannot be undone.`
+            : 'Delete this column?';
+          if (!confirm(msg)) return;
+          boardAction(() => callHrData('board_save_list', { teamId, mode: 'delete', id, force: true }), 'Column deleted');
+        }));
+
+        document.querySelectorAll('[data-add-card]').forEach(el => el.addEventListener('click', () => {
+          boardCard = { list_id: el.dataset.addCard, title: '', description: '', due_at: '', assigned_to_user_id: '', label: '' };
+          paint();
+          const t = document.getElementById('bdTitle');
+          if (t) t.focus();
+        }));
+
+        document.querySelectorAll('[data-card]').forEach(el => {
+          const open = () => {
+            boardCard = board.cards.find(c => String(c.id) === String(el.dataset.card)) || null;
+            paint();
+          };
+          el.addEventListener('click', open);
+          el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } });
+          el.addEventListener('dragstart', (e) => {
+            boardDragId = el.dataset.card;
+            el.classList.add('dragging');
+            if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', el.dataset.card); }
+          });
+          el.addEventListener('dragend', () => { el.classList.remove('dragging'); boardDragId = null; });
+        });
+
+        document.querySelectorAll('[data-drop]').forEach(zone => {
+          zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drop-target'); });
+          zone.addEventListener('dragleave', () => zone.classList.remove('drop-target'));
+          zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.classList.remove('drop-target');
+            const cardId = boardDragId || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
+            if (!cardId) return;
+            const listId = zone.dataset.drop;
+            const card = board.cards.find(c => String(c.id) === String(cardId));
+            if (!card || String(card.list_id) === String(listId)) return;
+            card.list_id = listId;
+            paint();
+            const order = board.cards.filter(c => String(c.list_id) === String(listId)).map(c => c.id);
+            boardAction(() => callHrData('board_save_card', { teamId, mode: 'move', id: cardId, listId, order }));
+          });
+        });
+
+        const closeCard = () => { boardCard = null; paint(); };
+        ['bdCardClose', 'bdCancelCard'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.addEventListener('click', closeCard);
+        });
+        const scrim = document.getElementById('bdCardScrim');
+        if (scrim) scrim.addEventListener('click', (e) => { if (e.target === scrim) closeCard(); });
+
+        const saveCard = document.getElementById('bdSaveCard');
+        if (saveCard) saveCard.addEventListener('click', () => {
+          const title = document.getElementById('bdTitle').value.trim();
+          if (!title) { toast('Give the card a name.', 'err'); return; }
+          const due = document.getElementById('bdDue').value;
+          const assignee = document.getElementById('bdAssignee').value;
+          const assigneeName = assignee
+            ? (String(assignee) === String(board.me.robloxUserId)
+              ? board.me.robloxUsername
+              : (board.members.find(m => String(m.roblox_user_id) === String(assignee)) || {}).roblox_username)
+            : null;
+          const payload = {
+            teamId,
+            mode: boardCard.id ? 'update' : 'create',
+            id: boardCard.id,
+            listId: boardCard.list_id,
+            title,
+            description: document.getElementById('bdDesc').value.trim(),
+            dueAt: due ? new Date(due + 'T23:59:59').toISOString() : null,
+            assignedToUserId: assignee || null,
+            assignedToUsername: assigneeName || null,
+            label: document.getElementById('bdLabel').value || null
+          };
+          const wasNew = !boardCard.id;
+          boardCard = null;
+          boardAction(() => callHrData('board_save_card', payload), wasNew ? 'Card added' : 'Card saved');
+        });
+
+        const deleteCard = document.getElementById('bdDeleteCard');
+        if (deleteCard) deleteCard.addEventListener('click', () => {
+          if (!confirm('Delete this card?')) return;
+          const id = boardCard.id;
+          boardCard = null;
+          boardAction(() => callHrData('board_save_card', { teamId, mode: 'delete', id }), 'Card deleted');
+        });
+      }
+
       async function loadAddPeople() {
         addPeopleLoading = true;
         addPeopleError = null;
@@ -13498,6 +14073,11 @@
       let pendingOpen = query.get('user') ? { id: query.get('user'), tab: { config: 'teams', payment: 'payout' }[query.get('open')] || query.get('open') || 'overview' } : null;
       let modOverview = null;
       let modLoading = false;
+      let staffLoadInFlight = false;
+      let staffRefreshQueued = false;
+      let staffRefreshTimer = null;
+      let modRefreshTimer = null;
+      let staffSnapshot = '';
       let modError = null;
 
       let inviteModalOpen = false;
@@ -13871,10 +14451,12 @@
         });
       }
 
-      async function load() {
+      async function load(quiet) {
+        if (staffLoadInFlight) { staffRefreshQueued = staffRefreshQueued || !!quiet; return; }
+        staffLoadInFlight = true;
         loadError = null;
         if (!staff.length) { loading = true; paintPeople(); }
-        const btn = document.getElementById('refreshStaffBtn');
+        const btn = quiet ? null : document.getElementById('refreshStaffBtn');
         if (btn) { btn.disabled = true; btn.textContent = 'Refreshing...'; }
         try {
           staff = await loadStaffDatabase();
@@ -13882,11 +14464,15 @@
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Could not load staff.';
         }
+        staffLoadInFlight = false;
         if (myGen !== renderGen) return;
         loading = false;
-        const btn2 = document.getElementById('refreshStaffBtn');
+        const btn2 = quiet ? null : document.getElementById('refreshStaffBtn');
         if (btn2) { btn2.disabled = false; btn2.textContent = 'Refresh'; }
-        paintPeople();
+        const snapshot = JSON.stringify(staff);
+        if (!quiet || snapshot !== staffSnapshot) paintPeople();
+        staffSnapshot = snapshot;
+        if (staffRefreshQueued) { staffRefreshQueued = false; setTimeout(() => load(true), 200); }
         if (pendingOpen) {
           history.replaceState(null, '', '#/staff');
           const p = staff.find(x => String(x.robloxUserId) === String(pendingOpen.id));
@@ -13901,12 +14487,20 @@
         const row = staff.find(x => String(x.robloxUserId) === String(d.robloxUserId));
         if (row) { row.warnCount = d.warnCount; row.isBanned = d.isBanned; }
         paintPeople();
-        if (staffTab === 'moderation') loadModeration();
+        if (staffTab === 'moderation') scheduleModerationRefresh();
       };
       const onPeopleChanged = () => {
         if (myGen !== renderGen) { window.removeEventListener('pv:people-changed', onPeopleChanged); return; }
-        load();
+        scheduleQuietRefresh();
       };
+      function scheduleQuietRefresh() {
+        clearTimeout(staffRefreshTimer);
+        staffRefreshTimer = setTimeout(() => { if (myGen === renderGen) load(true); }, 400);
+      }
+      function scheduleModerationRefresh() {
+        clearTimeout(modRefreshTimer);
+        modRefreshTimer = setTimeout(() => { if (myGen === renderGen) loadModeration(); }, 400);
+      }
       window.addEventListener('pv:moderated', onModerated);
       window.addEventListener('pv:people-changed', onPeopleChanged);
 
