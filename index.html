@@ -13121,6 +13121,17 @@
       }
 
       function go(nextTeamId, nextTab) {
+        if (String(nextTeamId || '') !== String(teamId || '')) {
+          board = null;
+          boardError = null;
+          boardCard = null;
+          boardBusy = false;
+          boardDragId = null;
+          boardDragFromList = null;
+          boardListDragId = null;
+          boardSearch = '';
+          boardFilter = 'all';
+        }
         teamId = nextTeamId;
         tab = nextTab || 'members';
         const hash = teamId ? `#/teams?team=${encodeURIComponent(teamId)}&tab=${tab}` : '#/teams';
