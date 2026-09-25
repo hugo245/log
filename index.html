@@ -2975,6 +2975,41 @@
       overflow-y: auto;
     }
 
+    .pp.pp-still {
+      animation: none;
+    }
+
+    .pp-skeleton {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .pp-skeleton span {
+      display: block;
+      height: 46px;
+      border-radius: 10px;
+      background: linear-gradient(90deg, var(--row-alt) 25%, var(--line) 37%, var(--row-alt) 63%);
+      background-size: 400% 100%;
+      animation: ppShimmer 1.4s ease infinite;
+    }
+
+    @keyframes ppShimmer {
+      from {
+        background-position: 100% 50%;
+      }
+
+      to {
+        background-position: 0 50%;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pp-skeleton span {
+        animation: none;
+      }
+    }
+
     .pp-tabs {
       display: flex;
       gap: 2px;
@@ -4855,6 +4890,70 @@
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+    }
+
+    .bd-card-title {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .bd-card code,
+    .bd-card a {
+      overflow-wrap: anywhere;
+    }
+
+    .bank-amount {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+    }
+
+    .bank-amount strong {
+      font-size: 22px;
+    }
+
+    .bank-rows {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .bank-row {
+      display: grid;
+      grid-template-columns: 110px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .bank-row:first-child {
+      border-top: none;
+    }
+
+    .bank-row code {
+      font-size: 13px;
+      overflow-wrap: anywhere;
+      color: var(--ink);
+    }
+
+    @media (max-width:560px) {
+      .bank-row {
+        grid-template-columns: 1fr auto;
+      }
+
+      .bank-row .hint {
+        grid-column: 1 / -1;
+      }
     }
 
     .bd-card-foot {
@@ -4896,6 +4995,30 @@
     .bd-label-feature {
       background: var(--ok-bg);
       color: var(--ok-text);
+    }
+
+    .bd-toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .bd-quick-input {
+      width: 100%;
+      font: inherit;
+      font-size: 13px;
+      padding: 8px 10px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .bd-quick-input:focus {
+      border-style: solid;
+      background: var(--surface);
     }
 
     .bd-add {
@@ -5477,6 +5600,85 @@
           ? row.skillset_names
           : (row.skillset_name ? [row.skillset_name] : [])
       };
+    }
+
+    let bankDetailsFor = null;
+
+    function bankDetailsModalHtml() {
+      const info = bankDetailsFor;
+      if (!info) return '';
+      const def = PAYMENT_METHODS.BANK_TRANSFER;
+      const d = info.details || {};
+      const rows = def.fields.map(f => ({ label: f.label, key: f.key, value: String(d[f.key] || '').trim() })).filter(r => r.value);
+      const plain = [`Pay ${info.amount}`, `Reference: ${info.reference}`].concat(rows.map(r => `${r.label}: ${r.value}`)).join('\n');
+      return `
+      <div class="pp-scrim" id="bankScrim">
+        <aside class="pp" role="dialog" aria-modal="true" aria-labelledby="bankTitle">
+          <div class="pp-head">
+            <div style="flex:1;min-width:0;">
+              <h2 id="bankTitle">Pay ${esc(info.name)}</h2>
+              <div class="pp-sub">${esc(info.amount)} &middot; bank transfer</div>
+            </div>
+            <button type="button" class="modal-close" id="bankClose" aria-label="Close">&times;</button>
+          </div>
+          <div class="pp-body">
+            <div class="bank-amount">
+              <span class="hint">Amount to send</span>
+              <strong>${esc(info.amount)}</strong>
+            </div>
+            <div class="bank-rows">
+              ${rows.map(r => `
+                <div class="bank-row">
+                  <span class="hint">${esc(r.label)}</span>
+                  <code>${esc(r.value)}</code>
+                  <button type="button" class="btn btn-ghost btn-sm" data-copy-value="${esc(r.value)}">Copy</button>
+                </div>`).join('')}
+              <div class="bank-row">
+                <span class="hint">Reference</span>
+                <code>${esc(info.reference)}</code>
+                <button type="button" class="btn btn-ghost btn-sm" data-copy-value="${esc(info.reference)}">Copy</button>
+              </div>
+            </div>
+            <p class="hint" style="margin:14px 0 0;">Put the reference on the transfer so it can be matched back to this request. These details are confidential.</p>
+          </div>
+          <div class="pp-foot">
+            <button type="button" class="btn btn-primary btn-sm" data-copy-value="${esc(plain)}">Copy everything</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="bankCloseFoot">Close</button>
+          </div>
+        </aside>
+      </div>`;
+    }
+
+    function wireBankDetails(rowsById) {
+      document.querySelectorAll('[data-bank-details]').forEach(el => el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const r = rowsById(el.dataset.bankDetails);
+        if (!r || !r.paymentMethod) return;
+        bankDetailsFor = {
+          name: r.robloxUsername || 'them',
+          amount: r.currency === 'ROBUX' ? `R$ ${Number(r.payment).toLocaleString()}` : `$${Number(r.payment).toFixed(2)}`,
+          reference: r.id,
+          details: r.paymentMethod.details || {}
+        };
+        paintBankModal();
+      }));
+    }
+
+    function paintBankModal() {
+      let root = document.getElementById('bankModalRoot');
+      if (!root) { root = document.createElement('div'); root.id = 'bankModalRoot'; document.body.appendChild(root); }
+      root.innerHTML = bankDetailsModalHtml();
+      const close = () => { bankDetailsFor = null; paintBankModal(); };
+      ['bankClose', 'bankCloseFoot'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', close);
+      });
+      const scrim = document.getElementById('bankScrim');
+      if (scrim) scrim.addEventListener('click', (e) => { if (e.target === scrim) close(); });
+      root.querySelectorAll('[data-copy-value]').forEach(el => el.addEventListener('click', () => {
+        if (navigator.clipboard) navigator.clipboard.writeText(el.dataset.copyValue);
+        toast('Copied');
+      }));
     }
 
     function methodDisplayLabel(pm) {
@@ -6464,6 +6666,7 @@
     let umNotify = false;
     let umDirty = false;
     let umPendingKeys = new Set();
+    let umAnimated = false;
 
     let umTeamsState = { loading: false, loaded: false, error: null, assignments: [], userSkillsets: [] };
     let umRolesState = { loading: false, loaded: false, error: null, assignments: [] };
@@ -6506,6 +6709,7 @@
 
     function openUserMenu(robloxUserId, robloxUsername, tab) {
       if (!robloxUserId && !robloxUsername) return;
+      umAnimated = false;
       umTarget = { id: robloxUserId ? String(robloxUserId) : null, username: robloxUsername || null };
       umLoading = true; umData = null; umLoadError = null; umReason = ''; umBusy = false;
       umMode = 'note'; umDuration = '168'; umNotify = false; umPendingKeys = new Set();
@@ -6517,7 +6721,7 @@
       umTab = allowed.includes(tab) ? tab : 'overview';
       paintUserMenu();
       refreshUserMenuData();
-      ensureTabData();
+      preloadPanelTabs();
       if (hasPermission('staff.view_database') && !peopleCache.rows.length) getPeople().then(() => { if (umTarget) paintUserMenu(); });
     }
 
@@ -6537,6 +6741,14 @@
       ensureTabData();
       const body = document.querySelector('#umScrim .pp-body');
       if (body) body.scrollTop = 0;
+    }
+
+    function preloadPanelTabs() {
+      if (!umTarget || !umTarget.id) return;
+      const tabs = panelTabs().map(t => t.id);
+      if (tabs.includes('teams')) loadTeamsTab();
+      if (tabs.includes('roles')) loadRolesTab();
+      if (tabs.includes('payout')) loadPayoutTab();
     }
 
     function ensureTabData() {
@@ -6753,7 +6965,7 @@
 
     function teamsTabHtml() {
       const st = umTeamsState;
-      if (st.loading && !st.loaded) return `<div class="dash-loading">Loading teams and skills...</div>`;
+      if (!st.loaded) return st.error ? '' : `<div class="pp-skeleton"><span></span><span></span><span></span></div>`;
       if (st.error) return `<div class="error-box"><span>${esc(st.error)}</span></div><button type="button" class="btn btn-ghost btn-sm" data-retry-tab="teams">Try again</button>`;
       const teams = catalog.teams || [];
       const skills = catalog.skillsets || [];
@@ -6763,6 +6975,8 @@
         const ids = team && team.skillsetIds && team.skillsetIds.length ? team.skillsetIds.map(String) : null;
         return ids ? skills.filter(k => ids.includes(String(k.id))) : skills;
       };
+      const removedRows = st.assignments.filter(a => a.removed);
+      const liveAssignments = st.assignments.filter(a => !a.removed);
       const joined = new Set(liveAssignments.map(a => String(a.teamId)));
       const available = teams.filter(t => !joined.has(String(t.id)));
       const teamSkillIds = new Set(st.assignments.map(a => a.skillset && String(a.skillset.id)).filter(Boolean));
@@ -6772,8 +6986,6 @@
         return a && a.team ? a.team.name : 'a team';
       };
 
-      const removedRows = st.assignments.filter(a => a.removed);
-      const liveAssignments = st.assignments.filter(a => !a.removed);
       const removedHtml = removedRows.length ? `
         <div class="pp-item">
           ${colorDot('var(--err-text)')}
@@ -6844,7 +7056,7 @@
 
     function rolesTabHtml() {
       const st = umRolesState;
-      if (st.loading && !st.loaded) return `<div class="dash-loading">Loading roles...</div>`;
+      if (!st.loaded) return st.error ? '' : `<div class="pp-skeleton"><span></span><span></span><span></span></div>`;
       if (st.error) return `<div class="error-box"><span>${esc(st.error)}</span></div><button type="button" class="btn btn-ghost btn-sm" data-retry-tab="roles">Try again</button>`;
       const roles = [...(catalog.roles || [])].sort((a, b) => (Number(b.hierarchy) || 0) - (Number(a.hierarchy) || 0));
       const direct = {}; st.assignments.forEach(a => { direct[String(a.role_id)] = a; });
@@ -6891,7 +7103,7 @@
 
     function payoutTabHtml() {
       const st = umPayState;
-      if (st.loading && !st.loaded) return `<div class="dash-loading">Loading payout method...</div>`;
+      if (!st.loaded) return st.error ? '' : `<div class="pp-skeleton"><span></span><span></span></div>`;
       if (st.error) return `<div class="error-box"><span>${esc(st.error)}</span></div><button type="button" class="btn btn-ghost btn-sm" data-retry-tab="payout">Try again</button>`;
       const elig = st.eligibility;
       const def = PAYMENT_METHODS[st.method] || PAYMENT_METHODS.PAYPAL;
@@ -7013,7 +7225,7 @@
 
       return `
     <div class="pp-scrim" id="umScrim">
-      <aside class="pp" role="dialog" aria-modal="true" aria-labelledby="ppName">
+      <aside class="pp${umAnimated ? ' pp-still' : ''}" role="dialog" aria-modal="true" aria-labelledby="ppName">
         <div class="pp-head">
           ${avatarImg(t.id, '')}
           <div style="min-width:0;flex:1;">
@@ -7044,6 +7256,7 @@
       const body = root.querySelector('.pp-body');
       const scroll = body ? body.scrollTop : 0;
       root.innerHTML = userMenuHtml();
+      umAnimated = true;
       wireUserMenuEvents();
       const body2 = root.querySelector('.pp-body');
       if (body2) body2.scrollTop = scroll;
@@ -8951,7 +9164,7 @@
         const rowHtml = `
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}${r.paymentMethod.method === 'BANK_TRANSFER' && !r.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(r.id)}">Payment details</button>` : ''}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell">
                 <div class="task-name">${esc(r.taskName || 'Untitled task')}</div>
                 ${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
@@ -9034,6 +9247,8 @@
       function wireTableEvents() {
         const retryBtn = document.getElementById('retryBtn');
         if (retryBtn) retryBtn.addEventListener('click', () => { load(); });
+
+        wireBankDetails((id) => allRequests.find(r => String(r.id) === String(id)));
 
         document.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => {
           const id = b.dataset.toggle;
@@ -12870,6 +13085,8 @@
       let boardCard = null;
       let boardBusy = false;
       let boardDragId = null;
+      let boardSearch = '';
+      let boardFilter = 'all';
       let historyChart = null;
       let openTaskBatches = new Set();
 
@@ -13206,13 +13423,39 @@
       function boardHtml() {
         if (!board) return `<div class="dash-loading">Loading the board...</div>`;
         if (boardError) return `<div class="dash-empty"><h3>Could not open the board</h3><p>${esc(boardError)}</p></div>`;
-        const cardsFor = (listId) => board.cards.filter(c => String(c.list_id) === String(listId));
+        const q = boardSearch.trim().toLowerCase();
+        const matches = (c) => {
+          if (boardFilter === 'mine' && String(c.assigned_to_user_id || '') !== String(board.me.robloxUserId)) return false;
+          if (boardFilter === 'overdue' && !(c.due_at && new Date(c.due_at) < new Date())) return false;
+          if (boardFilter === 'unassigned' && c.assigned_to_user_id) return false;
+          if (!q) return true;
+          return (c.title || '').toLowerCase().includes(q)
+            || (c.description || '').toLowerCase().includes(q)
+            || (c.assigned_to_username || '').toLowerCase().includes(q)
+            || (c.label || '').toLowerCase().includes(q);
+        };
+        const cardsFor = (listId) => board.cards.filter(c => String(c.list_id) === String(listId) && matches(c));
+        const totals = {
+          all: board.cards.length,
+          mine: board.cards.filter(c => String(c.assigned_to_user_id || '') === String(board.me.robloxUserId)).length,
+          overdue: board.cards.filter(c => c.due_at && new Date(c.due_at) < new Date()).length,
+          unassigned: board.cards.filter(c => !c.assigned_to_user_id).length
+        };
         return `
-        <p class="sub" style="margin:-6px 0 14px;">Everyone on this team can add, move and edit cards. Drag a card to another column, or click it to open.</p>
+        <div class="bd-toolbar">
+          <div class="search-input-wrap" style="flex:1 1 220px;max-width:320px;">
+            <input type="text" id="bdSearch" placeholder="Search cards" value="${esc(boardSearch)}" aria-label="Search cards">
+          </div>
+          <div class="chip-filters">
+            ${[['all', 'All'], ['mine', 'Mine'], ['overdue', 'Overdue'], ['unassigned', 'Unassigned']].map(([id, label]) =>
+          `<button type="button" class="chip-filter ${boardFilter === id ? 'on' : ''}" data-board-filter="${id}" aria-pressed="${boardFilter === id}">${label} <b>${esc(totals[id])}</b></button>`).join('')}
+          </div>
+        </div>
+        <p class="sub" style="margin:0 0 14px;">Everyone on this team can add, move and edit cards. Drag a card between columns, or press <kbd>Enter</kbd> after typing to add one quickly.</p>
         <div class="bd-board">
           ${board.lists.map(list => {
-          const cards = cardsFor(list.id);
-          return `
+            const cards = cardsFor(list.id);
+            return `
             <section class="bd-list" data-list="${esc(list.id)}">
               <header class="bd-list-head">
                 <h3 data-rename-list="${esc(list.id)}" title="Click to rename">${esc(list.title)}</h3>
@@ -13222,9 +13465,12 @@
               <div class="bd-cards" data-drop="${esc(list.id)}">
                 ${cards.map(boardCardHtml).join('')}
               </div>
-              <button type="button" class="bd-add" data-add-card="${esc(list.id)}">+ Add a card</button>
+              <div class="bd-quick">
+                <input type="text" class="bd-quick-input" data-quick-add="${esc(list.id)}" placeholder="+ Add a card" aria-label="Add a card to ${esc(list.title)}">
+              </div>
+              <button type="button" class="bd-add" data-add-card="${esc(list.id)}">Add with details</button>
             </section>`;
-        }).join('')}
+          }).join('')}
           <section class="bd-list bd-new">
             <input type="text" id="bdNewListInput" placeholder="New column name" aria-label="New column name">
             <button type="button" class="btn btn-ghost btn-sm" id="bdAddListBtn">Add column</button>
@@ -13866,6 +14112,25 @@
 
       function wireBoard() {
         if (tab !== 'board' || !board) return;
+
+        const search = document.getElementById('bdSearch');
+        if (search) search.addEventListener('input', debounce(() => {
+          boardSearch = search.value;
+          paint();
+          const again = document.getElementById('bdSearch');
+          if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+        }, 140));
+        document.querySelectorAll('[data-board-filter]').forEach(el => el.addEventListener('click', () => {
+          boardFilter = el.dataset.boardFilter;
+          paint();
+        }));
+        document.querySelectorAll('[data-quick-add]').forEach(inp => inp.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter') return;
+          const title = inp.value.trim();
+          if (!title) return;
+          inp.value = '';
+          boardAction(() => callHrData('board_save_card', { teamId, mode: 'create', listId: inp.dataset.quickAdd, title }), 'Card added');
+        }));
 
         const addList = document.getElementById('bdAddListBtn');
         const listInput = document.getElementById('bdNewListInput');
