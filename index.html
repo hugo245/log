@@ -4818,6 +4818,15 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      cursor: grab;
+    }
+
+    .bd-list.dragging-list {
+      opacity: .45;
+    }
+
+    .bd-list {
+      transition: transform .12s ease;
     }
 
     .bd-list-head h3 {
@@ -4981,20 +4990,28 @@
       color: var(--accent);
     }
 
-    .bd-label-urgent,
-    .bd-label-blocked {
-      background: var(--err-bg);
-      color: var(--err-text);
+    .bd-label-picks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
     }
 
-    .bd-label-bug {
-      background: var(--warn-bg);
-      color: var(--warn-text);
+    .bd-label-pick {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 2px 9px;
+      cursor: pointer;
+      background: none;
+      font: inherit;
     }
 
-    .bd-label-feature {
-      background: var(--ok-bg);
-      color: var(--ok-text);
+    .bd-label-pick.on {
+      box-shadow: 0 0 0 2px var(--ink) inset;
     }
 
     .bd-toolbar {
@@ -5326,12 +5343,12 @@
         confidential: true,
         fields: [
           { key: 'fullName', label: 'First and last name', type: 'text', placeholder: 'As it appears on the account' },
-          { key: 'country', label: 'Country', type: 'text', placeholder: 'Netherlands' },
-          { key: 'city', label: 'City', type: 'text', placeholder: 'Amsterdam' },
+          { key: 'country', label: 'Country', type: 'text', placeholder: 'United States of America' },
+          { key: 'city', label: 'City', type: 'text', placeholder: 'Los Angeles' },
           { key: 'address', label: 'Address', type: 'text', placeholder: 'Street and house number' },
-          { key: 'postalCode', label: 'Postal code', type: 'text', placeholder: '1011 AB' },
-          { key: 'swift', label: 'SWIFT / BIC', type: 'text', placeholder: 'ABNANL2A' },
-          { key: 'iban', label: 'IBAN or account number', type: 'text', placeholder: 'NL00 BANK 0123 4567 89' }
+          { key: 'postalCode', label: 'Postal code', type: 'text', placeholder: '1267 whatever your postcode is' },
+          { key: 'swift', label: 'SWIFT / BIC', type: 'text', placeholder: 'Your SWIFT / BIC' },
+          { key: 'iban', label: 'IBAN or account number', type: 'text', placeholder: 'XXXX BANK XXXX XXXX XX' }
         ]
       }
     };
@@ -9734,11 +9751,11 @@
         const map = new Map();
         rows.filter(r => r.status === 'pending').forEach(r => {
           const key = ownerKey(r);
-          const cur = map.get(key) || { robloxUserId: r.robloxUserId, robloxUsername: null, robux: 0, usd: 0, count: 0, paymentMethod: null };
+          const cur = map.get(key) || { robloxUserId: r.robloxUserId, robloxUsername: null, robux: 0, usd: 0, count: 0, paymentMethod: null, sampleRequestId: null };
           if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
           cur.count += 1;
           if (!cur.robloxUsername && r.robloxUsername) cur.robloxUsername = r.robloxUsername;
-          if (!cur.paymentMethod && r.paymentMethod) cur.paymentMethod = r.paymentMethod;
+          if (!cur.paymentMethod && r.paymentMethod) { cur.paymentMethod = r.paymentMethod; cur.sampleRequestId = r.id; }
           if (cur.robloxUserId == null && r.robloxUserId != null) cur.robloxUserId = r.robloxUserId;
           map.set(key, cur);
         });
@@ -10079,7 +10096,7 @@
           <table class="an-table">
             <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th>${canMarkPaid ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<span class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}</span>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
+              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}${o.paymentMethod.method === 'BANK_TRANSFER' && !o.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(o.sampleRequestId)}">Payment details</button>` : ''}</div>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -10154,6 +10171,7 @@
             alert('Could not save. Check your connection and try again.');
           }
         }));
+        wireBankDetails((id) => allRequests.find(r => String(r.id) === String(id)));
         wireExploreEvents();
 
         drawExploreChart(chartData);
@@ -13085,6 +13103,7 @@
       let boardCard = null;
       let boardBusy = false;
       let boardDragId = null;
+      let boardListDragId = null;
       let boardSearch = '';
       let boardFilter = 'all';
       let historyChart = null;
@@ -13406,11 +13425,16 @@
         </div>`;
       }
 
+      function boardLabels() {
+        return Array.from(new Set((board.cards || []).map(c => c.label).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+      }
+
       function boardCardHtml(card) {
         const due = card.due_at ? taskState({ due_at: card.due_at, status: 'open' }) : null;
+        const lc = card.label ? gameColor(card.label) : null;
         return `
           <div class="bd-card" draggable="true" data-card="${esc(card.id)}" tabindex="0" role="button" aria-label="${esc(card.title)}">
-            ${card.label ? `<span class="bd-label bd-label-${esc(String(card.label).toLowerCase().replace(/[^a-z]/g, ''))}">${esc(card.label)}</span>` : ''}
+            ${card.label ? `<span class="bd-label" style="background:${lc}1F;color:${lc};border:1px solid ${lc}55;">${esc(card.label)}</span>` : ''}
             <div class="bd-card-title">${esc(card.title)}</div>
             ${card.description ? `<div class="bd-card-desc">${esc(card.description)}</div>` : ''}
             <div class="bd-card-foot">
@@ -13451,13 +13475,13 @@
           `<button type="button" class="chip-filter ${boardFilter === id ? 'on' : ''}" data-board-filter="${id}" aria-pressed="${boardFilter === id}">${label} <b>${esc(totals[id])}</b></button>`).join('')}
           </div>
         </div>
-        <p class="sub" style="margin:0 0 14px;">Everyone on this team can add, move and edit cards. Drag a card between columns, or press <kbd>Enter</kbd> after typing to add one quickly.</p>
+        <p class="sub" style="margin:0 0 14px;">Everyone on this team can add, move and edit cards. Drag a card to move or reorder it, or drag a column by its header to reorder columns.</p>
         <div class="bd-board">
           ${board.lists.map(list => {
             const cards = cardsFor(list.id);
             return `
             <section class="bd-list" data-list="${esc(list.id)}">
-              <header class="bd-list-head">
+              <header class="bd-list-head" draggable="true" data-list-drag="${esc(list.id)}">
                 <h3 data-rename-list="${esc(list.id)}" title="Click to rename">${esc(list.title)}</h3>
                 <span class="bd-count">${cards.length}</span>
                 <button type="button" class="pp-icon-btn" data-delete-list="${esc(list.id)}" aria-label="Delete ${esc(list.title)}">&times;</button>
@@ -13507,10 +13531,14 @@
                     ${board.members.filter(m => String(m.roblox_user_id) !== String(board.me.robloxUserId)).map(m => `<option value="${esc(m.roblox_user_id)}" ${String(c.assigned_to_user_id || '') === String(m.roblox_user_id) ? 'selected' : ''}>${esc(m.roblox_username)}</option>`).join('')}
                   </select></div>
                 <div class="field"><label for="bdLabel">Label <span class="hint">(optional)</span></label>
-                  <select id="bdLabel">
-                    ${['', 'Bug', 'Feature', 'Art', 'Urgent', 'Blocked'].map(l => `<option value="${esc(l)}" ${String(c.label || '') === l ? 'selected' : ''}>${l || 'None'}</option>`).join('')}
-                  </select></div>
+                  <input type="text" id="bdLabel" list="bdLabelOptions" value="${esc(c.label || '')}" placeholder="e.g. Bug, Urgent, needs art" maxlength="24">
+                  <datalist id="bdLabelOptions">${boardLabels().map(l => `<option value="${esc(l)}">`).join('')}</datalist>
+                </div>
               </div>
+              ${boardLabels().length ? `<div class="bd-label-picks">${boardLabels().map(l => {
+          const col = gameColor(l);
+          return `<button type="button" class="bd-label-pick ${String(c.label || '') === l ? 'on' : ''}" data-pick-label="${esc(l)}" style="background:${col}1F;color:${col};border:1px solid ${col}55;">${esc(l)}</button>`;
+        }).join('')}</div>` : ''}
             </div>
             <div class="pp-foot">
               <button type="button" class="btn btn-primary btn-sm" id="bdSaveCard" ${boardBusy ? 'disabled' : ''}>${boardBusy ? 'Saving...' : isNew ? 'Add card' : 'Save'}</button>
@@ -14177,26 +14205,92 @@
             el.classList.add('dragging');
             if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', el.dataset.card); }
           });
-          el.addEventListener('dragend', () => { el.classList.remove('dragging'); boardDragId = null; });
+          el.addEventListener('dragend', () => {
+            el.classList.remove('dragging');
+            boardDragId = null;
+            document.querySelectorAll('.bd-cards').forEach(z => z.classList.remove('drop-target'));
+          });
+          el.addEventListener('dragover', (e) => {
+            if (!boardDragId || boardDragId === el.dataset.card) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const dragEl = document.querySelector(`.bd-card[data-card="${CSS.escape(boardDragId)}"]`);
+            if (!dragEl || dragEl === el) return;
+            const rect = el.getBoundingClientRect();
+            const before = (e.clientY - rect.top) < rect.height / 2;
+            el.parentNode.insertBefore(dragEl, before ? el : el.nextSibling);
+          });
         });
 
         document.querySelectorAll('[data-drop]').forEach(zone => {
-          zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drop-target'); });
-          zone.addEventListener('dragleave', () => zone.classList.remove('drop-target'));
-          zone.addEventListener('drop', (e) => {
+          zone.addEventListener('dragover', (e) => {
+            if (!boardDragId) return;
             e.preventDefault();
+            zone.classList.add('drop-target');
+            if (e.target === zone) {
+              const dragEl = document.querySelector(`.bd-card[data-card="${CSS.escape(boardDragId)}"]`);
+              if (dragEl) zone.appendChild(dragEl);
+            }
+          });
+          zone.addEventListener('dragleave', (e) => { if (e.target === zone) zone.classList.remove('drop-target'); });
+          zone.addEventListener('drop', (e) => {
+            if (!boardDragId) return;
+            e.preventDefault();
+            e.stopPropagation();
             zone.classList.remove('drop-target');
-            const cardId = boardDragId || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
-            if (!cardId) return;
+            const cardId = boardDragId;
             const listId = zone.dataset.drop;
             const card = board.cards.find(c => String(c.id) === String(cardId));
-            if (!card || String(card.list_id) === String(listId)) return;
+            if (!card) return;
+            const order = Array.from(zone.querySelectorAll('[data-card]')).map(c => c.dataset.card);
             card.list_id = listId;
+            const ordered = order.map(id => board.cards.find(c => String(c.id) === String(id))).filter(Boolean);
+            const others = board.cards.filter(c => !order.some(id => String(id) === String(c.id)));
+            board.cards = others.concat(ordered);
             paint();
-            const order = board.cards.filter(c => String(c.list_id) === String(listId)).map(c => c.id);
             boardAction(() => callHrData('board_save_card', { teamId, mode: 'move', id: cardId, listId, order }));
           });
         });
+
+        document.querySelectorAll('[data-list-drag]').forEach(header => {
+          const section = header.closest('.bd-list');
+          if (!section) return;
+          header.addEventListener('dragstart', (e) => {
+            boardListDragId = section.dataset.list;
+            section.classList.add('dragging-list');
+            if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'list:' + section.dataset.list); }
+          });
+          header.addEventListener('dragend', () => { section.classList.remove('dragging-list'); boardListDragId = null; });
+        });
+
+        document.querySelectorAll('.bd-list[data-list]').forEach(section => {
+          section.addEventListener('dragover', (e) => {
+            if (!boardListDragId || boardListDragId === section.dataset.list) return;
+            e.preventDefault();
+            const dragEl = document.querySelector(`.bd-list[data-list="${CSS.escape(boardListDragId)}"]`);
+            if (!dragEl || dragEl === section) return;
+            const rect = section.getBoundingClientRect();
+            const before = (e.clientX - rect.left) < rect.width / 2;
+            section.parentNode.insertBefore(dragEl, before ? section : section.nextSibling);
+          });
+          section.addEventListener('drop', (e) => {
+            if (!boardListDragId) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const order = Array.from(document.querySelectorAll('.bd-list[data-list]')).map(s => s.dataset.list);
+            board.lists = order.map(id => board.lists.find(l => String(l.id) === String(id))).filter(Boolean);
+            paint();
+            boardAction(() => callHrData('board_save_list', { teamId, mode: 'reorder', order }));
+          });
+        });
+
+        document.querySelectorAll('[data-pick-label]').forEach(btn => btn.addEventListener('click', () => {
+          const input = document.getElementById('bdLabel');
+          if (!input) return;
+          const val = btn.dataset.pickLabel;
+          input.value = (input.value.trim() === val) ? '' : val;
+          document.querySelectorAll('[data-pick-label]').forEach(b => b.classList.toggle('on', b.dataset.pickLabel === input.value.trim()));
+        }));
 
         const closeCard = () => { boardCard = null; paint(); };
         ['bdCardClose', 'bdCancelCard'].forEach(id => {
@@ -14227,7 +14321,7 @@
             dueAt: due ? new Date(due + 'T23:59:59').toISOString() : null,
             assignedToUserId: assignee || null,
             assignedToUsername: assigneeName || null,
-            label: document.getElementById('bdLabel').value || null
+            label: document.getElementById('bdLabel').value.trim() || null
           };
           const wasNew = !boardCard.id;
           boardCard = null;
