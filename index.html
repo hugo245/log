@@ -5908,6 +5908,7 @@
       invalid_place_id: "That doesn't look like a Roblox place ID or game link.",
       roblox_game_not_found: "Roblox doesn't have a game with that place ID.",
       team_removed: 'Your team was removed, so this is on hold until a lead places you on another one.',
+      default_list: 'This is one of the default columns, so it can\'t be deleted.',
       unknown_action: 'The server did not recognise that action. Refresh the page to load the latest version.'
     };
     function friendlyError(code) {
@@ -13103,6 +13104,7 @@
       let boardCard = null;
       let boardBusy = false;
       let boardDragId = null;
+      let boardDragFromList = null;
       let boardListDragId = null;
       let boardSearch = '';
       let boardFilter = 'all';
@@ -13484,7 +13486,7 @@
               <header class="bd-list-head" draggable="true" data-list-drag="${esc(list.id)}">
                 <h3 data-rename-list="${esc(list.id)}" title="Click to rename">${esc(list.title)}</h3>
                 <span class="bd-count">${cards.length}</span>
-                <button type="button" class="pp-icon-btn" data-delete-list="${esc(list.id)}" aria-label="Delete ${esc(list.title)}">&times;</button>
+                ${list.is_default ? '' : `<button type="button" class="pp-icon-btn" data-delete-list="${esc(list.id)}" aria-label="Delete ${esc(list.title)}">&times;</button>`}
               </header>
               <div class="bd-cards" data-drop="${esc(list.id)}">
                 ${cards.map(boardCardHtml).join('')}
@@ -14202,12 +14204,15 @@
           el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); open(); } });
           el.addEventListener('dragstart', (e) => {
             boardDragId = el.dataset.card;
+            const fromZone = el.closest('.bd-cards');
+            boardDragFromList = fromZone ? fromZone.dataset.drop : null;
             el.classList.add('dragging');
             if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', el.dataset.card); }
           });
           el.addEventListener('dragend', () => {
             el.classList.remove('dragging');
             boardDragId = null;
+            boardDragFromList = null;
             document.querySelectorAll('.bd-cards').forEach(z => z.classList.remove('drop-target'));
           });
           el.addEventListener('dragover', (e) => {
@@ -14216,6 +14221,11 @@
             e.stopPropagation();
             const dragEl = document.querySelector(`.bd-card[data-card="${CSS.escape(boardDragId)}"]`);
             if (!dragEl || dragEl === el) return;
+            const zone = el.closest('.bd-cards');
+            if (zone && zone.dataset.drop !== boardDragFromList) {
+              if (dragEl.parentNode !== zone) zone.appendChild(dragEl);
+              return;
+            }
             const rect = el.getBoundingClientRect();
             const before = (e.clientY - rect.top) < rect.height / 2;
             el.parentNode.insertBefore(dragEl, before ? el : el.nextSibling);
@@ -14227,9 +14237,9 @@
             if (!boardDragId) return;
             e.preventDefault();
             zone.classList.add('drop-target');
-            if (e.target === zone) {
+            if (e.target === zone || zone.dataset.drop !== boardDragFromList) {
               const dragEl = document.querySelector(`.bd-card[data-card="${CSS.escape(boardDragId)}"]`);
-              if (dragEl) zone.appendChild(dragEl);
+              if (dragEl && dragEl.parentNode !== zone) zone.appendChild(dragEl);
             }
           });
           zone.addEventListener('dragleave', (e) => { if (e.target === zone) zone.classList.remove('drop-target'); });
