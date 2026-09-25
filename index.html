@@ -4853,6 +4853,30 @@
       font-size: 15px;
     }
 
+    .bd-move-btn {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink-soft);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .bd-move-btn:hover:not(:disabled) {
+      color: var(--ink);
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .bd-move-btn:disabled {
+      opacity: .35;
+      cursor: default;
+    }
+
     .bd-cards {
       display: flex;
       flex-direction: column;
@@ -13488,14 +13512,16 @@
           `<button type="button" class="chip-filter ${boardFilter === id ? 'on' : ''}" data-board-filter="${id}" aria-pressed="${boardFilter === id}">${label} <b>${esc(totals[id])}</b></button>`).join('')}
           </div>
         </div>
-        <p class="sub" style="margin:0 0 14px;">Everyone on this team can add, move and edit cards. Drag a card to move or reorder it, or drag a column by its header to reorder columns.</p>
+        <p class="sub" style="margin:0 0 14px;">Everyone on this team can add, move and edit cards. Drag a card to move it, or use the arrows (or drag a column header) to reorder columns.</p>
         <div class="bd-board">
-          ${board.lists.map(list => {
+          ${board.lists.map((list, idx) => {
             const cards = cardsFor(list.id);
             return `
             <section class="bd-list" data-list="${esc(list.id)}">
               <header class="bd-list-head" draggable="true" data-list-drag="${esc(list.id)}">
+                <button type="button" class="bd-move-btn" data-move-list="${esc(list.id)}" data-dir="left" ${idx === 0 ? 'disabled' : ''} aria-label="Move ${esc(list.title)} left">&lsaquo;</button>
                 <h3 data-rename-list="${esc(list.id)}" title="Click to rename">${esc(list.title)}</h3>
+                <button type="button" class="bd-move-btn" data-move-list="${esc(list.id)}" data-dir="right" ${idx === board.lists.length - 1 ? 'disabled' : ''} aria-label="Move ${esc(list.title)} right">&rsaquo;</button>
                 <span class="bd-count">${cards.length}</span>
                 ${list.is_default ? '' : `<button type="button" class="pp-icon-btn" data-delete-list="${esc(list.id)}" aria-label="Delete ${esc(list.title)}">&times;</button>`}
               </header>
@@ -14197,6 +14223,25 @@
             : 'Delete this column?';
           if (!confirm(msg)) return;
           boardAction(() => callHrData('board_save_list', { teamId, mode: 'delete', id, force: true }), 'Column deleted');
+        }));
+
+        document.querySelectorAll('[data-move-list]').forEach(el => el.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const id = el.dataset.moveList;
+          const dir = el.dataset.dir;
+          const idx = board.lists.findIndex(l => String(l.id) === String(id));
+          if (idx < 0) return;
+          const swapIdx = dir === 'left' ? idx - 1 : idx + 1;
+          if (swapIdx < 0 || swapIdx >= board.lists.length) return;
+          const next = board.lists.slice();
+          const tmp = next[idx];
+          next[idx] = next[swapIdx];
+          next[swapIdx] = tmp;
+          board.lists = next;
+          paint();
+          const order = board.lists.map(l => l.id);
+          boardAction(() => callHrData('board_save_list', { teamId, mode: 'reorder', order }));
         }));
 
         document.querySelectorAll('[data-add-card]').forEach(el => el.addEventListener('click', () => {

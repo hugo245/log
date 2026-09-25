@@ -4650,13 +4650,30 @@ async function handleHrData(req, res) {
             supabase.from('user_assignments').select('roblox_user_id, roblox_username').eq('team_id', teamId)
         ]);
         if (!teamRes.data) { res.status(404).json({ ok: false, error: 'team_not_found' }); return; }
+        const DEFAULT_LIST_TITLES = ['To do', 'In progress', 'Needs review', 'Done'];
         let lists = listsRes.data || [];
         if (!lists.length) {
-            const starter = ['To do', 'In progress', 'Needs review', 'Done'].map((title, i) => ({
+            const starter = DEFAULT_LIST_TITLES.map((title, i) => ({
                 team_id: teamId, title, position: i * 100, created_by: session.roblox_username, created_at: new Date().toISOString(), is_default: true
             }));
             const { data: made } = await supabase.from('board_lists').insert(starter).select('*');
             lists = made || [];
+        } else {
+            const defaultCount = lists.filter(l => l.is_default).length;
+            if (defaultCount < DEFAULT_LIST_TITLES.length) {
+                const existingTitles = new Set(lists.map(l => String(l.title || '').trim().toLowerCase()));
+                const missingTitles = DEFAULT_LIST_TITLES
+                    .filter(t => !existingTitles.has(t.toLowerCase()))
+                    .slice(0, DEFAULT_LIST_TITLES.length - defaultCount);
+                if (missingTitles.length) {
+                    const lastPos = lists.reduce((max, l) => Math.max(max, Number(l.position) || 0), 0);
+                    const additions = missingTitles.map((title, i) => ({
+                        team_id: teamId, title, position: lastPos + (i + 1) * 100, created_by: session.roblox_username, created_at: new Date().toISOString(), is_default: true
+                    }));
+                    const { data: made } = await supabase.from('board_lists').insert(additions).select('*');
+                    lists = lists.concat(made || []).sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+                }
+            }
         }
         res.json({
             ok: true,
