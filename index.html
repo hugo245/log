@@ -5932,7 +5932,6 @@
       invalid_place_id: "That doesn't look like a Roblox place ID or game link.",
       roblox_game_not_found: "Roblox doesn't have a game with that place ID.",
       team_removed: 'Your team was removed, so this is on hold until a lead places you on another one.',
-      default_list: 'This is one of the default columns, so it can\'t be deleted.',
       unknown_action: 'The server did not recognise that action. Refresh the page to load the latest version.'
     };
     function friendlyError(code) {
@@ -13523,7 +13522,7 @@
                 <h3 data-rename-list="${esc(list.id)}" title="Click to rename">${esc(list.title)}</h3>
                 <button type="button" class="bd-move-btn" data-move-list="${esc(list.id)}" data-dir="right" ${idx === board.lists.length - 1 ? 'disabled' : ''} aria-label="Move ${esc(list.title)} right">&rsaquo;</button>
                 <span class="bd-count">${cards.length}</span>
-                ${list.is_default ? '' : `<button type="button" class="pp-icon-btn" data-delete-list="${esc(list.id)}" aria-label="Delete ${esc(list.title)}">&times;</button>`}
+                <button type="button" class="pp-icon-btn" data-delete-list="${esc(list.id)}" aria-label="Delete ${esc(list.title)}">&times;</button>
               </header>
               <div class="bd-cards" data-drop="${esc(list.id)}">
                 ${cards.map(boardCardHtml).join('')}
