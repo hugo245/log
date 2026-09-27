@@ -428,7 +428,7 @@ client.on(Events.InteractionCreate, async interaction => {
                     }
 
                     let teamGroupNote = null;
-                    const alreadyInTeamGroup = isRelink && !!team && !sameAsMainGroup
+                    const alreadyInTeamGroup = !!team && !sameAsMainGroup
                         && (await getCurrentGroupRoleId(team.roblox_group_id, flow.roblox_user_id)) != null;
                     if (team && !sameAsMainGroup && !alreadyInTeamGroup) {
                         try {
