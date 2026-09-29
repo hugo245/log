@@ -10924,6 +10924,25 @@
 
       async function syncAccess(manual) {
         if (manual) { checkingAccess = true; paint(); }
+        if (manual) {
+          try {
+            const check = await callHrData('check_access_now');
+            const d = check.data || {};
+            if (d.finishing) {
+              toast("You're in the group already. Finishing your access off now, this takes a few seconds.");
+            } else if (!d.hasFlow) {
+              toast('Nothing is waiting on you here. Refreshing your access.');
+            } else if (!d.mainJoined) {
+              toast(d.groupId
+                ? `We can't see you in the PlayVerse group (${d.groupId}) yet. Join it, then press Check now again.`
+                : 'No Roblox group has been set up for onboarding yet. A lead needs to set one in Manage.', 'err');
+            } else if (!d.teamJoined) {
+              toast(`You're in the main group. Still waiting on your request to join ${d.teamName || "your team's"} group.`, 'err');
+            }
+          } catch (e) {
+            toast(e.message || 'Could not check your group membership.', 'err');
+          }
+        }
         try {
           const s = await getMyAccessStatus();
           if (myGen !== renderGen) return;

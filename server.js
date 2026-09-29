@@ -1733,7 +1733,8 @@ async function runOnboardingJoinCheck() {
             const teamRequested = team ? await hasJoinedOrRequestedGroup(team.roblox_group_id, flow.roblox_user_id) : true;
 
             const currentState = mainJoined && teamRequested ? 'both' : mainJoined ? 'main_only' : (team && teamRequested) ? 'team_only' : 'neither';
-            if (currentState === (flow.last_prompt_state || 'neither')) continue;
+            const readyNow = mainJoined && teamRequested;
+            if (currentState === (flow.last_prompt_state || 'neither') && !readyNow) continue;
 
             const updates = { last_prompt_state: currentState, updated_at: new Date().toISOString() };
             let content;
@@ -1755,7 +1756,7 @@ async function runOnboardingJoinCheck() {
             }
 
             if (mainJoined && teamRequested) {
-                updates.step = 'group_joined';
+                updates.step = 'finish_requested';
                 content = `You've joined both groups. Click Continue to finish setting up your access.`;
             } else if (mainJoined) {
                 content = `You've joined the main group. You still need to request to join ${team.name}'s group to continue.`;
@@ -4146,6 +4147,60 @@ async function handleHrData(req, res) {
             });
         }
         res.json({ ok: true, discordSynced: discordResult.synced, discordReason: discordResult.reason || null });
+        return;
+    }
+
+    if (action === 'check_access_now') {
+        try {
+            const config = await getOnboardingGroupConfig();
+            const { data: flows } = await supabase
+                .from('recruit_onboarding_flows')
+                .select('*')
+                .eq('roblox_user_id', session.roblox_user_id)
+                .neq('step', 'done');
+            const flow = (flows || [])[0] || null;
+            const groupRoles = await fetchRobloxGroupRoles(session.roblox_user_id);
+            const mainJoined = !!config.groupId && groupRoles.some(gr => gr.group && gr.group.id === Number(config.groupId));
+
+            let team = null;
+            let teamId = flow ? flow.team_id : null;
+            if (flow && teamId == null && flow.ticket_id) {
+                const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
+                teamId = ticket ? ticket.placed_team_id : null;
+            }
+            if (teamId) {
+                const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', teamId).maybeSingle();
+                if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id && Number(teamRow.roblox_group_id) !== Number(config.groupId)) team = teamRow;
+            }
+            const teamJoined = team ? await hasJoinedOrRequestedGroup(team.roblox_group_id, session.roblox_user_id) : true;
+
+            let finishing = false;
+            if (flow && mainJoined && teamJoined && flow.step !== 'finish_requested') {
+                await supabase.from('recruit_onboarding_flows')
+                    .update({ step: 'finish_requested', last_prompt_state: 'both', updated_at: new Date().toISOString() })
+                    .eq('id', flow.id);
+                finishing = true;
+            } else if (flow && flow.step === 'finish_requested') {
+                finishing = true;
+            }
+
+            res.json({
+                ok: true,
+                data: {
+                    hasFlow: !!flow,
+                    step: flow ? flow.step : null,
+                    mainJoined,
+                    teamJoined,
+                    teamName: team ? team.name : null,
+                    groupId: config.groupId || null,
+                    groupsSeen: groupRoles.map(gr => gr.group && gr.group.id).filter(Boolean),
+                    finishing
+                }
+            });
+        } catch (e) {
+            console.error('check_access_now failed:', e.message);
+            res.status(500).json({ ok: false, error: 'access_check_failed' });
+        }
         return;
     }
 
