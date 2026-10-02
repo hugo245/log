@@ -1845,6 +1845,7 @@ async function enforceUsdMinimumThreshold(filter) {
         if (methodsErr || !methods || !methods.length) return;
 
         for (const m of methods) {
+            if (Number((m.details || {}).splitRobuxPercent) > 0) continue;
             const pendingUsdEquivalent = await getPendingUsdEquivalent(m.roblox_user_id, m.roblox_username);
             if (pendingUsdEquivalent >= threshold) continue;
 
@@ -1949,12 +1950,13 @@ async function runPaymentMethodConversionSweep(filter) {
         const usernames = [...new Set(pendingRows.filter(r => r.roblox_user_id == null && r.roblox_username).map(r => r.roblox_username))];
 
         const [byIdRes, byUsernameRes] = await Promise.all([
-            userIds.length ? supabase.from('payment_methods').select('roblox_user_id, roblox_username, method').in('roblox_user_id', userIds) : Promise.resolve({ data: [] }),
-            usernames.length ? supabase.from('payment_methods').select('roblox_user_id, roblox_username, method').in('roblox_username', usernames) : Promise.resolve({ data: [] })
+            userIds.length ? supabase.from('payment_methods').select('roblox_user_id, roblox_username, method, details').in('roblox_user_id', userIds) : Promise.resolve({ data: [] }),
+            usernames.length ? supabase.from('payment_methods').select('roblox_user_id, roblox_username, method, details').in('roblox_username', usernames) : Promise.resolve({ data: [] })
         ]);
         const methodByUserId = {};
         const methodByUsername = {};
         [].concat(byIdRes.data || [], byUsernameRes.data || []).forEach(m => {
+            if (Number((m.details || {}).splitRobuxPercent) > 0) return;
             if (m.roblox_user_id != null) methodByUserId[m.roblox_user_id] = m.method;
             if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m.method;
         });
@@ -3738,16 +3740,29 @@ async function handleHrData(req, res) {
     if (action === 'set_payout_split') {
         const percent = payload.percentRobux === '' || payload.percentRobux == null ? 0 : Number(payload.percentRobux);
         if (!Number.isFinite(percent) || percent < 0 || percent > 100) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
-        const { data: existing } = await supabase
+        let { data: existing } = await supabase
             .from('payment_methods')
             .select('*')
             .eq('roblox_user_id', session.roblox_user_id)
             .maybeSingle();
+        if (!existing && session.roblox_username) {
+            const { data: byName } = await supabase
+                .from('payment_methods')
+                .select('*')
+                .ilike('roblox_username', session.roblox_username)
+                .maybeSingle();
+            existing = byName || null;
+        }
         if (!existing) { res.status(400).json({ ok: false, error: 'no_payment_method' }); return; }
+        if (existing.method === 'DEVEX_ROBUX') { res.status(400).json({ ok: false, error: 'robux_cannot_split' }); return; }
         const details = { ...(existing.details || {}) };
         if (percent > 0) details.splitRobuxPercent = Math.round(percent);
         else delete details.splitRobuxPercent;
-        const { error } = await supabase.from('payment_methods').update({ details }).eq('roblox_user_id', session.roblox_user_id);
+        let query = supabase.from('payment_methods').update({ details, roblox_user_id: session.roblox_user_id });
+        query = existing.roblox_user_id != null
+            ? query.eq('roblox_user_id', existing.roblox_user_id)
+            : query.ilike('roblox_username', existing.roblox_username);
+        const { error } = await query;
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         res.json({ ok: true, percentRobux: percent > 0 ? Math.round(percent) : 0 });
         return;
@@ -3775,6 +3790,14 @@ async function handleHrData(req, res) {
         const cleanDetails = {};
         methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim(); });
 
+        const { data: priorMethod } = await supabase
+            .from('payment_methods')
+            .select('details')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .maybeSingle();
+        const keptSplit = Number(((priorMethod || {}).details || {}).splitRobuxPercent) || 0;
+        if (keptSplit > 0 && method !== 'DEVEX_ROBUX') cleanDetails.splitRobuxPercent = keptSplit;
+
         const { error } = await supabase.from('payment_methods').upsert({
             roblox_user_id: session.roblox_user_id,
             roblox_username: session.roblox_username,
@@ -3783,8 +3806,8 @@ async function handleHrData(req, res) {
             updated_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        await convertPendingForUser(session.roblox_user_id, session.roblox_username);
-        res.json({ ok: true });
+        if (!cleanDetails.splitRobuxPercent) await convertPendingForUser(session.roblox_user_id, session.roblox_username);
+        res.json({ ok: true, splitRobuxPercent: cleanDetails.splitRobuxPercent || 0 });
         return;
     }
 

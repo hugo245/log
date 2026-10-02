@@ -4829,18 +4829,18 @@
         display: none;
       }
 
-      .manage-side > button {
+      .manage-side>button {
         white-space: nowrap;
         border: 1px solid var(--line) !important;
         border-radius: 999px !important;
         padding: 8px 14px !important;
       }
 
-      .manage-side > div {
+      .manage-side>div {
         display: none !important;
       }
 
-      .manage-layout > div:last-child {
+      .manage-layout>div:last-child {
         width: 100%;
         min-width: 0;
       }
@@ -9725,8 +9725,8 @@
       ${filter === 'claims' ? `
       <div class="table-wrap" style="padding:0;">
         ${claimsLoading ? `<div class="dash-loading">Loading staff requests...</div>`
-          : !claims.length ? `<div class="dash-empty"><h3>Nothing to review</h3><p>When someone asks to be paid, it turns up here.</p></div>`
-          : `<div class="task-list">${claims.map(c => `
+              : !claims.length ? `<div class="dash-empty"><h3>Nothing to review</h3><p>When someone asks to be paid, it turns up here.</p></div>`
+                : `<div class="task-list">${claims.map(c => `
             <div class="task-row">
               <div style="flex:1;min-width:0;">
                 <div class="task-title">${esc(c.task_name || 'Work')}</div>
@@ -10915,21 +10915,34 @@
         }).join('')}
             </div>
             <div id="methodFieldsSlot"></div>
-            ${method && method.method !== 'DEVEX_ROBUX' ? `
+            ${(() => {
+              const saved = method ? method.method : null;
+              const savedLabel = saved && PAYMENT_METHODS[saved] ? PAYMENT_METHODS[saved].label : null;
+              const canSplit = !!saved && saved !== 'DEVEX_ROBUX';
+              return `
             <div class="split-box">
-              <label class="pp-check" style="margin:0 0 8px;"><input type="checkbox" id="splitToggle" ${splitPercent > 0 ? 'checked' : ''}> Split my payments between ${esc(PAYMENT_METHODS[method.method] ? PAYMENT_METHODS[method.method].label : method.method)} and Robux</label>
+              <div style="font-weight:600;font-size:13.5px;margin-bottom:4px;">Split your payments</div>
+              ${!saved
+                  ? `<p class="hint" style="margin:0;">Save a payment method first, then you can have part of every payment sent in Robux instead.</p>`
+                  : !canSplit
+                    ? `<p class="hint" style="margin:0;">You're paid in Robux, so there's nothing to split. Pick PayPal, Venmo or bank transfer above and save it, then you can send part of each payment to Robux instead.</p>`
+                    : `
+              <label class="pp-check" style="margin:0 0 8px;"><input type="checkbox" id="splitToggle" ${splitPercent > 0 ? 'checked' : ''}> Pay part of every payment in Robux instead of ${esc(savedLabel)}</label>
               ${splitPercent > 0 ? `
               <div class="split-row">
                 <input type="range" id="splitRange" min="5" max="95" step="5" value="${esc(splitPercent)}" aria-label="Share paid in Robux">
-                <span class="split-value"><b>${esc(100 - splitPercent)}%</b> cash &middot; <b>${esc(splitPercent)}%</b> Robux</span>
+                <span class="split-value"><b>${esc(100 - splitPercent)}%</b> ${esc(savedLabel)} &middot; <b>${esc(splitPercent)}%</b> Robux</span>
               </div>
               <p class="hint" style="margin:8px 0 0;">${(() => {
-                const robuxShare = 100 * (splitPercent / 100);
-                const robux = DEVEX_RATE ? Math.round(robuxShare / DEVEX_RATE) : 0;
-                return `On a $100 payment that is $${(100 - robuxShare).toFixed(2)} plus about R$ ${robux.toLocaleString()}.`;
-              })()}</p>` : `<p class="hint" style="margin:0;">Everything goes through ${esc(PAYMENT_METHODS[method.method] ? PAYMENT_METHODS[method.method].label : method.method)}.</p>`}
+                        const robuxShare = 100 * (splitPercent / 100);
+                        const robux = DEVEX_RATE ? Math.round(robuxShare / DEVEX_RATE) : 0;
+                        return `On a $100 payment that is $${(100 - robuxShare).toFixed(2)} through ${savedLabel} plus about R$ ${robux.toLocaleString()}.`;
+                      })()}</p>
+              <p class="hint" style="margin:6px 0 0;">While a split is on, your pending requests keep the currency they were logged in.</p>`
+                      : `<p class="hint" style="margin:0;">Everything goes through ${esc(savedLabel)} right now.</p>`}`}
               ${splitSaving ? '<p class="hint">Saving...</p>' : ''}
-            </div>` : ''}
+            </div>`;
+            })()}
             <button type="button" class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
           `}
         </div>
@@ -11142,11 +11155,15 @@
       }
 
       async function saveSplit(percent) {
+        if (!method) { toast('Save a payment method first.', 'err'); return; }
         splitSaving = true; paint();
         try {
           const r = await callHrData('set_payout_split', { percentRobux: percent });
           splitPercent = r.percentRobux || 0;
-          if (method) method.details = { ...(method.details || {}), splitRobuxPercent: splitPercent || undefined };
+          try {
+            method = await getMyPaymentMethod();
+            splitPercent = Number(((method && method.details) || {}).splitRobuxPercent) || 0;
+          } catch (e) { }
           toast(splitPercent ? `Split saved: ${100 - splitPercent}% cash, ${splitPercent}% Robux.` : 'Split turned off.');
         } catch (e) {
           toast(e.message || 'Could not save the split.', 'err');
@@ -13487,8 +13504,8 @@
       </div>` : ''}
 
       ${loading ? `<div class="dash-loading">Loading your requests...</div>`
-        : loadError ? `<div class="dash-empty"><h3>Could not load your requests</h3><p>${esc(loadError)}</p></div>`
-        : `
+            : loadError ? `<div class="dash-empty"><h3>Could not load your requests</h3><p>${esc(loadError)}</p></div>`
+              : `
       ${open.length ? `
       <h2 class="sec-title" style="font-size:15px;">Waiting on a lead (${open.length})</h2>
       <div class="task-list" style="margin-bottom:22px;">
