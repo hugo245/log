@@ -10,7 +10,6 @@ const {
     DISCORD_CLIENT_ID,
     DISCORD_GUILD_ID,
     DISCORD_LEAD_ROLE_ID,
-    ROBLOX_GROUP_API_KEY,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
     APP_ORIGIN
@@ -18,9 +17,7 @@ const {
 
 const LEAD_ROLE_ID = DISCORD_LEAD_ROLE_ID || '1539922527013572668';
 
-if (!ROBLOX_GROUP_API_KEY) {
-    console.warn('ROBLOX_GROUP_API_KEY not set - the post-recruitment "Get Ranked" button will not be able to actually rank anyone in the Roblox group. Create a user-owned Open Cloud API key in the Roblox Creator Dashboard (under your account, not the group - group-owned keys are deprecated), add the target group as an authorized resource with group read/write access, and set the key as this env var.');
-}
+
 
 for (const [name, val] of Object.entries({ DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY })) {
     if (!val) { console.error(`Missing required env var: ${name}`); process.exit(1); }
@@ -76,79 +73,6 @@ async function getOnboardingGroupConfig() {
     };
 }
 
-async function getCurrentGroupRoleId(groupId, targetUserId) {
-    try {
-        const res = await fetch(`https://groups.roblox.com/v1/users/${targetUserId}/groups/roles`);
-        if (!res.ok) return null;
-        const json = await res.json().catch(() => null);
-        const membership = (json && json.data || []).find(g => g.group && g.group.id === Number(groupId));
-        return membership ? membership.role.id : null;
-    } catch (e) {
-        return null;
-    }
-}
-
-async function setRobloxGroupRank(groupId, targetUserId, roleId) {
-    if (!ROBLOX_GROUP_API_KEY) throw new Error('roblox_group_api_key_not_configured');
-
-    const currentRoleId = await getCurrentGroupRoleId(groupId, targetUserId);
-    if (currentRoleId != null && Number(currentRoleId) === Number(roleId)) return;
-
-    const res = await fetch(`https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships/${targetUserId}`, {
-        method: 'PATCH',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': ROBLOX_GROUP_API_KEY
-        },
-        body: JSON.stringify({ role: `groups/${groupId}/roles/${roleId}` })
-    });
-    if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`roblox_rank_failed_${res.status}: ${body}`);
-    }
-}
-
-async function acceptGroupJoinRequest(groupId, targetUserId) {
-    if (!ROBLOX_GROUP_API_KEY) throw new Error('roblox_group_api_key_not_configured');
-
-    const listUrl = `https://apis.roblox.com/cloud/v2/groups/${groupId}/join-requests?maxPageSize=100&filter=${encodeURIComponent(`user == 'users/${targetUserId}'`)}`;
-    const listRes = await fetch(listUrl, { headers: { 'x-api-key': ROBLOX_GROUP_API_KEY } });
-    const listBody = await listRes.text().catch(() => '');
-    console.log(`acceptGroupJoinRequest: list lookup for group ${groupId}, user ${targetUserId} -> status ${listRes.status}, body: ${listBody.slice(0, 500)}`);
-    if (listRes.status === 404) return false;
-    if (!listRes.ok) {
-        throw new Error(`roblox_join_request_list_failed_${listRes.status}: ${listBody}`);
-    }
-
-    let listJson;
-    try { listJson = JSON.parse(listBody); } catch (e) {
-        throw new Error(`roblox_join_request_list_unparseable: ${listBody.slice(0, 300)}`);
-    }
-
-    const requests = listJson.groupJoinRequests || listJson.data || [];
-    const match = requests.find(r => String(r.user || '').endsWith(`/${targetUserId}`));
-    if (!match) {
-        console.log(`acceptGroupJoinRequest: no pending join request found for user ${targetUserId} in group ${groupId} (${requests.length} total request(s) returned).`);
-        return false;
-    }
-
-    const requestPath = match.path || `groups/${groupId}/join-requests/${targetUserId}`;
-    const acceptRes = await fetch(`https://apis.roblox.com/cloud/v2/${requestPath}:accept`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': ROBLOX_GROUP_API_KEY
-        },
-        body: '{}'
-    });
-    if (!acceptRes.ok) {
-        const body = await acceptRes.text().catch(() => '');
-        console.error(`acceptGroupJoinRequest: accept failed (${acceptRes.status}) for group ${groupId}, user ${targetUserId}: ${body}`);
-        throw new Error(`roblox_join_request_accept_failed_${acceptRes.status}: ${body}`);
-    }
-    return true;
-}
-
 async function grantAutoHireRole(robloxUserId, robloxUsername, roleId) {
     if (!roleId || !robloxUserId) return;
     const { error } = await supabase.from('user_role_assignments').insert({
@@ -194,114 +118,6 @@ async function upsertUserAssignment({ robloxUserId, robloxUsername, teamId, skil
     return { ok: true, mode: 'inserted' };
 }
 
-
-const FINISH_REQUEST_INTERVAL_MS = 5 * 1000;
-
-async function finishOnboardingFlow(flow) {
-    const config = await getOnboardingGroupConfig();
-
-    let team = null;
-    let teamId = flow.team_id;
-    if (teamId == null && flow.ticket_id) {
-        const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
-        teamId = ticket ? ticket.placed_team_id : null;
-    }
-    if (teamId) {
-        const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', teamId).maybeSingle();
-        if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id) team = teamRow;
-    }
-    const sameAsMainGroup = !!team && config.groupId != null && Number(team.roblox_group_id) === Number(config.groupId);
-    const isRelink = !flow.ticket_id && !flow.link_token;
-
-    if (!isRelink && !sameAsMainGroup) {
-        if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
-        const already = await getCurrentGroupRoleId(config.groupId, flow.roblox_user_id);
-        if (String(already || '') !== String(config.groupRoleId)) {
-            await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
-        }
-        await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
-    } else if (!isRelink && sameAsMainGroup) {
-        if (!config.groupId) throw new Error('onboarding_group_not_configured');
-        const already = await getCurrentGroupRoleId(team.roblox_group_id, flow.roblox_user_id);
-        if (String(already || '') !== String(team.default_group_role_id)) {
-            await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
-        }
-        await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
-    }
-
-    let teamGroupNote = null;
-    const alreadyInTeamGroup = !!team && !sameAsMainGroup
-        && (await getCurrentGroupRoleId(team.roblox_group_id, flow.roblox_user_id)) != null;
-    if (team && !sameAsMainGroup) {
-        if (alreadyInTeamGroup) {
-            if (String(await getCurrentGroupRoleId(team.roblox_group_id, flow.roblox_user_id)) !== String(team.default_group_role_id)) {
-                try { await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id); } catch (e) { }
-            }
-        } else {
-            try {
-                const accepted = await acceptGroupJoinRequest(team.roblox_group_id, flow.roblox_user_id);
-                if (!accepted) {
-                    teamGroupNote = `You're set up in the main group. Now request to join **${team.name}**'s group at https://www.roblox.com/groups/${team.roblox_group_id} and this finishes by itself.`;
-                } else {
-                    await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
-                }
-            } catch (teamErr) {
-                console.error(`finishOnboardingFlow: team group failed for ${flow.roblox_username}:`, teamErr.message);
-                teamGroupNote = `You're set up in the main group, but something went wrong adding you to **${team.name}**'s group. A lead can sort this out.`;
-            }
-        }
-    }
-
-    const stepAfter = teamGroupNote ? 'main_ranked_awaiting_team' : 'done';
-    let doneMessage = `You're all set, ${flow.roblox_username}. Welcome to the team.`;
-    if (stepAfter === 'done' && isRelink) doneMessage = `You're all set, ${flow.roblox_username}. Your account is unlocked again.`;
-    if (stepAfter === 'done' && flow.link_token) {
-        await grantInviteLinkAccess(flow);
-        doneMessage = `You're all set, ${flow.roblox_username}. Your access to the Tool is active, refresh the page if it still says waiting.`;
-    }
-
-    await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flow.id);
-    return { stepAfter, message: teamGroupNote || doneMessage };
-}
-
-async function runFinishRequests() {
-    try {
-        const { data: flows } = await supabase
-            .from('recruit_onboarding_flows')
-            .select('*')
-            .eq('step', 'finish_requested');
-        for (const flow of (flows || [])) {
-            try {
-                const result = await finishOnboardingFlow(flow);
-                console.log(`[onboarding] finished ${flow.roblox_username} automatically (${result.stepAfter})`);
-                if (flow.discord_user_id) {
-                    try {
-                        const user = await client.users.fetch(flow.discord_user_id);
-                        const dm = await user.createDM();
-                        let edited = false;
-                        if (flow.message_id) {
-                            try {
-                                const msg = await dm.messages.fetch(flow.message_id);
-                                await msg.edit({ content: result.message, components: [] });
-                                edited = true;
-                            } catch (editErr) { }
-                        }
-                        if (!edited) await dm.send(result.message);
-                    } catch (dmErr) {
-                        console.error('[onboarding] could not message them, but their access is set up:', dmErr.message);
-                    }
-                }
-            } catch (e) {
-                console.error(`[onboarding] could not finish ${flow.roblox_username}:`, e.message);
-                await supabase.from('recruit_onboarding_flows')
-                    .update({ step: 'awaiting_rank', updated_at: new Date().toISOString() })
-                    .eq('id', flow.id);
-            }
-        }
-    } catch (e) {
-        console.error('runFinishRequests failed:', e.message);
-    }
-}
 
 async function grantInviteLinkAccess(flow) {
     if (!flow.link_token) return;
@@ -498,94 +314,10 @@ client.on(Events.InteractionCreate, async interaction => {
             const continueMatch = interaction.customId.match(/^onboarding_continue_(.+)$/);
 
             if (continueMatch) {
-                const flowId = continueMatch[1];
-                const { data: flow, error } = await supabase.from('recruit_onboarding_flows').select('*').eq('id', flowId).maybeSingle();
-                if (error || !flow) { await interaction.reply({ content: 'This flow could not be found.', ephemeral: true }); return; }
-                if (flow.discord_user_id !== interaction.user.id) { await interaction.reply({ content: "This isn't your onboarding flow.", ephemeral: true }); return; }
-                if (flow.step === 'awaiting_group_join') { await interaction.reply({ content: "You haven't joined the group yet - this'll unlock automatically once you have.", ephemeral: true }); return; }
-                if (flow.step === 'finish_requested') { await interaction.reply({ content: "You're already in the group, so this is finishing off by itself. Give it a few seconds.", ephemeral: true }); return; }
-                if (flow.step === 'done') { await interaction.reply({ content: "You're already fully set up.", ephemeral: true }); return; }
-
-                await interaction.update({ content: 'One second...', components: [] });
-
-                try {
-                    const config = await getOnboardingGroupConfig();
-
-                    let team = null;
-                    let teamId = flow.team_id;
-                    if (teamId == null && flow.ticket_id) {
-                        const { data: ticket } = await supabase.from('recruitment_tickets').select('placed_team_id').eq('id', flow.ticket_id).maybeSingle();
-                        teamId = ticket ? ticket.placed_team_id : null;
-                    }
-                    if (teamId) {
-                        const { data: teamRow } = await supabase.from('teams').select('name, roblox_group_id, default_group_role_id').eq('id', teamId).maybeSingle();
-                        if (teamRow && teamRow.roblox_group_id && teamRow.default_group_role_id) team = teamRow;
-                    }
-                    const sameAsMainGroup = !!team && config.groupId != null && Number(team.roblox_group_id) === Number(config.groupId);
-
-                    const isRelink = !flow.ticket_id && !flow.link_token;
-
-                    if (!isRelink && flow.step !== 'main_ranked_awaiting_team' && !sameAsMainGroup) {
-                        if (!config.groupId || !config.groupRoleId) throw new Error('onboarding_group_not_configured');
-
-                        await setRobloxGroupRank(config.groupId, flow.roblox_user_id, config.groupRoleId);
-                        await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
-                    } else if (!isRelink && flow.step !== 'main_ranked_awaiting_team' && sameAsMainGroup) {
-                        if (!config.groupId) throw new Error('onboarding_group_not_configured');
-
-                        await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
-                        await grantAutoHireRole(flow.roblox_user_id, flow.roblox_username, config.autoRoleId);
-                    }
-
-                    let teamGroupNote = null;
-                    const alreadyInTeamGroup = !!team && !sameAsMainGroup
-                        && (await getCurrentGroupRoleId(team.roblox_group_id, flow.roblox_user_id)) != null;
-                    if (team && !sameAsMainGroup && !alreadyInTeamGroup) {
-                        try {
-                            const accepted = await acceptGroupJoinRequest(team.roblox_group_id, flow.roblox_user_id);
-                            if (!accepted) {
-                                teamGroupNote = `${isRelink ? "You're in the main group." : "You're ranked in the main group."} Now request to join **${team.name}**'s group at https://www.roblox.com/groups/${team.roblox_group_id} - once you have, click Continue to finish setting up your team access.`;
-                            } else {
-                                await setRobloxGroupRank(team.roblox_group_id, flow.roblox_user_id, team.default_group_role_id);
-                            }
-                        } catch (teamErr) {
-                            console.error(`onboarding_continue: failed to process ${flow.roblox_username} in team group ${team.roblox_group_id}:`, teamErr.message);
-                            teamGroupNote = `${isRelink ? "You're in the main group" : "You're ranked in the main group"}, but something went wrong getting you into **${team.name}**'s group automatically. Click Continue to try again, or ping a lead if it keeps failing.`;
-                        }
-                    }
-
-                    const stepAfter = teamGroupNote ? 'main_ranked_awaiting_team' : 'done';
-
-                    let doneMessage = `You're all set, ${flow.roblox_username}. Welcome to the team.`;
-                    if (stepAfter === 'done' && isRelink) {
-                        doneMessage = `You're all set, ${flow.roblox_username}. Your account is unlocked again.`;
-                    }
-                    if (stepAfter === 'done' && flow.link_token) {
-                        await grantInviteLinkAccess(flow);
-                        doneMessage = `You're all set, ${flow.roblox_username}. Your access to the Tool is now active - head back to the invite page and refresh if it's still showing "waiting".`;
-                    }
-
-                    await supabase.from('recruit_onboarding_flows').update({ step: stepAfter, updated_at: new Date().toISOString() }).eq('id', flowId);
-
-                    await interaction.editReply({
-                        content: teamGroupNote || doneMessage,
-                        components: teamGroupNote ? [{
-                            type: 1,
-                            components: [{ type: 2, style: 3, label: 'Continue', custom_id: `onboarding_continue_${flowId}` }]
-                        }] : []
-                    });
-                } catch (e) {
-                    console.error(`onboarding_continue: failed for flow ${flowId}:`, e.message);
-                    const resetStep = flow.step === 'main_ranked_awaiting_team' ? 'main_ranked_awaiting_team' : 'awaiting_rank';
-                    await supabase.from('recruit_onboarding_flows').update({ step: resetStep, updated_at: new Date().toISOString() }).eq('id', flowId);
-                    await interaction.editReply({
-                        content: `Something went wrong ranking you automatically. Please ping a lead or admin to finish this manually.`,
-                        components: [{
-                            type: 1,
-                            components: [{ type: 2, style: 3, label: 'Try again', custom_id: `onboarding_continue_${flowId}` }]
-                        }]
-                    });
-                }
+                await interaction.reply({
+                    content: "Thanks, nothing more is needed here. A lead ranks you in the Roblox group by hand, and your access on the site is already set up.",
+                    ephemeral: true
+                });
                 return;
             }
         }
@@ -692,7 +424,6 @@ http.createServer((req, res) => res.end('bot is alive')).listen(4000);
         console.error('initial reconcilePlacements failed:', e.message);
     }
     setInterval(reconcilePlacements, RECONCILE_INTERVAL_MS);
-    setInterval(runFinishRequests, FINISH_REQUEST_INTERVAL_MS);
 })();
 
 process.on('unhandledRejection', (reason) => {

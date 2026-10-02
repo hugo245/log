@@ -2493,9 +2493,7 @@ setInterval(() => {
     runTicketChannelCleanup().catch(e => console.error('scheduled runTicketChannelCleanup failed:', e.message));
 }, TICKET_CHANNEL_CLEANUP_INTERVAL_MS);
 
-setInterval(() => {
-    runOnboardingJoinCheck().catch(e => console.error('scheduled runOnboardingJoinCheck failed:', e.message));
-}, ONBOARDING_JOIN_CHECK_INTERVAL_MS);
+
 
 setTimeout(() => {
     enforceUsdMinimumThreshold().then(() => runPaymentMethodConversionSweep()).then(() => refreshPaymentRequestUsernames()).catch(e => console.error('initial payment conversion pass failed:', e.message));
@@ -3149,6 +3147,44 @@ app.delete('/hr-session', async (req, res) => {
 });
 
 const listRequestsSweepState = { paymentsAt: 0, usernamesAt: 0 };
+
+async function grantInviteLinkAccessNow({ robloxUserId, robloxUsername, link }) {
+    const teamId = link.team_id || null;
+    const skillsetId = link.skillset_id || null;
+    const roleId = link.role_id || null;
+    if (teamId) {
+        const { data: already } = await supabase
+            .from('user_assignments')
+            .select('roblox_user_id')
+            .eq('roblox_user_id', robloxUserId)
+            .eq('team_id', teamId)
+            .maybeSingle();
+        if (already) {
+            await supabase.from('user_assignments')
+                .update({ skillset_id: skillsetId, roblox_username: robloxUsername, source_link_token: link.token })
+                .eq('roblox_user_id', robloxUserId).eq('team_id', teamId);
+        } else {
+            const { error } = await supabase.from('user_assignments').insert({
+                roblox_user_id: robloxUserId,
+                roblox_username: robloxUsername,
+                team_id: teamId,
+                skillset_id: skillsetId,
+                source_link_token: link.token,
+                assigned_at: new Date().toISOString()
+            });
+            if (error) console.error('grantInviteLinkAccessNow: could not assign the team:', error.message);
+        }
+    }
+    if (roleId) {
+        const { error } = await supabase.from('user_role_assignments').insert({
+            roblox_user_id: robloxUserId,
+            role_id: roleId,
+            roblox_username: robloxUsername
+        });
+        if (error && error.code !== '23505') console.error('grantInviteLinkAccessNow: could not assign the role:', error.message);
+    }
+    await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+}
 
 app.post('/hr-data', async (req, res) => {
     try {
@@ -5620,43 +5656,21 @@ async function handleHrData(req, res) {
                 return;
             }
 
-            const discordUserId = await getLinkedDiscordUserId(session.roblox_user_id);
-            if (!discordUserId) { res.status(400).json({ ok: false, error: 'discord_not_linked' }); return; }
-            if (DISCORD_GUILD_ID) {
-                const inServer = await isDiscordGuildMember(discordUserId);
-                if (!inServer) { res.status(403).json({ ok: false, error: 'discord_not_in_server' }); return; }
-            }
-
-            const { data: existingFlow } = await supabase
-                .from('recruit_onboarding_flows')
-                .select('id, step')
-                .eq('roblox_user_id', session.roblox_user_id)
-                .eq('link_token', token)
-                .maybeSingle();
-            if (existingFlow) {
-                res.json({ ok: true, data: { alreadyStarted: true, done: existingFlow.step === 'done' } });
-                return;
-            }
-
-            const flow = await startAccessOnboardingFlow({
+            await grantInviteLinkAccessNow({
                 robloxUserId: session.roblox_user_id,
                 robloxUsername: session.roblox_username,
-                discordUserId,
-                linkToken: token,
-                teamId: link.team_id || null,
-                skillsetId: link.skillset_id || null,
-                roleId: link.role_id || null
+                link
             });
-            if (!flow) {
-                res.status(500).json({ ok: false, error: 'Could not start setup - make sure the onboarding group is configured and the bot can DM you.' });
-                return;
-            }
-
             await supabase.from('onboarding_links').update({ uses: (link.uses || 0) + 1 }).eq('token', link.token);
-
-            res.json({ ok: true, data: { started: true } });
+            await logAudit(session, {
+                category: 'teams', action: 'claim_invite',
+                targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
+                details: { token: link.token, teamId: link.team_id, roleId: link.role_id }
+            });
+            res.json({ ok: true, data: { done: true } });
         } catch (e) {
-            res.status(500).json({ ok: false, error: 'Could not apply that invite link.' });
+            console.error('claim_onboarding_link failed:', e.message);
+            res.status(500).json({ ok: false, error: 'claim_failed' });
         }
         return;
     }
