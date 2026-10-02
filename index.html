@@ -4829,18 +4829,18 @@
         display: none;
       }
 
-      .manage-side>button {
+      .manage-side > button {
         white-space: nowrap;
         border: 1px solid var(--line) !important;
         border-radius: 999px !important;
         padding: 8px 14px !important;
       }
 
-      .manage-side>div {
+      .manage-side > div {
         display: none !important;
       }
 
-      .manage-layout>div:last-child {
+      .manage-layout > div:last-child {
         width: 100%;
         min-width: 0;
       }
@@ -4912,6 +4912,66 @@
       .bank-row {
         min-height: 44px;
       }
+    }
+
+    .split-box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-top: 14px;
+    }
+
+    .split-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .split-row input[type="range"] {
+      flex: 1 1 160px;
+      accent-color: var(--accent);
+    }
+
+    .split-value {
+      font-size: 13px;
+      color: var(--ink-soft);
+      white-space: nowrap;
+    }
+
+    .claim-edit {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .claim-edit input {
+      width: 120px;
+      flex: 0 0 auto;
+    }
+
+    .claim-edit select {
+      width: auto;
+      min-width: 110px;
+      flex: 0 0 auto;
+    }
+
+    .claim-edit .btn {
+      width: auto;
+      flex: 0 0 auto;
+    }
+
+    .claim-edit input,
+    .claim-edit select {
+      font: inherit;
+      font-size: 13px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--input-bg);
+      color: var(--ink);
     }
 
     .bd-board {
@@ -5745,6 +5805,7 @@
         id: row.id,
         requestedBy: row.requested_by || '',
         requestedByUserId: row.requested_by_user_id != null ? row.requested_by_user_id : null,
+        split: row.split || null,
         robloxUserId: row.roblox_user_id != null ? row.roblox_user_id : null,
         robloxUsername: row.roblox_username || '',
         taskName: row.task_name || '',
@@ -7861,6 +7922,8 @@
         if (isHrAuthed && canSubmitRequests()) renderCreateView(); else if (isHrAuthed) renderMyPayments(); else renderHrGate();
       } else if (path === '#/onboarding') {
         if (isHrAuthed) renderOnboarding(); else renderHrGate();
+      } else if (path === '#/request') {
+        if (isHrAuthed) renderClaimPage(); else renderHrGate();
       } else if (path === '#/teams') {
         if (isHrAuthed) renderTeams(); else renderHrGate();
       } else if (path === '#/staff') {
@@ -7925,6 +7988,7 @@
       return [
         { group: 'you', label: 'My payments', href: '#/my', match: ['#/my', '#/', ''] },
         { group: 'you', label: 'New request', href: '#/new', show: canSubmitRequests() },
+        { group: 'you', label: 'Request payment', href: '#/request', keywords: 'claim ask paid owed' },
         { group: 'team', label: 'Dashboard', href: '#/dashboard', match: ['#/dashboard', '#/hr'], show: hasPermission('dashboard.view'), keywords: 'dashboard pay approve review' },
         { group: 'team', label: 'Teams', href: '#/teams', show: canSeeTeams(), keywords: 'team games deadlines analytics growth' },
         { group: 'team', label: 'Staff', href: '#/staff', show: hasPermission('staff.view_database'), keywords: 'people users members database profiles' },
@@ -7978,7 +8042,7 @@
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
              </details>`
-            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeTeams() ? pill('#/teams', 'Teams', ['#/teams']) : ''}${(() => {
+            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${pill('#/request', 'Request payment')}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeTeams() ? pill('#/teams', 'Teams', ['#/teams']) : ''}${(() => {
               const more = [
                 canSeeStaff ? { href: '#/staff', label: 'Staff', paths: ['#/staff'] } : null,
                 canSeeRecruitment ? { href: '#/recruitment', label: 'Recruitment', paths: ['#/recruitment', '#/recruitment-analytics'] } : null,
@@ -9274,6 +9338,8 @@
       let filter = 'pending';
       let search = '';
       let missingOnly = false;
+      let claims = [];
+      let claimsLoading = false;
       let roleFilter = 'all';
       let teamFilter = 'all';
       let skillsetFilter = 'all';
@@ -9331,7 +9397,7 @@
         const rowHtml = `
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}${r.paymentMethod.method === 'BANK_TRANSFER' && !r.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(r.id)}">Payment details</button>` : ''}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.split ? `<div class="method-note has-method">Split: $${Number(r.split.cashUsd).toFixed(2)} + R$ ${Number(r.split.robux).toLocaleString()}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}${r.paymentMethod.method === 'BANK_TRANSFER' && !r.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(r.id)}">Payment details</button>` : ''}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell">
                 <div class="task-name">${esc(r.taskName || 'Untitled task')}</div>
                 ${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
@@ -9632,6 +9698,7 @@
           <button type="button" class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (<span class="tab-count" data-count-for="pending">${counts.pending}</span>)</button>
           <button type="button" class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (<span class="tab-count" data-count-for="paid">${counts.paid}</span>)</button>
           <button type="button" class="tab-btn ${filter === 'rejected' ? 'active' : ''}" data-filter="rejected">Rejected (<span class="tab-count" data-count-for="rejected">${counts.rejected}</span>)</button>
+          <button type="button" class="tab-btn ${filter === 'claims' ? 'active' : ''}" data-filter="claims">Staff requests (${claims.length})</button>
         </div>
         <div class="search-input-wrap">
           <input type="text" id="searchInput" placeholder="Search by username, task, or game" value="${esc(search)}">
@@ -9655,16 +9722,68 @@
         </div>
       </div>
 
+      ${filter === 'claims' ? `
+      <div class="table-wrap" style="padding:0;">
+        ${claimsLoading ? `<div class="dash-loading">Loading staff requests...</div>`
+          : !claims.length ? `<div class="dash-empty"><h3>Nothing to review</h3><p>When someone asks to be paid, it turns up here.</p></div>`
+          : `<div class="task-list">${claims.map(c => `
+            <div class="task-row">
+              <div style="flex:1;min-width:0;">
+                <div class="task-title">${esc(c.task_name || 'Work')}</div>
+                <div class="task-meta">
+                  <span>${userLink(c.roblox_user_id, c.roblox_username)}</span>
+                  <span class="pp-tag">asked for ${esc(c.currency === 'USD' ? '$' + Number(c.payment).toFixed(2) : 'R$ ' + Number(c.payment).toLocaleString())}</span>
+                  ${c.game ? `<span>${esc(c.game)}</span>` : ''}
+                  <span>${esc(relTime(c.created_at))}</span>
+                </div>
+                ${c.work_raw ? `<div class="task-details">${esc(c.work_raw)}</div>` : ''}
+                <div class="claim-edit">
+                  <label class="hint" for="claimAmt_${esc(c.id)}">Approve for</label>
+                  <input type="number" id="claimAmt_${esc(c.id)}" value="${esc(c.payment)}" min="1" step="1">
+                  <select id="claimCur_${esc(c.id)}">
+                    <option value="ROBUX" ${c.currency === 'ROBUX' ? 'selected' : ''}>Robux</option>
+                    <option value="USD" ${c.currency === 'USD' ? 'selected' : ''}>USD</option>
+                  </select>
+                  <button type="button" class="btn btn-ok btn-sm" data-claim-decide="${esc(c.id)}" data-decision="approve">Approve</button>
+                  <button type="button" class="btn btn-ghost btn-sm" data-claim-decide="${esc(c.id)}" data-decision="reject">Turn down</button>
+                </div>
+              </div>
+            </div>`).join('')}</div>`}
+      </div>` : ''}
       ${missingOnly ? `<div class="filter-notice">Showing pending requests with no payout method. Click a name, then the Payout tab, to add one.<button type="button" class="btn btn-ghost btn-sm" id="clearMissingBtn">Show all</button></div>` : ''}
-      <div class="table-wrap" id="reqTableArea">${tableHtml()}</div>
+      <div class="table-wrap" id="reqTableArea" ${filter === 'claims' ? 'hidden' : ''}>${tableHtml()}</div>
     </div>`;
 
         wireTopbarSignOut();
         wireTableEvents();
 
+        document.querySelectorAll('[data-claim-decide]').forEach(el => el.addEventListener('click', async () => {
+          const id = el.dataset.claimDecide;
+          const decision = el.dataset.decision;
+          const amountField = document.getElementById('claimAmt_' + id);
+          const curField = document.getElementById('claimCur_' + id);
+          const payment = amountField ? amountField.value : null;
+          const currency = curField ? curField.value : null;
+          let note = null;
+          if (decision === 'reject') {
+            note = prompt('Why are you turning this down? They see this.');
+            if (note === null) return;
+          }
+          el.disabled = true;
+          try {
+            const r = await callHrData('decide_claim', { id, decision, payment, currency, note });
+            toast(decision === 'approve' ? (r.changed ? 'Approved at the amount you set' : 'Approved') : 'Turned down');
+            await loadClaims();
+            await load(true);
+          } catch (e) {
+            el.disabled = false;
+            toast(e.message || 'That did not go through.', 'err');
+          }
+        }));
         document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
+          const wasClaims = filter === 'claims';
           filter = b.dataset.filter;
-          if (missingOnly) { missingOnly = false; paintShell(); return; }
+          if (missingOnly || filter === 'claims' || wasClaims) { missingOnly = false; paintShell(); return; }
           document.querySelectorAll('#dashFilterTabs .tab-btn').forEach(t => t.classList.toggle('active', t.dataset.filter === filter));
           paintTable();
         }));
@@ -9722,6 +9841,21 @@
             btn.textContent = original;
           }
         });
+      }
+
+      loadClaims();
+
+      async function loadClaims() {
+        if (!hasPermission('dashboard.view')) return;
+        claimsLoading = !claims.length;
+        try {
+          const json = await callHrData('list_claims');
+          claims = json.data || [];
+        } catch (e) {
+          claims = [];
+        }
+        claimsLoading = false;
+        if (myGen === renderGen) paintShell();
       }
 
       async function load(force) {
@@ -10498,6 +10632,8 @@
       let savingMethod = false;
       let methodError = null;
       let methodSaved = false;
+      let splitPercent = 0;
+      let splitSaving = false;
 
       let eligibility = [];
       let eligibilityLoading = true;
@@ -10779,6 +10915,21 @@
         }).join('')}
             </div>
             <div id="methodFieldsSlot"></div>
+            ${method && method.method !== 'DEVEX_ROBUX' ? `
+            <div class="split-box">
+              <label class="pp-check" style="margin:0 0 8px;"><input type="checkbox" id="splitToggle" ${splitPercent > 0 ? 'checked' : ''}> Split my payments between ${esc(PAYMENT_METHODS[method.method] ? PAYMENT_METHODS[method.method].label : method.method)} and Robux</label>
+              ${splitPercent > 0 ? `
+              <div class="split-row">
+                <input type="range" id="splitRange" min="5" max="95" step="5" value="${esc(splitPercent)}" aria-label="Share paid in Robux">
+                <span class="split-value"><b>${esc(100 - splitPercent)}%</b> cash &middot; <b>${esc(splitPercent)}%</b> Robux</span>
+              </div>
+              <p class="hint" style="margin:8px 0 0;">${(() => {
+                const robuxShare = 100 * (splitPercent / 100);
+                const robux = DEVEX_RATE ? Math.round(robuxShare / DEVEX_RATE) : 0;
+                return `On a $100 payment that is $${(100 - robuxShare).toFixed(2)} plus about R$ ${robux.toLocaleString()}.`;
+              })()}</p>` : `<p class="hint" style="margin:0;">Everything goes through ${esc(PAYMENT_METHODS[method.method] ? PAYMENT_METHODS[method.method].label : method.method)}.</p>`}
+              ${splitSaving ? '<p class="hint">Saving...</p>' : ''}
+            </div>` : ''}
             <button type="button" class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
           `}
         </div>
@@ -10859,6 +11010,17 @@
           paint();
         }));
 
+        const splitToggle = document.getElementById('splitToggle');
+        if (splitToggle) splitToggle.addEventListener('change', () => saveSplit(splitToggle.checked ? (splitPercent || 50) : 0));
+        const splitRange = document.getElementById('splitRange');
+        if (splitRange) {
+          splitRange.addEventListener('input', () => {
+            splitPercent = Number(splitRange.value);
+            const label = document.querySelector('.split-value');
+            if (label) label.innerHTML = `<b>${100 - splitPercent}%</b> cash &middot; <b>${splitPercent}%</b> Robux`;
+          });
+          splitRange.addEventListener('change', () => saveSplit(Number(splitRange.value)));
+        }
         const saveMethodBtn = document.getElementById('saveMethodBtn');
         if (saveMethodBtn) saveMethodBtn.addEventListener('click', handleSaveMethod);
 
@@ -10929,6 +11091,7 @@
         methodLoading = true; paint();
         try {
           method = await getMyPaymentMethod();
+          splitPercent = Number(((method && method.details) || {}).splitRobuxPercent) || 0;
           if (method) { selectedMethod = method.method; methodDetails = method.details || {}; }
         } catch (err) { }
         if (myGen !== renderGen) return;
@@ -10975,6 +11138,20 @@
         }
         if (myGen !== renderGen) return;
         warningsLoading = false;
+        paint();
+      }
+
+      async function saveSplit(percent) {
+        splitSaving = true; paint();
+        try {
+          const r = await callHrData('set_payout_split', { percentRobux: percent });
+          splitPercent = r.percentRobux || 0;
+          if (method) method.details = { ...(method.details || {}), splitRobuxPercent: splitPercent || undefined };
+          toast(splitPercent ? `Split saved: ${100 - splitPercent}% cash, ${splitPercent}% Robux.` : 'Split turned off.');
+        } catch (e) {
+          toast(e.message || 'Could not save the split.', 'err');
+        }
+        splitSaving = false;
         paint();
       }
 
@@ -13250,6 +13427,152 @@
         paint();
       }
 
+      load();
+    }
+
+    function renderClaimPage() {
+      if (!authReady) { app.innerHTML = topbar(); return; }
+      if (!isHrAuthed) { renderHrGate(); return; }
+
+      const myGen = renderGen;
+      let claims = [];
+      let loading = true;
+      let loadError = null;
+      let busy = false;
+      let formOpen = false;
+
+      function money(r) {
+        return r.currency === 'USD' ? `$${Number(r.payment).toFixed(2)}` : `R$ ${Number(r.payment).toLocaleString()}`;
+      }
+
+      function stateChip(r) {
+        if (r.status === 'proposed') return '<span class="pp-state warn">Waiting on a lead</span>';
+        if (r.status === 'rejected') return '<span class="pp-state ban">Turned down</span>';
+        if (r.status === 'paid' || r.paid) return '<span class="pp-state ok">Paid</span>';
+        return '<span class="pp-state">Approved, waiting to be paid</span>';
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        const open = claims.filter(c => c.status === 'proposed');
+        const decided = claims.filter(c => c.status !== 'proposed');
+        app.innerHTML = `
+    ${topbar()}
+    <div class="dash-shell">
+      <div class="dash-head">
+        <div>
+          <h1 style="margin-bottom:4px;">Request a payment</h1>
+          <p class="sub">Ask to be paid for work you've finished. A lead checks it, and can adjust the amount before approving.</p>
+        </div>
+        <div class="dash-toolbar">
+          <button type="button" class="btn ${formOpen ? 'btn-ghost' : 'btn-primary'} btn-sm" id="claimToggle">${formOpen ? 'Cancel' : 'New request'}</button>
+        </div>
+      </div>
+
+      ${formOpen ? `
+      <div class="panel" style="margin:0 0 20px;">
+        <div class="field"><label for="claimTask">What did you do</label>
+          <input type="text" id="claimTask" placeholder="e.g. Built the winter lobby"></div>
+        <div class="team-form-row">
+          <div class="field"><label for="claimAmount">Amount</label>
+            <input type="number" id="claimAmount" min="1" step="1" placeholder="e.g. 5000"></div>
+          <div class="field"><label for="claimCurrency">Paid in</label>
+            <select id="claimCurrency"><option value="ROBUX">Robux</option><option value="USD">USD</option></select></div>
+          <div class="field"><label for="claimGame">Game <span class="hint">(optional)</span></label>
+            <input type="text" id="claimGame" placeholder="e.g. Obby Rush"></div>
+        </div>
+        <div class="field"><label for="claimNote">Details <span class="hint">(what you did, links, anything that helps)</span></label>
+          <textarea id="claimNote" rows="3" placeholder="A couple of lines is plenty"></textarea></div>
+        <button type="button" class="btn btn-primary btn-sm" id="claimSubmit" ${busy ? 'disabled' : ''}>${busy ? 'Sending...' : 'Send request'}</button>
+      </div>` : ''}
+
+      ${loading ? `<div class="dash-loading">Loading your requests...</div>`
+        : loadError ? `<div class="dash-empty"><h3>Could not load your requests</h3><p>${esc(loadError)}</p></div>`
+        : `
+      ${open.length ? `
+      <h2 class="sec-title" style="font-size:15px;">Waiting on a lead (${open.length})</h2>
+      <div class="task-list" style="margin-bottom:22px;">
+        ${open.map(r => `
+        <div class="task-row">
+          <div style="flex:1;min-width:0;">
+            <div class="task-title">${esc(r.taskName || r.task_name || 'Work')}</div>
+            <div class="task-meta">
+              ${stateChip(r)}
+              <span class="pp-tag">${esc(money(r))}</span>
+              ${r.game ? `<span>${esc(r.game)}</span>` : ''}
+              <span>${esc(relTime(r.created_at || r.createdAt))}</span>
+            </div>
+            ${(r.workRaw || r.work_raw) ? `<div class="task-details">${esc(r.workRaw || r.work_raw)}</div>` : ''}
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" data-withdraw="${esc(r.id)}">Withdraw</button>
+        </div>`).join('')}
+      </div>` : `<div class="dash-empty"><h3>Nothing waiting</h3><p>Press New request when you've finished something that should be paid.</p></div>`}
+
+      ${decided.length ? `
+      <h2 class="sec-title" style="font-size:15px;">Decided (${decided.length})</h2>
+      <div class="task-list">
+        ${decided.map(r => `
+        <div class="task-row">
+          <div style="flex:1;min-width:0;">
+            <div class="task-title">${esc(r.taskName || r.task_name || 'Work')}</div>
+            <div class="task-meta">
+              ${stateChip(r)}
+              <span class="pp-tag">${esc(money(r))}</span>
+              ${r.statusNote || r.status_note ? `<span>${esc(r.statusNote || r.status_note)}</span>` : ''}
+              <span>${esc(relTime(r.created_at || r.createdAt))}</span>
+            </div>
+          </div>
+        </div>`).join('')}
+      </div>` : ''}`}
+    </div>`;
+
+        wireTopbarSignOut();
+        document.getElementById('claimToggle').addEventListener('click', () => { formOpen = !formOpen; paint(); const t = document.getElementById('claimTask'); if (t) t.focus(); });
+        const submit = document.getElementById('claimSubmit');
+        if (submit) submit.addEventListener('click', async () => {
+          const taskName = document.getElementById('claimTask').value.trim();
+          const payment = document.getElementById('claimAmount').value;
+          const currency = document.getElementById('claimCurrency').value;
+          const game = document.getElementById('claimGame').value.trim();
+          const note = document.getElementById('claimNote').value.trim();
+          if (!taskName) { toast('Say what you did first.', 'err'); return; }
+          if (!payment || Number(payment) <= 0) { toast('Put in how much you are asking for.', 'err'); return; }
+          busy = true; paint();
+          try {
+            await callHrData('submit_claim', { taskName, payment, currency, game, note });
+            busy = false; formOpen = false;
+            toast('Sent. A lead will look at it.');
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.code === 'too_many_open_claims' ? 'You already have 10 requests waiting. Wait for those first.' : (e.message || 'Could not send that.'), 'err');
+            paint();
+          }
+        });
+        document.querySelectorAll('[data-withdraw]').forEach(el => el.addEventListener('click', async () => {
+          if (!confirm('Withdraw this request?')) return;
+          try {
+            await callHrData('withdraw_claim', { id: el.dataset.withdraw });
+            toast('Withdrawn');
+            await load();
+          } catch (e) { toast(e.message || 'Could not withdraw it.', 'err'); }
+        }));
+      }
+
+      async function load() {
+        loadError = null;
+        try {
+          const json = await callHrData('list_my_claims');
+          claims = json.data || [];
+        } catch (e) {
+          loadError = e.message || 'Could not load your requests.';
+        }
+        if (myGen !== renderGen) return;
+        loading = false;
+        paint();
+      }
+
+      paint();
       load();
     }
 

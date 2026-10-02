@@ -3146,6 +3146,30 @@ app.delete('/hr-session', async (req, res) => {
     res.json({ ok: true });
 });
 
+function splitForRequest(row, method, devexRate) {
+    const percent = Number((method.details || {}).splitRobuxPercent) || 0;
+    if (!percent || percent <= 0 || percent >= 100) return null;
+    if (method.method === 'DEVEX_ROBUX') return null;
+    const rate = Number(devexRate) || 0;
+    if (!rate) return null;
+    const usdTotal = row.currency === 'ROBUX' ? Number(row.payment) * rate : Number(row.payment);
+    if (!Number.isFinite(usdTotal) || usdTotal <= 0) return null;
+    const robuxShareUsd = usdTotal * (percent / 100);
+    return {
+        percentRobux: percent,
+        cashUsd: Number((usdTotal - robuxShareUsd).toFixed(2)),
+        robux: Math.round(robuxShareUsd / rate),
+        cashMethod: method.method
+    };
+}
+
+function shapeRequestRow(r) {
+    return {
+        ...r,
+        paymentMethod: r.payment_method || null
+    };
+}
+
 const listRequestsSweepState = { paymentsAt: 0, usernamesAt: 0 };
 
 async function grantInviteLinkAccessNow({ robloxUserId, robloxUsername, link }) {
@@ -3276,6 +3300,145 @@ async function handleHrData(req, res) {
         return;
     }
 
+    if (action === 'submit_claim') {
+        const taskName = payload.taskName ? String(payload.taskName).trim() : '';
+        const game = payload.game ? String(payload.game).trim() : null;
+        const amount = Number(payload.payment);
+        const currency = payload.currency === 'USD' ? 'USD' : 'ROBUX';
+        const note = payload.note ? String(payload.note).trim() : '';
+        if (!taskName || !Number.isFinite(amount) || amount <= 0) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        if (await isUserBanned(session.roblox_user_id)) { res.status(403).json({ ok: false, error: 'already_banned' }); return; }
+
+        const { count } = await supabase
+            .from('payment_requests')
+            .select('id', { count: 'exact', head: true })
+            .eq('roblox_user_id', session.roblox_user_id)
+            .eq('status', 'proposed');
+        if ((count || 0) >= 10) { res.status(400).json({ ok: false, error: 'too_many_open_claims' }); return; }
+
+        const id = generateRequestId();
+        const { error } = await supabase.from('payment_requests').insert({
+            id,
+            requested_by: session.roblox_username,
+            requested_by_user_id: session.roblox_user_id,
+            roblox_username: session.roblox_username,
+            roblox_user_id: session.roblox_user_id,
+            task_name: taskName,
+            game,
+            game_id: await resolveGameId(game),
+            work_raw: note,
+            time_worked: payload.timeWorked ? String(payload.timeWorked).trim() : '',
+            payment: amount,
+            currency,
+            paid: false,
+            status: 'proposed',
+            created_at: new Date().toISOString()
+        });
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        await logAudit(session, {
+            category: 'payments', action: 'submit_claim',
+            targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
+            details: { id, taskName, payment: amount, currency }
+        });
+        res.json({ ok: true, id });
+        return;
+    }
+
+    if (action === 'list_my_claims') {
+        const { data } = await supabase
+            .from('payment_requests')
+            .select('*')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .order('created_at', { ascending: false })
+            .limit(60);
+        res.json({ ok: true, data: (data || []).map(shapeRequestRow) });
+        return;
+    }
+
+    if (action === 'withdraw_claim') {
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: row } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
+        if (!row) { res.status(404).json({ ok: false, error: 'not_found' }); return; }
+        if (String(row.roblox_user_id) !== String(session.roblox_user_id) || row.status !== 'proposed') {
+            res.status(403).json({ ok: false, error: 'cannot_withdraw' });
+            return;
+        }
+        await supabase.from('payment_requests').delete().eq('id', id);
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_claims') {
+        if (!requirePermission(res, session, 'dashboard.view')) return;
+        const { data } = await supabase
+            .from('payment_requests')
+            .select('*')
+            .eq('status', 'proposed')
+            .order('created_at', { ascending: true });
+        res.json({ ok: true, data: (data || []).map(shapeRequestRow) });
+        return;
+    }
+
+    if (action === 'decide_claim') {
+        if (!requirePermission(res, session, 'dashboard.submit_request')) return;
+        const id = payload.id;
+        const decision = payload.decision === 'approve' ? 'approve' : payload.decision === 'reject' ? 'reject' : null;
+        if (!id || !decision) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: row } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
+        if (!row || row.status !== 'proposed') { res.status(404).json({ ok: false, error: 'claim_not_found' }); return; }
+
+        if (decision === 'reject') {
+            const note = payload.note ? String(payload.note).trim() : '';
+            await supabase.from('payment_requests')
+                .update({ status: 'rejected', status_note: note || null })
+                .eq('id', id);
+            await logAudit(session, {
+                category: 'payments', action: 'reject_claim',
+                targetUserId: row.roblox_user_id, targetUsername: row.roblox_username,
+                details: { id, note, payment: row.payment, currency: row.currency }
+            });
+            await notifyModeratedUser(row.roblox_user_id,
+                `Your payment request for "${row.task_name}" was turned down.${note ? `\nReason: ${note}` : ''}`);
+            res.json({ ok: true });
+            return;
+        }
+
+        const newAmount = payload.payment != null && payload.payment !== '' ? Number(payload.payment) : Number(row.payment);
+        const newCurrency = payload.currency === 'USD' ? 'USD' : payload.currency === 'ROBUX' ? 'ROBUX' : row.currency;
+        if (!Number.isFinite(newAmount) || newAmount <= 0) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        const changed = Number(newAmount) !== Number(row.payment) || newCurrency !== row.currency;
+
+        const { error } = await supabase.from('payment_requests').update({
+            status: 'pending',
+            payment: newAmount,
+            currency: newCurrency,
+            requested_by: session.roblox_username,
+            requested_by_user_id: session.roblox_user_id,
+            status_note: payload.note ? String(payload.note).trim() : null
+        }).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+
+        await logAudit(session, {
+            category: 'payments', action: 'approve_claim',
+            targetUserId: row.roblox_user_id, targetUsername: row.roblox_username,
+            details: {
+                id,
+                payment: newAmount, currency: newCurrency,
+                originalPayment: changed ? row.payment : null,
+                originalCurrency: changed ? row.currency : null
+            }
+        });
+        const amountText = newCurrency === 'ROBUX' ? `R$ ${Number(newAmount).toLocaleString()}` : `$${Number(newAmount).toFixed(2)}`;
+        const askedText = row.currency === 'ROBUX' ? `R$ ${Number(row.payment).toLocaleString()}` : `$${Number(row.payment).toFixed(2)}`;
+        await notifyModeratedUser(row.roblox_user_id, changed
+            ? `Your payment request for "${row.task_name}" was approved at ${amountText} (you asked for ${askedText}). It's now waiting to be paid out.${payload.note ? `\n${String(payload.note).trim()}` : ''}`
+            : `Your payment request for "${row.task_name}" (${amountText}) was approved and is waiting to be paid out.`);
+        runPaymentMethodConversionSweep({ robloxUserId: row.roblox_user_id });
+        res.json({ ok: true, changed });
+        return;
+    }
+
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
         const now = Date.now();
@@ -3292,9 +3455,11 @@ async function handleHrData(req, res) {
             listRequestsSweepState.usernamesAt = now;
             refreshPaymentRequestUsernames();
         }
+        const devexRate = await getDevexRate();
         const { data, error } = await supabase
             .from('payment_requests')
             .select('*')
+            .neq('status', 'proposed')
             .order('created_at', { ascending: false });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
 
@@ -3344,6 +3509,7 @@ async function handleHrData(req, res) {
                 || null;
             const safeMethod = m ? redactPayoutMethod({ method: m.method, details: m.details || {}, roblox_user_id: m.roblox_user_id }, session) : null;
             r.payment_method = safeMethod ? { method: safeMethod.method, details: safeMethod.details || {}, detailsHidden: !!safeMethod.detailsHidden } : null;
+            r.split = m ? splitForRequest(r, m, devexRate) : null;
 
             r.requester_roles = r.roblox_user_id != null ? (rolesByUserId[r.roblox_user_id] || []) : [];
             const assigns = r.roblox_user_id != null ? (assignsByUserId[r.roblox_user_id] || []) : [];
@@ -3566,6 +3732,24 @@ async function handleHrData(req, res) {
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
         await convertPendingForUser(robloxUserId, username);
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'set_payout_split') {
+        const percent = payload.percentRobux === '' || payload.percentRobux == null ? 0 : Number(payload.percentRobux);
+        if (!Number.isFinite(percent) || percent < 0 || percent > 100) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        const { data: existing } = await supabase
+            .from('payment_methods')
+            .select('*')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .maybeSingle();
+        if (!existing) { res.status(400).json({ ok: false, error: 'no_payment_method' }); return; }
+        const details = { ...(existing.details || {}) };
+        if (percent > 0) details.splitRobuxPercent = Math.round(percent);
+        else delete details.splitRobuxPercent;
+        const { error } = await supabase.from('payment_methods').update({ details }).eq('roblox_user_id', session.roblox_user_id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        res.json({ ok: true, percentRobux: percent > 0 ? Math.round(percent) : 0 });
         return;
     }
 
