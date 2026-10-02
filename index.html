@@ -6369,7 +6369,8 @@
       const json = await callHrData('get_my_summary');
       return {
         requests: (json.data || []).map(rowToClient),
-        totals: json.totals || {}
+        totals: json.totals || {},
+        split: json.split || null
       };
     }
 
@@ -10622,6 +10623,7 @@
     function renderMyPayments() {
       const myGen = renderGen;
       let summary = null;
+      let summarySplit = null;
       let loading = true;
       let loadError = null;
 
@@ -10861,6 +10863,7 @@
               </div>`).join('')}
           </div>`}
           <div class="owed-sub">${pendingRequests.length} pending request${pendingRequests.length === 1 ? '' : 's'}, ${paidRequests.length} paid to date, ${devexLabel()}</div>
+          ${summarySplit ? `<div class="owed-sub">Split on: ${100 - summarySplit.percentRobux}% through ${esc(PAYMENT_METHODS[summarySplit.cashMethod] ? PAYMENT_METHODS[summarySplit.cashMethod].label : summarySplit.cashMethod)}, ${summarySplit.percentRobux}% in Robux. The figures above already follow your split.</div>` : ''}
         </div>
       `}
 
@@ -11092,6 +11095,7 @@
         loading = true; loadError = null; paint();
         try {
           summary = await getMySummary();
+          summarySplit = summary.split || null;
         } catch (err) {
           loadError = (err && err.message) ? err.message : 'Could not load your payment summary.';
         }

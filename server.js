@@ -1956,7 +1956,6 @@ async function runPaymentMethodConversionSweep(filter) {
         const methodByUserId = {};
         const methodByUsername = {};
         [].concat(byIdRes.data || [], byUsernameRes.data || []).forEach(m => {
-            if (Number((m.details || {}).splitRobuxPercent) > 0) return;
             if (m.roblox_user_id != null) methodByUserId[m.roblox_user_id] = m.method;
             if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m.method;
         });
@@ -3649,15 +3648,43 @@ async function handleHrData(req, res) {
         const data = [...(byId.data || []), ...(byUsername.data || [])]
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+        const { data: myMethod } = await supabase
+            .from('payment_methods')
+            .select('method, details')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .maybeSingle();
+        const splitPercent = Number(((myMethod || {}).details || {}).splitRobuxPercent) || 0;
+        const splitOn = splitPercent > 0 && myMethod && myMethod.method !== 'DEVEX_ROBUX';
+        const rate = splitOn ? await getDevexRate() : 0;
+
+        const addTo = (totals, cur, field, amount) => {
+            if (!totals[cur]) totals[cur] = { pending: 0, paid: 0 };
+            totals[cur][field] += amount;
+        };
+
         const totals = {};
         data.forEach(row => {
             const cur = row.currency || 'ROBUX';
-            if (!totals[cur]) totals[cur] = { pending: 0, paid: 0 };
-            if (row.paid) totals[cur].paid += Number(row.payment) || 0;
-            else if ((row.status || 'pending') === 'pending') totals[cur].pending += Number(row.payment) || 0;
+            const amount = Number(row.payment) || 0;
+            const field = row.paid ? 'paid' : (row.status || 'pending') === 'pending' ? 'pending' : null;
+            if (!field) return;
+            if (!splitOn || !(rate > 0)) { addTo(totals, cur, field, amount); return; }
+
+            const usdValue = cur === 'ROBUX' ? amount * rate : amount;
+            const robuxPortionUsd = usdValue * (splitPercent / 100);
+            const cashPortionUsd = usdValue - robuxPortionUsd;
+            const cashCurrency = cur === 'ROBUX' && myMethod.method === 'DEVEX_ROBUX' ? 'ROBUX' : 'USD';
+            if (cashCurrency === 'USD') addTo(totals, 'USD', field, Number(cashPortionUsd.toFixed(2)));
+            else addTo(totals, 'ROBUX', field, Math.round(cashPortionUsd / rate));
+            addTo(totals, 'ROBUX', field, Math.round(robuxPortionUsd / rate));
         });
 
-        res.json({ ok: true, data, totals });
+        res.json({
+            ok: true,
+            data,
+            totals,
+            split: splitOn ? { percentRobux: splitPercent, cashMethod: myMethod.method } : null
+        });
         return;
     }
 
@@ -3806,7 +3833,7 @@ async function handleHrData(req, res) {
             updated_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
-        if (!cleanDetails.splitRobuxPercent) await convertPendingForUser(session.roblox_user_id, session.roblox_username);
+        await convertPendingForUser(session.roblox_user_id, session.roblox_username);
         res.json({ ok: true, splitRobuxPercent: cleanDetails.splitRobuxPercent || 0 });
         return;
     }
