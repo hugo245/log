@@ -4939,6 +4939,12 @@
       white-space: nowrap;
     }
 
+    .convert-btn {
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+    }
+
     .claim-edit {
       display: flex;
       gap: 8px;
@@ -10997,7 +11003,7 @@
                   <td class="id-cell mono">${esc(r.id)}</td>
                   <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div>${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}</td>
                   <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
-                  <td class="pay-cell">${fmtAmount(r)}</td>
+                  <td class="pay-cell">${fmtAmount(r)}${r.status === 'pending' ? `<button type="button" class="pp-linkbtn convert-btn" data-convert="${esc(r.id)}" title="Swap this request to the other currency at the current DevEx rate">Convert to ${r.currency === 'USD' ? 'Robux' : 'USD'}</button>` : ''}</td>
                   <td><span class="status-chip ${r.status}">${r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending'}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
                   <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
                 </tr>`).join('')}
@@ -11010,6 +11016,25 @@
 
         wireTopbarSignOut();
         paintMethodFields();
+        document.querySelectorAll('[data-convert]').forEach(el => el.addEventListener('click', async () => {
+          const id = el.dataset.convert;
+          const r = (summary ? summary.requests : []).find(x => String(x.id) === String(id));
+          if (!r) return;
+          const to = r.currency === 'USD' ? 'Robux' : 'USD';
+          const estimate = r.currency === 'USD'
+            ? `about R$ ${Math.round(Number(r.payment) / (DEVEX_RATE || 0.0038)).toLocaleString()}`
+            : `about $${(Number(r.payment) * (DEVEX_RATE || 0.0038)).toFixed(2)}`;
+          if (!confirm(`Switch this request to ${to}? It becomes ${estimate} at today's DevEx rate, and it stays in ${to} from then on.`)) return;
+          el.disabled = true;
+          try {
+            const res = await callHrData('convert_my_request', { id });
+            toast(`Switched to ${res.currency === 'USD' ? '$' + Number(res.payment).toFixed(2) : 'R$ ' + Number(res.payment).toLocaleString()}.`);
+            await loadSummary();
+          } catch (e) {
+            el.disabled = false;
+            toast(e.code === 'already_decided' ? 'That request has already been decided.' : (e.message || 'Could not convert that.'), 'err');
+          }
+        }));
 
         const lockLinkBtn = document.getElementById('lockLinkDiscordBtn');
         if (lockLinkBtn) lockLinkBtn.addEventListener('click', () => setRejoinState('linking'));

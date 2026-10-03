@@ -1933,7 +1933,7 @@ async function runPaymentMethodConversionSweep(filter) {
     try {
         let query = supabase
             .from('payment_requests')
-            .select('id, roblox_user_id, roblox_username, payment, currency, status, paid')
+            .select('id, roblox_user_id, roblox_username, payment, currency, status, paid, currency_locked')
             .eq('paid', false);
         if (filter && filter.robloxUserId != null) {
             query = query.eq('roblox_user_id', filter.robloxUserId);
@@ -1943,7 +1943,7 @@ async function runPaymentMethodConversionSweep(filter) {
         const { data: rows, error } = await query;
         if (error || !rows || !rows.length) return;
 
-        const pendingRows = rows.filter(r => (r.status || 'pending') === 'pending');
+        const pendingRows = rows.filter(r => (r.status || 'pending') === 'pending' && !r.currency_locked);
         if (!pendingRows.length) return;
 
         const userIds = [...new Set(pendingRows.filter(r => r.roblox_user_id != null).map(r => r.roblox_user_id))];
@@ -3331,6 +3331,7 @@ async function handleHrData(req, res) {
             time_worked: payload.timeWorked ? String(payload.timeWorked).trim() : '',
             payment: amount,
             currency,
+            currency_locked: true,
             paid: false,
             status: 'proposed',
             created_at: new Date().toISOString()
@@ -3631,6 +3632,40 @@ async function handleHrData(req, res) {
             revert: existing ? { type: 'restore_payment_request', row: existing } : null
         });
         res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'convert_my_request') {
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: row } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
+        if (!row) { res.status(404).json({ ok: false, error: 'not_found' }); return; }
+        const mine = String(row.roblox_user_id || '') === String(session.roblox_user_id)
+            || (row.roblox_user_id == null && row.roblox_username && row.roblox_username.toLowerCase() === String(session.roblox_username || '').toLowerCase());
+        if (!mine) { res.status(403).json({ ok: false, error: 'not_your_request' }); return; }
+        if (row.paid || (row.status || 'pending') !== 'pending') { res.status(400).json({ ok: false, error: 'already_decided' }); return; }
+
+        const rate = await getDevexRate();
+        if (!(rate > 0)) { res.status(400).json({ ok: false, error: 'no_devex_rate' }); return; }
+
+        const from = row.currency === 'USD' ? 'USD' : 'ROBUX';
+        const to = from === 'USD' ? 'ROBUX' : 'USD';
+        const amount = to === 'USD'
+            ? Math.round((Number(row.payment) || 0) * rate * 100) / 100
+            : Math.round((Number(row.payment) || 0) / rate);
+        if (!(amount > 0)) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+
+        const { error } = await supabase.from('payment_requests')
+            .update({ payment: amount, currency: to, currency_locked: true })
+            .eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+
+        await logAudit(session, {
+            category: 'payments', action: 'convert_currency',
+            targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
+            details: { id, from, to, fromAmount: row.payment, toAmount: amount }
+        });
+        res.json({ ok: true, currency: to, payment: amount });
         return;
     }
 
