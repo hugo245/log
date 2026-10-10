@@ -5478,40 +5478,6 @@
       Everything: null
     };
 
-    function groupPermissions(list) {
-      const seen = new Set();
-      const groups = PERMISSION_GROUPS.map(g => {
-        const items = list.filter(p => !seen.has(p) && g.match(p));
-        items.forEach(p => seen.add(p));
-        return { ...g, items };
-      }).filter(g => g.items.length);
-      const rest = list.filter(p => !seen.has(p));
-      if (rest.length) groups.push({ id: 'other', label: 'Other', hint: '', items: rest });
-      return groups;
-    }
-
-    function permissionPickerHtml(cls, chosen, roleId) {
-      const has = (p) => (chosen || []).includes(p);
-      return `
-        <div class="perm-presets">
-          <span class="hint">Quick set:</span>
-          ${Object.keys(PERMISSION_PRESETS).map(name => `<button type="button" class="chip-filter" data-perm-preset="${esc(name)}" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">${esc(name)}</button>`).join('')}
-          <button type="button" class="chip-filter" data-perm-preset="None" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">Clear</button>
-        </div>
-        ${groupPermissions(ALL_PERMISSIONS).map(g => `
-          <div class="perm-group">
-            <div class="perm-group-head">
-              <strong>${esc(g.label)}</strong>
-              ${g.hint ? `<span class="hint">${esc(g.hint)}</span>` : ''}
-              <button type="button" class="pp-linkbtn" data-perm-group="${esc(g.id)}" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">${g.items.every(has) ? 'None' : 'All'}</button>
-            </div>
-            <div class="perm-check-grid">
-              ${g.items.map(p => `
-                <label class="perm-check-item" title="${esc(p)}"><input type="checkbox" class="${esc(cls)}" ${roleId ? `data-role-id="${esc(roleId)}"` : ''} data-perm-group-id="${esc(g.id)}" value="${p}" ${has(p) ? 'checked' : ''}> ${esc(PERMISSION_LABELS[p] || p)}</label>`).join('')}
-            </div>
-          </div>`).join('')}`;
-    }
-
     const PERMISSION_LABELS = {
       'dashboard.view': 'View dashboard',
       'dashboard.mark_paid': 'Mark requests paid',
@@ -5535,10 +5501,47 @@
       'recruitment.signoff': 'Sign off recruitment placements as ready',
       'recruitment.finalise': 'Finalise recruitment placements (grant roles/access)',
       'recruitment.analytics': 'View recruitment analytics',
+      'payouts.view_bank_details': 'View full bank transfer details (name, address, SWIFT and IBAN)',
       'teams.view': 'View teams, their games and deadlines',
       'teams.manage': 'Assign games to teams and manage team deadlines'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
+
+    function groupPermissions(list) {
+      const seen = new Set();
+      const groups = PERMISSION_GROUPS.map(g => {
+        const items = list.filter(p => !seen.has(p) && g.match(p));
+        items.forEach(p => seen.add(p));
+        return { ...g, items };
+      }).filter(g => g.items.length);
+      const rest = list.filter(p => !seen.has(p));
+      if (rest.length) groups.push({ id: 'other', label: 'Other', hint: '', items: rest });
+      return groups;
+    }
+
+    function permissionPickerHtml(cls, chosen, roleId) {
+      const has = (p) => (chosen || []).includes(p);
+      const known = ALL_PERMISSIONS.concat((chosen || []).filter(p => p && !ALL_PERMISSIONS.includes(p)));
+      return `
+        <div class="perm-presets">
+          <span class="hint">Quick set:</span>
+          ${Object.keys(PERMISSION_PRESETS).map(name => `<button type="button" class="chip-filter" data-perm-preset="${esc(name)}" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">${esc(name)}</button>`).join('')}
+          <button type="button" class="chip-filter" data-perm-preset="None" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">Clear</button>
+        </div>
+        ${groupPermissions(known).map(g => `
+          <div class="perm-group">
+            <div class="perm-group-head">
+              <strong>${esc(g.label)}</strong>
+              ${g.hint ? `<span class="hint">${esc(g.hint)}</span>` : ''}
+              <button type="button" class="pp-linkbtn" data-perm-group="${esc(g.id)}" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">${g.items.every(has) ? 'None' : 'All'}</button>
+            </div>
+            <div class="perm-check-grid">
+              ${g.items.map(p => `
+                <label class="perm-check-item" title="${esc(p)}"><input type="checkbox" class="${esc(cls)}" ${roleId ? `data-role-id="${esc(roleId)}"` : ''} data-perm-group-id="${esc(g.id)}" value="${p}" ${has(p) ? 'checked' : ''}> ${esc(PERMISSION_LABELS[p] || p)}</label>`).join('')}
+            </div>
+          </div>`).join('')}`;
+    }
+
 
     const ONBOARDING_TYPE_LABELS = {
       intro: 'Getting started',
@@ -5922,9 +5925,15 @@
         const who = (pm.details || {}).fullName;
         return pm.detailsHidden || !who ? `${def.label} (details hidden)` : `${def.label}: ${who}`;
       }
+      if (!def.fields || !def.fields.length) return def.label;
       const key = def.fields[0].key;
       const val = (pm.details || {})[key] || '';
       return `${def.label}: ${val}`;
+    }
+
+    function methodHiddenTitle(pm) {
+      if (!pm || !pm.detailsHidden) return '';
+      return ' title="Bank details are only shown to roles with the &quot;View full bank transfer details&quot; permission. A role manager can turn that on in Settings, Roles."';
     }
 
     async function loadGames() {
@@ -6124,6 +6133,17 @@
       invalid_place_id: "That doesn't look like a Roblox place ID or game link.",
       roblox_game_not_found: "Roblox doesn't have a game with that place ID.",
       team_removed: 'Your team was removed, so this is on hold until a lead places you on another one.',
+      claim_not_found: 'That request is no longer waiting for a decision. The list has been refreshed.',
+      claim_withdrawn: 'That request is gone. The person who sent it withdrew it, so there is nothing to decide.',
+      claim_already_approved: 'That request was already approved by someone else. It is now in the pending list.',
+      claim_already_paid: 'That request has already been paid out, so it cannot be changed here.',
+      too_many_open_claims: 'You already have 10 requests waiting for a decision. Wait for those before sending another.',
+      already_decided: 'That request has already been decided, so it cannot be changed any more.',
+      not_your_request: 'That request belongs to someone else.',
+      no_devex_rate: 'No DevEx rate is set yet, so amounts cannot be converted. Ask an admin to set one in Settings.',
+      lookup_failed: 'Could not read that request from the database. Try again in a moment.',
+      update_failed: 'The change did not save. Try again, and tell an admin if it keeps happening.',
+      missing_id: 'Nothing was selected, so there is nothing to change.',
       unknown_action: 'The server did not recognise that action. Refresh the page to load the latest version.'
     };
     function friendlyError(code) {
@@ -6704,6 +6724,57 @@
       root.appendChild(el);
       while (root.children.length > 2) root.firstChild.remove();
       setTimeout(() => el.remove(), kind === 'err' ? 6000 : 3500);
+    }
+
+    function askForText(opts) {
+      const o = opts || {};
+      return new Promise(resolve => {
+        const scrim = document.createElement('div');
+        scrim.className = 'modal-scrim';
+        scrim.innerHTML = `
+      <div class="modal-card" style="max-width:460px;">
+        <div class="modal-body" style="padding:24px;">
+          <h3 style="margin:0 0 6px;">${esc(o.title || 'Add a note')}</h3>
+          ${o.hint ? `<p class="hint" style="margin:0 0 14px;">${esc(o.hint)}</p>` : ''}
+          <textarea id="askForTextInput" rows="4" placeholder="${esc(o.placeholder || '')}" style="width:100%;resize:vertical;"></textarea>
+          <div id="askForTextError" class="hint" style="color:var(--danger);margin-top:6px;display:none;"></div>
+          <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+            <button type="button" class="btn btn-ghost" id="askForTextCancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="askForTextOk">${esc(o.confirmLabel || 'Save')}</button>
+          </div>
+        </div>
+      </div>`;
+        document.body.appendChild(scrim);
+        const input = scrim.querySelector('#askForTextInput');
+        const errBox = scrim.querySelector('#askForTextError');
+        let settled = false;
+        const close = value => {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', onKey);
+          scrim.remove();
+          resolve(value);
+        };
+        const submit = () => {
+          const value = input.value.trim();
+          if (o.required && !value) {
+            errBox.textContent = o.requiredMessage || 'Please write something first.';
+            errBox.style.display = 'block';
+            input.focus();
+            return;
+          }
+          close(value);
+        };
+        function onKey(e) {
+          if (e.key === 'Escape') close(null);
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit();
+        }
+        scrim.querySelector('#askForTextOk').addEventListener('click', submit);
+        scrim.querySelector('#askForTextCancel').addEventListener('click', () => close(null));
+        scrim.addEventListener('click', e => { if (e.target === scrim) close(null); });
+        document.addEventListener('keydown', onKey);
+        setTimeout(() => input.focus(), 30);
+      });
     }
 
     const avatarCache = new Map();
@@ -9347,6 +9418,7 @@
       let missingOnly = false;
       let claims = [];
       let claimsLoading = false;
+      const claimsBusy = new Set();
       let roleFilter = 'all';
       let teamFilter = 'all';
       let skillsetFilter = 'all';
@@ -9404,7 +9476,7 @@
         const rowHtml = `
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.split ? `<div class="method-note has-method">Split: $${Number(r.split.cashUsd).toFixed(2)} + R$ ${Number(r.split.robux).toLocaleString()}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(r.paymentMethod))}${r.paymentMethod.method === 'BANK_TRANSFER' && !r.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(r.id)}">Payment details</button>` : ''}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.split ? `<div class="method-note has-method">Split: $${Number(r.split.cashUsd).toFixed(2)} + R$ ${Number(r.split.robux).toLocaleString()}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(r.paymentMethod)}>${esc(methodDisplayLabel(r.paymentMethod))}${r.paymentMethod.method === 'BANK_TRANSFER' && !r.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(r.id)}">Payment details</button>` : ''}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell">
                 <div class="task-name">${esc(r.taskName || 'Untitled task')}</div>
                 ${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
@@ -9516,8 +9588,10 @@
           const id = b.dataset.paid;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
-          e.currentTarget.disabled = true;
-          e.currentTarget.textContent = 'Saving...';
+          const before = { status: r.status, paid: r.paid, paidAt: r.paidAt };
+          const btn = b;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
           try {
             r.paid = true;
             r.status = 'paid';
@@ -9526,9 +9600,12 @@
             updateStatsAndTabs();
             paintTable();
           } catch (err) {
-            e.currentTarget.disabled = false;
-            e.currentTarget.textContent = 'Mark paid';
-            alert('Could not save. Check your connection and try again.');
+            r.status = before.status;
+            r.paid = before.paid;
+            r.paidAt = before.paidAt;
+            btn.disabled = false;
+            btn.textContent = 'Mark paid';
+            toast(err.message || 'Could not save. Check your connection and try again.', 'err');
           }
         }));
 
@@ -9538,9 +9615,17 @@
           const id = b.dataset.reject;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
-          const note = prompt('Reason for rejecting this request (optional):', '') || '';
-          e.currentTarget.disabled = true;
-          e.currentTarget.textContent = 'Saving...';
+          const note = await askForText({
+            title: 'Reject this request',
+            hint: 'The person who was going to be paid sees this reason.',
+            placeholder: 'For example: this work was already covered by another payment.',
+            confirmLabel: 'Reject it'
+          });
+          if (note === null) return;
+          const before = { status: r.status, statusNote: r.statusNote, paid: r.paid, paidAt: r.paidAt };
+          const btn = b;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
           try {
             r.status = 'rejected';
             r.statusNote = note;
@@ -9550,9 +9635,13 @@
             updateStatsAndTabs();
             paintTable();
           } catch (err) {
-            e.currentTarget.disabled = false;
-            e.currentTarget.textContent = 'Reject';
-            alert('Could not save. Check your connection and try again.');
+            r.status = before.status;
+            r.statusNote = before.statusNote;
+            r.paid = before.paid;
+            r.paidAt = before.paidAt;
+            btn.disabled = false;
+            btn.textContent = 'Reject';
+            toast(err.message || 'Could not save. Check your connection and try again.', 'err');
           }
         }));
 
@@ -9562,8 +9651,10 @@
           const id = b.dataset.reopen;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
-          e.currentTarget.disabled = true;
-          e.currentTarget.textContent = 'Saving...';
+          const before = { status: r.status, statusNote: r.statusNote, paid: r.paid, paidAt: r.paidAt };
+          const btn = b;
+          btn.disabled = true;
+          btn.textContent = 'Saving...';
           try {
             r.status = 'pending';
             r.statusNote = '';
@@ -9573,9 +9664,13 @@
             updateStatsAndTabs();
             paintTable();
           } catch (err) {
-            e.currentTarget.disabled = false;
-            e.currentTarget.textContent = 'Reopen';
-            alert('Could not save. Check your connection and try again.');
+            r.status = before.status;
+            r.statusNote = before.statusNote;
+            r.paid = before.paid;
+            r.paidAt = before.paidAt;
+            btn.disabled = false;
+            btn.textContent = 'Reopen';
+            toast(err.message || 'Could not save. Check your connection and try again.', 'err');
           }
         }));
 
@@ -9586,17 +9681,18 @@
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
           if (!confirm('Permanently delete this payment request? This cannot be undone.')) return;
-          e.currentTarget.disabled = true;
-          e.currentTarget.textContent = 'Deleting...';
+          const btn = b;
+          btn.disabled = true;
+          btn.textContent = 'Deleting...';
           try {
             await deleteRequest(id);
             allRequests = allRequests.filter(x => x.id !== id);
             updateStatsAndTabs();
             paintTable();
           } catch (err) {
-            e.currentTarget.disabled = false;
-            e.currentTarget.textContent = 'Delete Request';
-            alert('Could not delete that request. Check your connection and try again.');
+            btn.disabled = false;
+            btn.textContent = 'Delete Request';
+            toast(err.message || 'Could not delete that request. Check your connection and try again.', 'err');
           }
         }));
       }
@@ -9767,24 +9863,49 @@
         document.querySelectorAll('[data-claim-decide]').forEach(el => el.addEventListener('click', async () => {
           const id = el.dataset.claimDecide;
           const decision = el.dataset.decision;
+          if (!id || claimsBusy.has(id)) return;
           const amountField = document.getElementById('claimAmt_' + id);
           const curField = document.getElementById('claimCur_' + id);
           const payment = amountField ? amountField.value : null;
           const currency = curField ? curField.value : null;
           let note = null;
           if (decision === 'reject') {
-            note = prompt('Why are you turning this down? They see this.');
+            note = await askForText({
+              title: 'Turn down this request',
+              hint: 'The person who sent it sees this reason, so keep it clear and kind.',
+              placeholder: 'For example: this was already paid under last week\'s task.',
+              confirmLabel: 'Turn it down',
+              required: true,
+              requiredMessage: 'Write a short reason so they know what to fix.'
+            });
             if (note === null) return;
           }
-          el.disabled = true;
+          claimsBusy.add(id);
+          const siblings = Array.from(document.querySelectorAll('[data-claim-decide]')).filter(b => b.dataset.claimDecide === id);
+          const originalLabel = el.textContent;
+          siblings.forEach(b => { b.disabled = true; });
+          el.textContent = decision === 'approve' ? 'Approving...' : 'Turning down...';
+          const drop = () => { claims = claims.filter(c => String(c.id) !== String(id)); };
           try {
             const r = await callHrData('decide_claim', { id, decision, payment, currency, note });
+            drop();
             toast(decision === 'approve' ? (r.changed ? 'Approved at the amount you set' : 'Approved') : 'Turned down');
+            claimsBusy.delete(id);
             await loadClaims();
             await load(true);
           } catch (e) {
-            el.disabled = false;
+            claimsBusy.delete(id);
+            const stale = e.code === 'claim_withdrawn' || e.code === 'claim_not_found'
+              || e.code === 'claim_already_approved' || e.code === 'claim_already_paid';
             toast(e.message || 'That did not go through.', 'err');
+            if (stale) {
+              drop();
+              await loadClaims();
+              await load(true);
+            } else {
+              siblings.forEach(b => { b.disabled = false; });
+              el.textContent = originalLabel;
+            }
           }
         }));
         document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
@@ -10387,7 +10508,7 @@
           <table class="an-table">
             <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th>${canMarkPaid ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<div class="method-note has-method">${esc(methodDisplayLabel(o.paymentMethod))}${o.paymentMethod.method === 'BANK_TRANSFER' && !o.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(o.sampleRequestId)}">Payment details</button>` : ''}</div>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
+              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(o.paymentMethod)}>${esc(methodDisplayLabel(o.paymentMethod))}${o.paymentMethod.method === 'BANK_TRANSFER' && !o.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(o.sampleRequestId)}">Payment details</button>` : ''}</div>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -10911,14 +11032,15 @@
               <label>How would you like to be paid?</label>
               ${Object.keys(PAYMENT_METHODS).map(key => {
           const isUsdMethod = key === 'PAYPAL' || key === 'VENMO' || key === 'BANK_TRANSFER';
-          const blocked = isUsdMethod && usdEligibility && !usdEligibility.eligible;
+          const blocked = isUsdMethod && usdEligibility && usdEligibility.eligible === false;
+          const stillNeeded = blocked ? Number(usdEligibility.amountNeeded || 0) : 0;
           return `
                 <label class="method-option ${selectedMethod === key ? 'active' : ''}" style="${blocked ? 'opacity:0.5;cursor:not-allowed;' : ''}">
                   <input type="radio" name="methodChoice" value="${key}" ${selectedMethod === key ? 'checked' : ''} ${blocked ? 'disabled' : ''}>
                   <div>
                     <div class="mo-label">${esc(PAYMENT_METHODS[key].label)}</div>
                     <div class="mo-sub">${esc(PAYMENT_METHODS[key].sub)}</div>
-                    ${blocked ? `<div class="mo-sub" style="color:var(--warn-text);margin-top:4px;">You need $${usdEligibility.amountNeeded.toFixed(2)} more in pending requests to select this.</div>` : ''}
+                    ${blocked ? `<div class="mo-sub" style="color:var(--warn-text);margin-top:4px;">You need $${stillNeeded.toFixed(2)} more in pending requests to select this.</div>` : ''}
                   </div>
                 </label>`;
         }).join('')}

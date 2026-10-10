@@ -3384,25 +3384,67 @@ async function handleHrData(req, res) {
 
     if (action === 'decide_claim') {
         if (!requirePermission(res, session, 'dashboard.submit_request')) return;
-        const id = payload.id;
+        const id = payload.id != null ? String(payload.id).trim() : '';
         const decision = payload.decision === 'approve' ? 'approve' : payload.decision === 'reject' ? 'reject' : null;
         if (!id || !decision) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
-        const { data: row } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
-        if (!row || row.status !== 'proposed') { res.status(404).json({ ok: false, error: 'claim_not_found' }); return; }
+
+        const { data: found, error: lookupError } = await supabase
+            .from('payment_requests')
+            .select('*')
+            .eq('id', id)
+            .limit(1);
+        if (lookupError) {
+            console.error('[decide_claim] could not read request', id, ':', lookupError.message);
+            res.status(500).json({ ok: false, error: 'lookup_failed' });
+            return;
+        }
+        const row = (found || [])[0] || null;
+        if (!row) {
+            console.warn('[decide_claim] no request with id', id);
+            res.status(404).json({ ok: false, error: 'claim_withdrawn' });
+            return;
+        }
+
+        const claimStatus = row.status ? String(row.status).trim().toLowerCase() : 'proposed';
+        if (row.paid === true || claimStatus === 'paid') {
+            res.status(409).json({ ok: false, error: 'claim_already_paid' });
+            return;
+        }
 
         if (decision === 'reject') {
+            if (claimStatus === 'rejected') { res.json({ ok: true, already: true }); return; }
             const note = payload.note ? String(payload.note).trim() : '';
-            await supabase.from('payment_requests')
-                .update({ status: 'rejected', status_note: note || null })
-                .eq('id', id);
+            const { data: rejected, error: rejectError } = await supabase.from('payment_requests')
+                .update({ status: 'rejected', status_note: note || null, paid: false, paid_at: null })
+                .eq('id', id)
+                .select('id');
+            if (rejectError) {
+                console.error('[decide_claim] could not turn down', id, ':', rejectError.message);
+                res.status(500).json({ ok: false, error: 'update_failed' });
+                return;
+            }
+            if (!rejected || !rejected.length) {
+                console.error('[decide_claim] turn down matched no rows for', id);
+                res.status(500).json({ ok: false, error: 'update_failed' });
+                return;
+            }
             await logAudit(session, {
                 category: 'payments', action: 'reject_claim',
                 targetUserId: row.roblox_user_id, targetUsername: row.roblox_username,
-                details: { id, note, payment: row.payment, currency: row.currency }
+                details: { id, note, payment: row.payment, currency: row.currency, fromStatus: claimStatus }
             });
-            await notifyModeratedUser(row.roblox_user_id,
-                `Your payment request for "${row.task_name}" was turned down.${note ? `\nReason: ${note}` : ''}`);
+            try {
+                await notifyModeratedUser(row.roblox_user_id,
+                    `Your payment request for "${row.task_name}" was turned down.${note ? `\nReason: ${note}` : ''}`);
+            } catch (e) {
+                console.error('[decide_claim] could not send the turn down notice:', e.message);
+            }
             res.json({ ok: true });
+            return;
+        }
+
+        if (claimStatus !== 'proposed' && claimStatus !== 'rejected') {
+            res.status(409).json({ ok: false, error: 'claim_already_approved' });
             return;
         }
 
@@ -3411,15 +3453,24 @@ async function handleHrData(req, res) {
         if (!Number.isFinite(newAmount) || newAmount <= 0) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
         const changed = Number(newAmount) !== Number(row.payment) || newCurrency !== row.currency;
 
-        const { error } = await supabase.from('payment_requests').update({
+        const { data: approved, error } = await supabase.from('payment_requests').update({
             status: 'pending',
             payment: newAmount,
             currency: newCurrency,
             requested_by: session.roblox_username,
             requested_by_user_id: session.roblox_user_id,
             status_note: payload.note ? String(payload.note).trim() : null
-        }).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        }).eq('id', id).select('id');
+        if (error) {
+            console.error('[decide_claim] could not approve', id, ':', error.message);
+            res.status(500).json({ ok: false, error: 'update_failed' });
+            return;
+        }
+        if (!approved || !approved.length) {
+            console.error('[decide_claim] approve matched no rows for', id);
+            res.status(500).json({ ok: false, error: 'update_failed' });
+            return;
+        }
 
         await logAudit(session, {
             category: 'payments', action: 'approve_claim',
@@ -3433,9 +3484,13 @@ async function handleHrData(req, res) {
         });
         const amountText = newCurrency === 'ROBUX' ? `R$ ${Number(newAmount).toLocaleString()}` : `$${Number(newAmount).toFixed(2)}`;
         const askedText = row.currency === 'ROBUX' ? `R$ ${Number(row.payment).toLocaleString()}` : `$${Number(row.payment).toFixed(2)}`;
-        await notifyModeratedUser(row.roblox_user_id, changed
-            ? `Your payment request for "${row.task_name}" was approved at ${amountText} (you asked for ${askedText}). It's now waiting to be paid out.${payload.note ? `\n${String(payload.note).trim()}` : ''}`
-            : `Your payment request for "${row.task_name}" (${amountText}) was approved and is waiting to be paid out.`);
+        try {
+            await notifyModeratedUser(row.roblox_user_id, changed
+                ? `Your payment request for "${row.task_name}" was approved at ${amountText} (you asked for ${askedText}). It's now waiting to be paid out.${payload.note ? `\n${String(payload.note).trim()}` : ''}`
+                : `Your payment request for "${row.task_name}" (${amountText}) was approved and is waiting to be paid out.`);
+        } catch (e) {
+            console.error('[decide_claim] could not send the approval notice:', e.message);
+        }
         runPaymentMethodConversionSweep({ robloxUserId: row.roblox_user_id });
         res.json({ ok: true, changed });
         return;
