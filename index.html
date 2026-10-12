@@ -995,6 +995,267 @@
       color: var(--ink-soft);
     }
 
+    .home-shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 24px 80px;
+    }
+
+    .home-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 22px;
+    }
+
+    .home-head h1 {
+      margin: 0 0 4px;
+      font-size: 26px;
+      letter-spacing: -.02em;
+    }
+
+    .home-role {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft, rgba(55, 48, 217, .09));
+      border-radius: 999px;
+      padding: 4px 11px;
+      margin-left: 8px;
+      vertical-align: 3px;
+    }
+
+    .home-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+
+    .home-stat {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 15px 16px;
+    }
+
+    .home-stat .k {
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin-bottom: 6px;
+    }
+
+    .home-stat .v {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      line-height: 1.1;
+    }
+
+    .home-stat .s {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .home-stat.flag {
+      border-color: var(--warn-line);
+      background: var(--warn-bg);
+    }
+
+    .home-stat.flag .v {
+      color: var(--warn-text);
+    }
+
+    .home-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .home-grid.single {
+      grid-template-columns: 1fr;
+    }
+
+    .home-card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    .home-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .home-card-head h2 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .home-card-head .count {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .home-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .home-row:last-child {
+      border-bottom: 0;
+    }
+
+    .home-row-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .home-row-title {
+      font-weight: 600;
+      font-size: 13.5px;
+      margin-bottom: 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .home-row-title a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .home-row-title a:hover {
+      text-decoration: underline;
+    }
+
+    .home-row-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .home-row-meta .late {
+      color: var(--danger-text, #c0392b);
+      font-weight: 600;
+    }
+
+    .home-row-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .home-empty {
+      padding: 26px 16px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .home-games {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+      padding: 14px 16px;
+    }
+
+    .home-game {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 13px;
+    }
+
+    .home-game-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .home-game-top img {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .home-game-name {
+      font-weight: 600;
+      font-size: 13.5px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .home-meter {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--line);
+      overflow: hidden;
+      margin: 8px 0 6px;
+    }
+
+    .home-meter span {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .home-meter span.over {
+      background: var(--danger, #e05c4b);
+    }
+
+    .home-note {
+      padding: 12px 16px;
+      font-size: 12.5px;
+      color: var(--ink-soft);
+      border-bottom: 1px solid var(--line);
+      background: var(--row-alt);
+    }
+
+    @media (max-width: 900px) {
+      .home-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .home-shell {
+        padding: 20px 14px 70px;
+      }
+
+      .home-row {
+        flex-wrap: wrap;
+      }
+
+      .home-row-actions {
+        width: 100%;
+      }
+
+      .home-row-actions .btn {
+        flex: 1;
+      }
+    }
+
     .indev-shell {
       position: fixed;
       inset: 0;
@@ -4982,18 +5243,18 @@
         display: none;
       }
 
-      .manage-side > button {
+      .manage-side>button {
         white-space: nowrap;
         border: 1px solid var(--line) !important;
         border-radius: 999px !important;
         padding: 8px 14px !important;
       }
 
-      .manage-side > div {
+      .manage-side>div {
         display: none !important;
       }
 
-      .manage-layout > div:last-child {
+      .manage-layout>div:last-child {
         width: 100%;
         min-width: 0;
       }
@@ -8179,6 +8440,12 @@
         if (isHrAuthed) renderPolicyPage('aup'); else renderHrGate();
       } else if (path === '#/team-removed') {
         if (isHrAuthed) renderTeamRemovedPage(); else renderHrGate();
+      } else if (path === '#/home') {
+        if (isHrAuthed) renderHome(); else renderHrGate();
+      } else if (path === '#/runs') {
+        if (isHrAuthed && hasPermission('dashboard.view')) renderPaymentRuns();
+        else if (isHrAuthed) window.location.hash = '#/home';
+        else renderHrGate();
       } else if (path === '#/hr' || path === '#/dashboard') {
         if (isHrAuthed) renderDashboard(); else renderHrGate();
       } else if (path === '#/manage') {
@@ -8215,7 +8482,7 @@
         else renderHrGate();
       } else {
         if (isHrAuthed) {
-          renderMyPayments();
+          renderHome();
         } else {
           renderHrGate();
         }
@@ -8311,11 +8578,12 @@
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
              </details>`
-            : `${pill('#/my', 'My payments', ['#/my', '#/', ''])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${pill('#/request', 'Request payment')}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeTeams() ? pill('#/teams', 'Teams', ['#/teams']) : ''}${(() => {
+            : `${pill('#/home', 'Home', ['#/home', '#/', ''])}${pill('#/my', 'My payments', ['#/my'])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${pill('#/request', 'Request payment')}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeTeams() ? pill('#/teams', 'Teams', ['#/teams']) : ''}${(() => {
               const more = [
                 canSeeStaff ? { href: '#/staff', label: 'Staff', paths: ['#/staff'] } : null,
                 canSeeRecruitment ? { href: '#/recruitment', label: 'Recruitment', paths: ['#/recruitment', '#/recruitment-analytics'] } : null,
                 canSeeAnalytics() ? { href: '#/analytics', label: 'Analytics', paths: ['#/analytics'] } : null,
+                canSeeDashboard ? { href: '#/runs', label: 'Payment runs', paths: ['#/runs'] } : null,
                 hasPermission('audit.view') ? { href: '#/audit', label: 'Audit logs', paths: ['#/audit'] } : null,
                 canSeeManage() ? { href: '#/manage', label: 'Manage', paths: ['#/manage'] } : null
               ].filter(Boolean);
@@ -9600,6 +9868,560 @@
       }
     }
 
+    function moneyUsd(n) {
+      return '$' + (Number(n) || 0).toFixed(2);
+    }
+
+    function moneyRobux(n) {
+      return 'R$ ' + Math.round(Number(n) || 0).toLocaleString();
+    }
+
+    function homeDue(dueAt) {
+      if (!dueAt) return 'No due date';
+      const diff = new Date(dueAt).getTime() - Date.now();
+      const days = Math.round(diff / 86400000);
+      if (diff < 0) return `<span class="late">${days === 0 ? 'Due today' : Math.abs(days) + (Math.abs(days) === 1 ? ' day late' : ' days late')}</span>`;
+      if (days === 0) return 'Due today';
+      if (days === 1) return 'Due tomorrow';
+      return 'Due in ' + days + ' days';
+    }
+
+    function homeTaskMoney(t) {
+      if (!t.payment) return '';
+      return t.currency === 'USD' ? moneyUsd(t.payment) : moneyRobux(t.payment);
+    }
+
+    function statCard(label, value, sub, flag) {
+      return `<div class="home-stat${flag ? ' flag' : ''}"><div class="k">${esc(label)}</div><div class="v">${value}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+    }
+
+    function renderHome() {
+      const myGen = renderGen;
+      let data = null;
+      let loading = true;
+      let loadError = null;
+      const busy = new Set();
+
+      function taskRow(t, actions) {
+        return `
+          <div class="home-row">
+            <div class="home-row-main">
+              <div class="home-row-title"><a href="#/task/${esc(t.id)}">${esc(t.title)}</a></div>
+              <div class="home-row-meta">
+                <span>${t.submittedAt ? 'Submitted ' + esc(relTime(t.submittedAt)) : homeDue(t.dueAt)}</span>
+                ${t.assignedTo ? `<span>${esc(t.assignedTo)}</span>` : ''}
+                ${homeTaskMoney(t) ? `<span>${esc(homeTaskMoney(t))}</span>` : ''}
+                ${t.status === 'review' && !t.submittedAt ? '<span>With your producer</span>' : ''}
+              </div>
+            </div>
+            <div class="home-row-actions">${actions || ''}</div>
+          </div>`;
+      }
+
+      function developerView() {
+        const open = data.myTasks.filter(t => t.status !== 'review');
+        const inReview = data.myTasks.filter(t => t.status === 'review');
+        const sentBack = open.filter(t => t.reviewNote);
+        return `
+      ${data.owed.hasMethod ? '' : `<div class="home-stat flag" style="margin-bottom:12px;"><div class="k">Before you can be paid</div><div class="v" style="font-size:15px;">Add a payout method</div><div class="s"><a href="#/my">Open My payments</a> and save how you want to be paid.</div></div>`}
+      <div class="home-stats">
+        ${statCard('Owed to you', data.owed.usd > 0 || data.owed.robux <= 0 ? moneyUsd(data.owed.usd) : moneyRobux(data.owed.robux), data.owed.usd > 0 && data.owed.robux > 0 ? 'plus ' + moneyRobux(data.owed.robux) : (data.openRun ? 'Next run: ' + esc(data.openRun.label) : 'No run open yet'))}
+        ${statCard('Open tasks', open.length, open.length ? 'Oldest first below' : 'Nothing assigned')}
+        ${statCard('Waiting on review', inReview.length, inReview.length ? 'Your producer has these' : 'Nothing submitted')}
+        ${statCard('Requests pending', data.owed.awaitingDecision, data.owed.awaitingDecision ? 'Not decided yet' : 'All decided')}
+      </div>
+      <div class="home-grid">
+        <div class="home-card">
+          <div class="home-card-head"><h2>Your work</h2><span class="count">${open.length} open</span></div>
+          ${sentBack.length ? `<div class="home-note">${sentBack.length === 1 ? 'One task came back' : sentBack.length + ' tasks came back'} with notes. Open it to see what to change.</div>` : ''}
+          ${open.length ? open.map(t => taskRow(t, `<button type="button" class="btn btn-ok btn-sm" data-home-submit="${esc(t.id)}">Mark done</button>`)).join('') : '<div class="home-empty">Nothing assigned to you right now.</div>'}
+        </div>
+        <div class="home-card">
+          <div class="home-card-head"><h2>With your producer</h2><span class="count">${inReview.length}</span></div>
+          ${inReview.length ? inReview.map(t => taskRow(t, '')).join('') : '<div class="home-empty">Nothing waiting on review.</div>'}
+          ${data.producer ? `<div class="home-row"><div class="home-row-main"><div class="home-row-title">Your producer</div><div class="home-row-meta"><span>${userLink(data.producer.robloxUserId, data.producer.robloxUsername)}</span></div></div></div>` : ''}
+        </div>
+      </div>`;
+      }
+
+      function producerView() {
+        const games = data.games || [];
+        return `
+      <div class="home-stats">
+        ${statCard('Waiting on you', data.reviewQueue.length, data.reviewQueue.length ? 'Review these first' : 'Nothing to review', data.reviewQueue.length > 0)}
+        ${statCard('Overdue', data.overdue.length, data.overdue.length ? 'Across your teams' : 'Nothing late', data.overdue.length > 0)}
+        ${statCard('Nobody assigned', data.idleMembers.length, data.idleMembers.length ? 'People with no open task' : 'Everyone has work')}
+        ${statCard('Your games', games.length, data.openRun ? 'Run: ' + esc(data.openRun.label) : 'No run open')}
+      </div>
+      <div class="home-grid">
+        <div class="home-card">
+          <div class="home-card-head"><h2>Waiting on your review</h2><span class="count">${data.reviewQueue.length}</span></div>
+          ${data.reviewQueue.length ? data.reviewQueue.map(t => taskRow(t, `<button type="button" class="btn btn-ok btn-sm" data-home-approve="${esc(t.id)}">Approve</button><button type="button" class="btn btn-ghost btn-sm" data-home-sendback="${esc(t.id)}">Send back</button>`)).join('') : '<div class="home-empty">Nothing is waiting on you.</div>'}
+        </div>
+        <div class="home-card">
+          <div class="home-card-head"><h2>Running late</h2><span class="count">${data.overdue.length}</span></div>
+          ${data.overdue.length ? data.overdue.slice(0, 8).map(t => taskRow(t, '')).join('') : '<div class="home-empty">Nothing is overdue.</div>'}
+        </div>
+      </div>
+      <div class="home-grid single" style="margin-top:16px;">
+        <div class="home-card">
+          <div class="home-card-head"><h2>Your games</h2><span class="count">${games.length}</span></div>
+          ${games.length ? `<div class="home-games">${games.map(gameCard).join('')}</div>` : '<div class="home-empty">No games assigned to you yet.</div>'}
+        </div>
+      </div>
+      ${data.idleMembers.length ? `
+      <div class="home-grid single" style="margin-top:16px;">
+        <div class="home-card">
+          <div class="home-card-head"><h2>Nobody assigned</h2><span class="count">${data.idleMembers.length}</span></div>
+          ${data.idleMembers.map(m => `<div class="home-row"><div class="home-row-main"><div class="home-row-title">${userLink(m.robloxUserId, m.robloxUsername)}</div><div class="home-row-meta"><span>No open task</span></div></div></div>`).join('')}
+        </div>
+      </div>` : ''}`;
+      }
+
+      function gameCard(g) {
+        const budget = g.budgetAmount;
+        const spentUsd = g.spent.usd;
+        const pct = budget > 0 ? Math.min(100, Math.round((spentUsd / budget) * 100)) : 0;
+        const over = budget > 0 && spentUsd > budget;
+        return `
+          <div class="home-game">
+            <div class="home-game-top">
+              ${g.iconUrl ? `<img src="${esc(g.iconUrl)}" alt="">` : ''}
+              <div style="min-width:0;">
+                <div class="home-game-name">${esc(g.name)}</div>
+                ${g.producerUsername ? `<div class="home-row-meta"><span>${esc(g.producerUsername)}</span></div>` : ''}
+              </div>
+            </div>
+            ${budget > 0
+            ? `<div class="home-meter"><span class="${over ? 'over' : ''}" style="width:${pct}%;"></span></div>
+                 <div class="home-row-meta"><span>${esc(moneyUsd(spentUsd))} of ${esc(moneyUsd(budget))}</span>${over ? '<span class="late">over budget</span>' : ''}</div>`
+            : `<div class="home-row-meta"><span>Spent ${esc(moneyUsd(spentUsd))}${g.spent.robux ? ' and ' + esc(moneyRobux(g.spent.robux)) : ''}</span><span>No budget set</span></div>`}
+          </div>`;
+      }
+
+      function executiveView() {
+        const s = data.studio || {};
+        const runs = s.recentRuns || [];
+        const openRun = data.openRun;
+        return `
+      <div class="home-stats">
+        ${statCard('Staff requests', s.openClaims || 0, (s.openClaims || 0) ? 'Waiting for a decision' : 'None open', (s.openClaims || 0) > 0)}
+        ${statCard('Work to review', s.reviewWaiting || 0, (s.reviewWaiting || 0) ? 'Across your teams' : 'Nothing waiting')}
+        ${statCard('Owed in cash', moneyUsd(s.pendingUsd || 0), 'Approved, not paid')}
+        ${statCard('Owed in Robux', moneyRobux(s.pendingRobux || 0), 'Approved, not paid')}
+        ${statCard('People on teams', s.headcount || 0, 'With an assignment')}
+      </div>
+      <div class="home-grid">
+        <div class="home-card">
+          <div class="home-card-head"><h2>Payment runs</h2><a class="pp-linkbtn" href="#/runs">Open runs</a></div>
+          ${openRun
+            ? `<div class="home-row"><div class="home-row-main"><div class="home-row-title">${esc(openRun.label)}</div><div class="home-row-meta"><span>${esc(openRun.period_start)} to ${esc(openRun.period_end)}</span><span>Open, collecting approved work</span></div></div><div class="home-row-actions"><a class="btn btn-ghost btn-sm" href="#/runs">Manage</a></div></div>`
+            : '<div class="home-note">No run is open, so approved work is not being collected anywhere. Open one from the runs page.</div>'}
+          ${runs.filter(r => r.status !== 'open').slice(0, 4).map(r => `
+            <div class="home-row">
+              <div class="home-row-main">
+                <div class="home-row-title">${esc(r.label)}</div>
+                <div class="home-row-meta"><span>${esc(r.period_start)} to ${esc(r.period_end)}</span><span>${esc(r.status)}</span></div>
+              </div>
+            </div>`).join('')}
+        </div>
+        <div class="home-card">
+          <div class="home-card-head"><h2>Waiting on your review</h2><span class="count">${data.reviewQueue.length}</span></div>
+          ${data.reviewQueue.length ? data.reviewQueue.slice(0, 8).map(t => taskRow(t, `<button type="button" class="btn btn-ok btn-sm" data-home-approve="${esc(t.id)}">Approve</button><button type="button" class="btn btn-ghost btn-sm" data-home-sendback="${esc(t.id)}">Send back</button>`)).join('') : '<div class="home-empty">Nothing is waiting on you.</div>'}
+        </div>
+      </div>
+      ${(data.games || []).length ? `
+      <div class="home-grid single" style="margin-top:16px;">
+        <div class="home-card">
+          <div class="home-card-head"><h2>Games and spend</h2><span class="count">${data.games.length}</span></div>
+          <div class="home-games">${data.games.map(gameCard).join('')}</div>
+        </div>
+      </div>` : ''}`;
+      }
+
+      function paint() {
+        const greeting = hrUsername ? 'Hi ' + esc(hrUsername) : 'Hi';
+        const roleLabel = data ? (data.view === 'executive' ? 'Studio' : data.view === 'producer' ? 'Producer' : 'Developer') : '';
+        app.innerHTML = `
+    ${topbar()}
+    <div class="home-shell">
+      <div class="home-head">
+        <div>
+          <h1>${greeting}${roleLabel ? `<span class="home-role">${esc(roleLabel)}</span>` : ''}</h1>
+          <p class="sub" style="margin:0;">${data ? (data.view === 'developer' ? 'Your work and your pay, in one place.' : data.view === 'producer' ? 'What needs you today across your games and teams.' : 'How the studio is doing right now.') : 'Loading your day.'}</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="homeRefresh">Refresh</button>
+      </div>
+      ${loadError
+            ? `<div class="error-box"><span>${esc(loadError)}</span></div>`
+            : loading
+              ? '<div class="home-stats">' + [0, 1, 2, 3].map(() => '<div class="home-stat"><div class="k">Loading</div><div class="v">&nbsp;</div></div>').join('') + '</div>'
+              : data.view === 'developer' ? developerView() : data.view === 'producer' ? producerView() : executiveView()}
+    </div>`;
+
+        wireTopbarSignOut();
+        const refresh = document.getElementById('homeRefresh');
+        if (refresh) refresh.addEventListener('click', () => load());
+
+        document.querySelectorAll('[data-home-submit]').forEach(el => el.addEventListener('click', async () => {
+          const id = el.dataset.homeSubmit;
+          if (busy.has(id)) return;
+          busy.add(id);
+          el.disabled = true;
+          el.textContent = 'Sending...';
+          try {
+            await callHrData('submit_task_for_review', { id });
+            toast('Sent to your producer to review');
+            await load();
+          } catch (e) {
+            busy.delete(id);
+            el.disabled = false;
+            el.textContent = 'Mark done';
+            toast(e.message || 'That did not go through.', 'err');
+          }
+        }));
+
+        document.querySelectorAll('[data-home-approve]').forEach(el => el.addEventListener('click', async () => {
+          const id = el.dataset.homeApprove;
+          if (busy.has(id)) return;
+          busy.add(id);
+          el.disabled = true;
+          el.textContent = 'Approving...';
+          try {
+            await callHrData('decide_task_review', { id, decision: 'approve' });
+            toast('Approved and queued for payment');
+            await load();
+          } catch (e) {
+            busy.delete(id);
+            el.disabled = false;
+            el.textContent = 'Approve';
+            toast(e.message || 'That did not go through.', 'err');
+          }
+        }));
+
+        document.querySelectorAll('[data-home-sendback]').forEach(el => el.addEventListener('click', async () => {
+          const id = el.dataset.homeSendback;
+          if (busy.has(id)) return;
+          const note = await askForText({
+            title: 'Send this back',
+            hint: 'They see this, so say what needs changing.',
+            placeholder: 'For example: the doors clip through the wall on the left side.',
+            confirmLabel: 'Send it back',
+            required: true,
+            requiredMessage: 'Write what needs changing.'
+          });
+          if (note === null) return;
+          busy.add(id);
+          el.disabled = true;
+          el.textContent = 'Sending...';
+          try {
+            await callHrData('decide_task_review', { id, decision: 'send_back', note });
+            toast('Sent back with your notes');
+            await load();
+          } catch (e) {
+            busy.delete(id);
+            el.disabled = false;
+            el.textContent = 'Send back';
+            toast(e.message || 'That did not go through.', 'err');
+          }
+        }));
+      }
+
+      async function load() {
+        loadError = null;
+        if (!data) loading = true;
+        paint();
+        try {
+          const json = await callHrData('get_home');
+          data = json.data || null;
+          if (!data) loadError = 'Could not read your home screen.';
+        } catch (e) {
+          loadError = e.message || 'Could not load your home screen.';
+        }
+        if (myGen !== renderGen) return;
+        busy.clear();
+        loading = false;
+        paint();
+      }
+
+      load();
+    }
+
+    function runStatusLabel(status) {
+      return { open: 'Open', frozen: 'Frozen', paying: 'Paying out', closed: 'Closed' }[status] || status;
+    }
+
+    function renderPaymentRuns() {
+      const myGen = renderGen;
+      let runs = [];
+      let active = null;
+      let sheet = null;
+      let loading = true;
+      let loadError = null;
+      let selectedId = null;
+      let creating = false;
+      const canPay = hasPermission('dashboard.mark_paid');
+      const busy = new Set();
+
+      function defaultPeriod() {
+        const now = new Date();
+        const y = now.getUTCFullYear(), m = now.getUTCMonth();
+        const firstHalf = now.getUTCDate() <= 14;
+        const pad = n => String(n).padStart(2, '0');
+        const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+        const start = firstHalf ? `${y}-${pad(m + 1)}-01` : `${y}-${pad(m + 1)}-15`;
+        const end = firstHalf ? `${y}-${pad(m + 1)}-14` : `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+        const month = new Date(Date.UTC(y, m, 1)).toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' });
+        return { label: `${month} ${firstHalf ? '1 to 14' : '15 to ' + lastDay}`, start, end };
+      }
+
+      function sheetRow(p) {
+        const allPaid = p.lines.length > 0 && p.paidLines === p.lines.length;
+        const methodLabel = p.method ? methodDisplayLabel(p.method) : 'No payout method set';
+        const key = p.robloxUserId != null ? 'id:' + p.robloxUserId : 'name:' + p.robloxUsername;
+        return `
+          <div class="home-row">
+            <div class="home-row-main">
+              <div class="home-row-title">${userLink(p.robloxUserId, p.robloxUsername)}</div>
+              <div class="home-row-meta">
+                <span>${p.usd > 0 ? esc(moneyUsd(p.usd)) : ''}${p.usd > 0 && p.robux > 0 ? ' plus ' : ''}${p.robux > 0 ? esc(moneyRobux(p.robux)) : ''}${!p.usd && !p.robux ? 'Nothing owed' : ''}</span>
+                <span>${p.lines.length} ${p.lines.length === 1 ? 'item' : 'items'}</span>
+                <span${p.method ? '' : ' class="late"'}>${esc(methodLabel)}</span>
+              </div>
+            </div>
+            <div class="home-row-actions">
+              ${allPaid
+            ? '<span class="pp-tag">Paid</span>'
+            : canPay && active && active.status !== 'open' && active.status !== 'closed'
+              ? `<button type="button" class="btn btn-ok btn-sm" data-run-pay="${esc(key)}">Mark paid</button>`
+              : ''}
+            </div>
+          </div>`;
+      }
+
+      function paint() {
+        app.innerHTML = `
+    ${topbar()}
+    <div class="home-shell">
+      <div class="home-head">
+        <div>
+          <h1>Payment runs</h1>
+          <p class="sub" style="margin:0;">Approved work collects in the open run. Freeze it on the cut-off, pay it out, then close it.</p>
+        </div>
+        ${canPay && !runs.some(r => r.status === 'open') ? '<button type="button" class="btn btn-primary btn-sm" id="runNewBtn">Open a run</button>' : ''}
+      </div>
+      ${loadError ? `<div class="error-box"><span>${esc(loadError)}</span></div>` : ''}
+      ${creating ? (() => {
+            const d = defaultPeriod();
+            return `
+      <div class="home-card" style="margin-bottom:16px;">
+        <div class="home-card-head"><h2>Open a new run</h2></div>
+        <div style="padding:14px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;">
+          <div class="field"><label for="runLabel">Name</label><input type="text" id="runLabel" value="${esc(d.label)}"></div>
+          <div class="field"><label for="runStart">Covers from</label><input type="date" id="runStart" value="${esc(d.start)}"></div>
+          <div class="field"><label for="runEnd">Covers to</label><input type="date" id="runEnd" value="${esc(d.end)}"></div>
+          <div class="field"><label for="runPayDate">Pay date</label><input type="date" id="runPayDate" value=""></div>
+        </div>
+        <div style="padding:0 16px 14px;display:flex;gap:8px;">
+          <button type="button" class="btn btn-primary btn-sm" id="runCreateBtn">Open it</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="runCancelBtn">Cancel</button>
+        </div>
+      </div>`;
+          })() : ''}
+      ${loading
+            ? '<div class="home-empty">Loading runs...</div>'
+            : !runs.length
+              ? '<div class="home-card"><div class="home-empty">No runs yet. Open one and approved work will start collecting in it.</div></div>'
+              : `
+      <div class="home-grid">
+        <div class="home-card">
+          <div class="home-card-head"><h2>All runs</h2><span class="count">${runs.length}</span></div>
+          ${runs.map(r => `
+            <div class="home-row" style="${String(r.id) === String(selectedId) ? 'background:var(--row-alt);' : ''}">
+              <div class="home-row-main">
+                <div class="home-row-title">${esc(r.label)}</div>
+                <div class="home-row-meta">
+                  <span>${esc(r.period_start)} to ${esc(r.period_end)}</span>
+                  <span>${esc(runStatusLabel(r.status))}</span>
+                  <span>${r.totals.lines} ${r.totals.lines === 1 ? 'item' : 'items'}</span>
+                  ${r.totals.lines ? `<span>${r.totals.paidLines} paid</span>` : ''}
+                </div>
+              </div>
+              <div class="home-row-actions">
+                <button type="button" class="btn btn-ghost btn-sm" data-run-open="${esc(r.id)}">${String(r.id) === String(selectedId) ? 'Showing' : 'Show'}</button>
+              </div>
+            </div>`).join('')}
+        </div>
+        <div class="home-card">
+          ${!active
+                ? '<div class="home-empty">Pick a run to see who gets paid what.</div>'
+                : `
+          <div class="home-card-head">
+            <h2>${esc(active.label)}</h2>
+            <span class="count">${esc(runStatusLabel(active.status))}</span>
+          </div>
+          <div class="home-note">
+            ${active.status === 'open' ? 'Collecting approved work. Freeze it when the period ends and nothing more will go in.'
+                  : active.status === 'frozen' ? 'Frozen. Pay each person, then close it.'
+                    : active.status === 'paying' ? 'Part paid. Finish the rest, then close it.'
+                      : 'Closed. This is the permanent record for the period.'}
+          </div>
+          ${sheet ? `
+          <div class="home-stats" style="padding:14px 16px;margin:0;">
+            ${statCard('People', sheet.totals.people, '')}
+            ${statCard('Cash', moneyUsd(sheet.totals.usd), '')}
+            ${statCard('Robux', moneyRobux(sheet.totals.robux), '')}
+            ${statCard('Paid', sheet.totals.paidLines + ' of ' + sheet.totals.lines, '')}
+          </div>
+          ${sheet.sheet.length ? sheet.sheet.map(sheetRow).join('') : '<div class="home-empty">Nothing in this run yet.</div>'}` : '<div class="home-empty">Loading the payout sheet...</div>'}
+          ${canPay ? `
+          <div style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);">
+            ${active.status === 'open' ? '<button type="button" class="btn btn-primary btn-sm" id="runFreezeBtn">Freeze this run</button>' : ''}
+            ${active.status === 'frozen' || active.status === 'paying' ? '<button type="button" class="btn btn-ok btn-sm" id="runCloseBtn">Close the run</button>' : ''}
+            ${sheet && sheet.sheet.length ? '<button type="button" class="btn btn-ghost btn-sm" id="runCopyBtn">Copy payout sheet</button>' : ''}
+          </div>` : ''}`}
+        </div>
+      </div>`}
+    </div>`;
+
+        wireTopbarSignOut();
+
+        const newBtn = document.getElementById('runNewBtn');
+        if (newBtn) newBtn.addEventListener('click', () => { creating = true; paint(); });
+        const cancelBtn = document.getElementById('runCancelBtn');
+        if (cancelBtn) cancelBtn.addEventListener('click', () => { creating = false; paint(); });
+
+        const createBtn = document.getElementById('runCreateBtn');
+        if (createBtn) createBtn.addEventListener('click', async () => {
+          const label = (document.getElementById('runLabel') || {}).value || '';
+          const periodStart = (document.getElementById('runStart') || {}).value || '';
+          const periodEnd = (document.getElementById('runEnd') || {}).value || '';
+          const payDate = (document.getElementById('runPayDate') || {}).value || null;
+          if (!label.trim() || !periodStart || !periodEnd) { toast('Fill in the name and both dates.', 'err'); return; }
+          createBtn.disabled = true;
+          createBtn.textContent = 'Opening...';
+          try {
+            const json = await callHrData('create_payment_run', { label: label.trim(), periodStart, periodEnd, payDate });
+            creating = false;
+            selectedId = json.id;
+            toast('Run opened');
+            await load();
+          } catch (e) {
+            createBtn.disabled = false;
+            createBtn.textContent = 'Open it';
+            toast(e.message || 'Could not open that run.', 'err');
+          }
+        });
+
+        document.querySelectorAll('[data-run-open]').forEach(el => el.addEventListener('click', () => {
+          selectedId = el.dataset.runOpen;
+          sheet = null;
+          paint();
+          loadSheet();
+        }));
+
+        const freezeBtn = document.getElementById('runFreezeBtn');
+        if (freezeBtn) freezeBtn.addEventListener('click', async () => {
+          freezeBtn.disabled = true;
+          freezeBtn.textContent = 'Freezing...';
+          try {
+            const json = await callHrData('freeze_payment_run', { id: selectedId });
+            toast(json.lines ? `Frozen with ${json.lines} ${json.lines === 1 ? 'item' : 'items'}` : 'Frozen, nothing was waiting');
+            await load();
+          } catch (e) {
+            freezeBtn.disabled = false;
+            freezeBtn.textContent = 'Freeze this run';
+            toast(e.message || 'Could not freeze that run.', 'err');
+          }
+        });
+
+        const closeBtn = document.getElementById('runCloseBtn');
+        if (closeBtn) closeBtn.addEventListener('click', async () => {
+          closeBtn.disabled = true;
+          closeBtn.textContent = 'Closing...';
+          try {
+            await callHrData('close_payment_run', { id: selectedId });
+            toast('Run closed');
+            await load();
+          } catch (e) {
+            closeBtn.disabled = false;
+            closeBtn.textContent = 'Close the run';
+            toast(e.message || 'Could not close that run.', 'err');
+          }
+        });
+
+        const copyBtn = document.getElementById('runCopyBtn');
+        if (copyBtn && sheet) copyBtn.addEventListener('click', () => {
+          const header = ['Name', 'Method', 'Cash USD', 'Robux', 'Items'].join('\t');
+          const body = sheet.sheet.map(p => [
+            p.robloxUsername || '',
+            p.method ? methodDisplayLabel(p.method) : 'None set',
+            p.usd ? p.usd.toFixed(2) : '',
+            p.robux ? String(p.robux) : '',
+            String(p.lines.length)
+          ].join('\t')).join('\n');
+          copyText(header + '\n' + body, copyBtn, 'Copied the sheet');
+        });
+
+        document.querySelectorAll('[data-run-pay]').forEach(el => el.addEventListener('click', async () => {
+          const key = el.dataset.runPay;
+          if (busy.has(key)) return;
+          busy.add(key);
+          el.disabled = true;
+          el.textContent = 'Saving...';
+          const payload = { id: selectedId };
+          if (key.indexOf('id:') === 0) payload.robloxUserId = Number(key.slice(3));
+          else payload.robloxUsername = key.slice(5);
+          try {
+            const json = await callHrData('mark_run_person_paid', payload);
+            toast(json.count ? `Marked ${json.count} ${json.count === 1 ? 'item' : 'items'} paid` : 'Nothing left to pay');
+            await load();
+          } catch (e) {
+            busy.delete(key);
+            el.disabled = false;
+            el.textContent = 'Mark paid';
+            toast(e.message || 'That did not save.', 'err');
+          }
+        }));
+      }
+
+      async function loadSheet() {
+        if (!selectedId) return;
+        try {
+          const json = await callHrData('get_payment_run', { id: selectedId });
+          if (myGen !== renderGen) return;
+          sheet = json.data;
+          active = json.data.run;
+        } catch (e) {
+          sheet = null;
+          toast(e.message || 'Could not read that run.', 'err');
+        }
+        if (myGen === renderGen) paint();
+      }
+
+      async function load() {
+        loadError = null;
+        try {
+          const json = await callHrData('list_payment_runs');
+          runs = json.data || [];
+          if (!selectedId || !runs.some(r => String(r.id) === String(selectedId))) {
+            const open = runs.find(r => r.status === 'open');
+            selectedId = open ? open.id : (runs[0] ? runs[0].id : null);
+          }
+          active = runs.find(r => String(r.id) === String(selectedId)) || null;
+        } catch (e) {
+          loadError = e.message || 'Could not load the runs.';
+        }
+        if (myGen !== renderGen) return;
+        busy.clear();
+        loading = false;
+        paint();
+        if (selectedId) await loadSheet();
+      }
+
+      load();
+    }
+
     function renderDashboard() {
       if (!hasPermission('dashboard.view')) { window.location.hash = canSeeManage() ? '#/manage' : '#/'; return; }
       const myGen = renderGen;
@@ -10019,8 +10841,8 @@
       ${filter === 'claims' ? `
       <div class="table-wrap" style="padding:0;">
         ${claimsLoading ? `<div class="dash-loading">Loading staff requests...</div>`
-          : !claims.length ? `<div class="dash-empty"><h3>Nothing to review</h3><p>When someone asks to be paid, it turns up here.</p></div>`
-          : `<div class="task-list">${claims.map(c => `
+              : !claims.length ? `<div class="dash-empty"><h3>Nothing to review</h3><p>When someone asks to be paid, it turns up here.</p></div>`
+                : `<div class="task-list">${claims.map(c => `
             <div class="task-row">
               <div style="flex:1;min-width:0;">
                 <div class="task-title">${esc(c.task_name || 'Work')}</div>
@@ -11245,10 +12067,10 @@
             <div class="split-box">
               <div style="font-weight:600;font-size:13.5px;margin-bottom:4px;">Split your payments</div>
               ${!saved
-                ? `<p class="hint" style="margin:0;">Save a payment method first, then you can have part of every payment sent in Robux instead.</p>`
-                : !canSplit
-                  ? `<p class="hint" style="margin:0;">You're paid in Robux, so there's nothing to split. Pick PayPal, Venmo or bank transfer above and save it, then you can send part of each payment to Robux instead.</p>`
-                  : `
+                  ? `<p class="hint" style="margin:0;">Save a payment method first, then you can have part of every payment sent in Robux instead.</p>`
+                  : !canSplit
+                    ? `<p class="hint" style="margin:0;">You're paid in Robux, so there's nothing to split. Pick PayPal, Venmo or bank transfer above and save it, then you can send part of each payment to Robux instead.</p>`
+                    : `
               <label class="pp-check" style="margin:0 0 8px;"><input type="checkbox" id="splitToggle" ${splitPercent > 0 ? 'checked' : ''}> Pay part of every payment in Robux instead of ${esc(savedLabel)}</label>
               ${splitPercent > 0 ? `
               <div class="split-row">
@@ -11256,12 +12078,12 @@
                 <span class="split-value"><b>${esc(100 - splitPercent)}%</b> ${esc(savedLabel)} &middot; <b>${esc(splitPercent)}%</b> Robux</span>
               </div>
               <p class="hint" style="margin:8px 0 0;">${(() => {
-                const robuxShare = 100 * (splitPercent / 100);
-                const robux = DEVEX_RATE ? Math.round(robuxShare / DEVEX_RATE) : 0;
-                return `On a $100 payment that is $${(100 - robuxShare).toFixed(2)} through ${savedLabel} plus about R$ ${robux.toLocaleString()}.`;
-              })()}</p>
+                        const robuxShare = 100 * (splitPercent / 100);
+                        const robux = DEVEX_RATE ? Math.round(robuxShare / DEVEX_RATE) : 0;
+                        return `On a $100 payment that is $${(100 - robuxShare).toFixed(2)} through ${savedLabel} plus about R$ ${robux.toLocaleString()}.`;
+                      })()}</p>
               <p class="hint" style="margin:6px 0 0;">While a split is on, your pending requests keep the currency they were logged in.</p>`
-                : `<p class="hint" style="margin:0;">Everything goes through ${esc(savedLabel)} right now.</p>`}`}
+                      : `<p class="hint" style="margin:0;">Everything goes through ${esc(savedLabel)} right now.</p>`}`}
               ${splitSaving ? '<p class="hint">Saving...</p>' : ''}
             </div>`;
             })()}
@@ -11663,6 +12485,7 @@
       const manageTabDefs = [
         { id: 'access', label: 'Access', enabled: canManageBaseAccess || canManageGroups },
         { id: 'games', label: 'Games & rate', enabled: canManageGames || canManageRate },
+        { id: 'rates', label: 'Rate card', enabled: canManageRate },
         { id: 'roles', label: 'Roles', enabled: canManageRoles },
         { id: 'teams', label: 'Teams & skills', enabled: canManageOnboarding },
         { id: 'onboarding', label: 'Onboarding', enabled: canManageOnboarding },
@@ -11675,6 +12498,12 @@
       let savingRate = false;
       let rateError = null;
       let rateSuccess = false;
+
+      let rateBands = [];
+      let rateBandsLoaded = false;
+      let bandError = null;
+      let savingBand = false;
+      let editingBandId = null;
 
       let usdMinimum = null;
       let savingUsdMin = false;
@@ -11871,6 +12700,51 @@
           <button type="button" class="btn btn-ok" id="addBaseDiscordBtn" ${addingBaseAccessDiscordServer ? 'disabled' : ''}>${addingBaseAccessDiscordServer ? 'Adding...' : 'Add server'}</button>
         </div>
       </div>` : ''}
+      ` : ''}
+
+      ${manageTab === 'rates' ? `
+      <div class="heading-block">
+        <h2 class="sec-title">Rate card</h2>
+        <p class="sub">Standard pay for a piece of work, so the same job is worth the same whoever assigns it. Producers pick a band when they set a task, and anything else has to be typed in by hand.</p>
+      </div>
+      ${bandError ? `<div class="error-box"><span>${esc(bandError)}</span></div>` : ''}
+      <div class="panel" style="padding:0;overflow:hidden;">
+        <div class="home-card-head"><h2>Bands</h2><span class="count">${rateBands.length}</span></div>
+        ${!rateBandsLoaded
+              ? '<div class="home-empty">Loading the rate card...</div>'
+              : !rateBands.length
+                ? '<div class="home-empty">No bands yet. Add the first one below.</div>'
+                : rateBands.map(band => `
+          <div class="home-row">
+            <div class="home-row-main">
+              <div class="home-row-title">${esc(band.name)}</div>
+              <div class="home-row-meta">
+                <span>${band.currency === 'USD' ? esc(moneyUsd(band.amount)) : esc(moneyRobux(band.amount))}</span>
+                ${band.notes ? `<span>${esc(band.notes)}</span>` : ''}
+              </div>
+            </div>
+            <div class="home-row-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-band-edit="${esc(band.id)}">Edit</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-band-retire="${esc(band.id)}">Retire</button>
+            </div>
+          </div>`).join('')}
+        <div style="padding:16px;border-top:1px solid var(--line);">
+          <h3 style="margin:0 0 12px;font-size:14px;">${editingBandId ? 'Edit band' : 'Add a band'}</h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;">
+            <div class="field"><label for="bandName">What it covers</label><input type="text" id="bandName" placeholder="e.g. Small script, under a day" value="${esc((rateBands.find(x => String(x.id) === String(editingBandId)) || {}).name || '')}"></div>
+            <div class="field"><label for="bandAmount">Pay</label><input type="number" id="bandAmount" min="1" step="1" value="${esc((rateBands.find(x => String(x.id) === String(editingBandId)) || {}).amount || '')}"></div>
+            <div class="field"><label for="bandCurrency">Currency</label><select id="bandCurrency">
+              <option value="USD" ${((rateBands.find(x => String(x.id) === String(editingBandId)) || {}).currency || 'USD') === 'USD' ? 'selected' : ''}>USD</option>
+              <option value="ROBUX" ${((rateBands.find(x => String(x.id) === String(editingBandId)) || {}).currency || '') === 'ROBUX' ? 'selected' : ''}>Robux</option>
+            </select></div>
+            <div class="field"><label for="bandNotes">Note <span class="hint">(optional)</span></label><input type="text" id="bandNotes" placeholder="When to use this one" value="${esc((rateBands.find(x => String(x.id) === String(editingBandId)) || {}).notes || '')}"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            <button type="button" class="btn btn-primary btn-sm" id="bandSaveBtn" ${savingBand ? 'disabled' : ''}>${savingBand ? 'Saving...' : editingBandId ? 'Save changes' : 'Add band'}</button>
+            ${editingBandId ? '<button type="button" class="btn btn-ghost btn-sm" id="bandCancelBtn">Cancel</button>' : ''}
+          </div>
+        </div>
+      </div>
       ` : ''}
 
       ${manageTab === 'games' ? `
@@ -12435,7 +13309,50 @@
 
         wireTopbarSignOut();
 
-        document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', () => { manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); }));
+        document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', () => { manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); if (manageTab === 'rates' && !rateBandsLoaded) loadRateBands(); }));
+
+        const bandSaveBtn = document.getElementById('bandSaveBtn');
+        if (bandSaveBtn) bandSaveBtn.addEventListener('click', async () => {
+          const name = (document.getElementById('bandName') || {}).value || '';
+          const amount = (document.getElementById('bandAmount') || {}).value || '';
+          const currency = (document.getElementById('bandCurrency') || {}).value || 'USD';
+          const notes = (document.getElementById('bandNotes') || {}).value || '';
+          if (!name.trim() || !(Number(amount) > 0)) { toast('Give it a name and a pay amount above zero.', 'err'); return; }
+          savingBand = true; bandError = null; paint();
+          try {
+            await callHrData('save_rate_band', { id: editingBandId || undefined, name: name.trim(), amount: Number(amount), currency, notes: notes.trim() });
+            editingBandId = null;
+            toast('Rate card saved');
+            await loadRateBands();
+          } catch (e) {
+            bandError = e.message || 'Could not save that band.';
+          }
+          savingBand = false;
+          paint();
+        });
+
+        const bandCancelBtn = document.getElementById('bandCancelBtn');
+        if (bandCancelBtn) bandCancelBtn.addEventListener('click', () => { editingBandId = null; paint(); });
+
+        document.querySelectorAll('[data-band-edit]').forEach(el => el.addEventListener('click', () => {
+          editingBandId = el.dataset.bandEdit;
+          paint();
+          const field = document.getElementById('bandName');
+          if (field) field.focus();
+        }));
+
+        document.querySelectorAll('[data-band-retire]').forEach(el => el.addEventListener('click', async () => {
+          el.disabled = true;
+          try {
+            await callHrData('delete_rate_band', { id: el.dataset.bandRetire });
+            toast('Band retired');
+            if (String(editingBandId) === String(el.dataset.bandRetire)) editingBandId = null;
+            await loadRateBands();
+          } catch (e) {
+            el.disabled = false;
+            toast(e.message || 'Could not retire that band.', 'err');
+          }
+        }));
         document.querySelectorAll('[data-manage-jump]').forEach(b => b.addEventListener('click', () => {
           const target = document.getElementById(b.dataset.manageJump);
           if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -13065,6 +13982,20 @@
         paint();
       }
 
+      async function loadRateBands() {
+        bandError = null;
+        try {
+          const json = await callHrData('list_rate_bands');
+          rateBands = json.data || [];
+          rateBandsLoaded = true;
+        } catch (err) {
+          bandError = (err && err.message) ? err.message : 'Could not load the rate card.';
+          rateBandsLoaded = true;
+        }
+        if (myGen !== renderGen) return;
+        paint();
+      }
+
       async function loadApprovalConfig() {
         approvalConfigLoading = true; approvalConfigError = null; paint();
         try {
@@ -13157,7 +14088,7 @@
         loadRoles();
       }
       if (canManageOnboarding) { loadTeamsData(); loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); loadOnboardingGroupConfig(); loadRobloxGroupApiKeyStatus(); }
-      if (canManageRate) loadUsdMinimum();
+      if (canManageRate) { loadUsdMinimum(); loadRateBands(); }
       if (canManageBroadcasts) loadBroadcastsData();
     }
 
@@ -13706,6 +14637,10 @@
 
         ${t.details ? `<div class="panel" style="margin:0 0 18px;"><h3 style="margin:0 0 8px;font-size:15px;">Details</h3><p class="task-details" style="margin:0;">${esc(t.details)}</p></div>` : ''}
 
+        ${t.status === 'review' ? `<div class="filter-notice" style="margin-bottom:18px;">Waiting on a producer to review this. ${t.submitted_by ? esc(t.submitted_by) + ' sent it' : 'It was sent'}${t.submitted_at ? ' ' + esc(relTime(t.submitted_at)) : ''}.</div>` : ''}
+        ${t.status === 'open' && t.review_note ? `<div class="pp-banner neutral" style="margin-bottom:18px;"><strong>Sent back:</strong> ${esc(t.review_note)}</div>` : ''}
+        ${t.status === 'done' && t.approved_by ? `<div class="confirm-box" style="margin-bottom:18px;"><div class="icon">&#10003;</div><div class="txt"><strong>Approved by ${esc(t.approved_by)}</strong><span>${t.review_note ? esc(t.review_note) : 'Signed off, so it can be paid.'}</span></div></div>` : ''}
+
         ${money(t) ? (t.payment_request_id
               ? `<div class="confirm-box" style="margin-bottom:18px;"><div class="icon">&#10003;</div><div class="txt"><strong>Payment logged</strong><span>${esc(money(t))} for ${esc(t.assigned_to_username || 'them')}. Follow it on the payments dashboard.</span></div></div>`
               : done
@@ -13713,7 +14648,9 @@
                 : `<div class="filter-notice" style="margin-bottom:18px;">Pays ${esc(money(t))} once it's finished and a lead logs it.</div>`) : ''}
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          ${(data.isMine || data.canManage) ? `<button type="button" class="btn ${done && t.payment ? 'btn-ghost' : done ? 'btn-ghost' : 'btn-primary'} btn-sm" id="taskToggleBtn" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : done ? 'Reopen this task' : 'Mark it done'}</button>` : ''}
+          ${data.isMine && !done && t.status !== 'review' && t.status !== 'cancelled' ? `<button type="button" class="btn btn-primary btn-sm" id="taskSubmitBtn" ${busy ? 'disabled' : ''}>${busy ? 'Sending...' : 'Mark it done'}</button>` : ''}
+          ${t.status === 'review' && data.canManage && !data.isMine ? `<button type="button" class="btn btn-ok btn-sm" id="taskApproveBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : 'Approve it'}</button><button type="button" class="btn btn-ghost btn-sm" id="taskSendBackBtn" ${busy ? 'disabled' : ''}>Send it back</button>` : ''}
+          ${done && data.canManage ? `<button type="button" class="btn btn-ghost btn-sm" id="taskToggleBtn" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : 'Reopen this task'}</button>` : ''}
           ${done && t.payment && !t.payment_request_id && data.canManage && canSubmitRequests()
               ? `<button type="button" class="btn btn-ok btn-sm" id="taskPayBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : `Pay ${esc(money(t))}`}</button>` : ''}
           ${data.team ? `<a class="btn btn-ghost btn-sm" href="#/teams?team=${encodeURIComponent(data.team.id)}&tab=deadlines">All ${esc(data.team.name)} deadlines</a>` : ''}
@@ -13754,16 +14691,69 @@
         });
         const toggle = document.getElementById('taskToggleBtn');
         if (toggle) toggle.addEventListener('click', async () => {
-          const next = data.task.status === 'done' ? 'open' : 'done';
           busy = true; paint();
           try {
-            await callHrData('set_team_task_status', { id: data.task.id, status: next });
-            toast(next === 'done' ? 'Marked done' : 'Reopened');
+            await callHrData('set_team_task_status', { id: data.task.id, status: 'open' });
+            toast('Reopened');
             busy = false;
             await load();
           } catch (e) {
             busy = false;
             toast(e.message || 'Could not update the task.', 'err');
+            paint();
+          }
+        });
+
+        const submitBtn = document.getElementById('taskSubmitBtn');
+        if (submitBtn) submitBtn.addEventListener('click', async () => {
+          busy = true; paint();
+          try {
+            await callHrData('submit_task_for_review', { id: data.task.id });
+            toast('Sent to your producer to review');
+            busy = false;
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.message || 'Could not send that for review.', 'err');
+            paint();
+          }
+        });
+
+        const approveBtn = document.getElementById('taskApproveBtn');
+        if (approveBtn) approveBtn.addEventListener('click', async () => {
+          busy = true; paint();
+          try {
+            await callHrData('decide_task_review', { id: data.task.id, decision: 'approve' });
+            toast('Approved and queued for payment');
+            busy = false;
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.message || 'Could not approve that.', 'err');
+            paint();
+          }
+        });
+
+        const sendBackBtn = document.getElementById('taskSendBackBtn');
+        if (sendBackBtn) sendBackBtn.addEventListener('click', async () => {
+          const note = await askForText({
+            title: 'Send this back',
+            hint: 'They see this, so say what needs changing.',
+            placeholder: 'For example: the doors clip through the wall on the left side.',
+            confirmLabel: 'Send it back',
+            required: true,
+            requiredMessage: 'Write what needs changing.'
+          });
+          if (note === null) return;
+          busy = true; paint();
+          try {
+            await callHrData('decide_task_review', { id: data.task.id, decision: 'send_back', note });
+            toast('Sent back with your notes');
+            busy = false;
+            await load();
+          } catch (e) {
+            busy = false;
+            toast(e.message || 'Could not send that back.', 'err');
             paint();
           }
         });
@@ -13846,8 +14836,8 @@
       </div>` : ''}
 
       ${loading ? `<div class="dash-loading">Loading your requests...</div>`
-        : loadError ? `<div class="dash-empty"><h3>Could not load your requests</h3><p>${esc(loadError)}</p></div>`
-        : `
+            : loadError ? `<div class="dash-empty"><h3>Could not load your requests</h3><p>${esc(loadError)}</p></div>`
+              : `
       ${open.length ? `
       <h2 class="sec-title" style="font-size:15px;">Waiting on a lead (${open.length})</h2>
       <div class="task-list" style="margin-bottom:22px;">

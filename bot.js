@@ -10,6 +10,7 @@ const {
     DISCORD_CLIENT_ID,
     DISCORD_GUILD_ID,
     DISCORD_LEAD_ROLE_ID,
+    DISCORD_LEAD_CHANNEL_ID,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
     APP_ORIGIN
@@ -34,7 +35,33 @@ const commands = [
     new SlashCommandBuilder()
         .setName('recruit-ticket')
         .setDescription('Look up a recruitment application by ticket id')
-        .addStringOption(opt => opt.setName('id').setDescription('Ticket id').setRequired(true))
+        .addStringOption(opt => opt.setName('id').setDescription('Ticket id').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('me')
+        .setDescription('Your open work and what you are owed'),
+    new SlashCommandBuilder()
+        .setName('review')
+        .setDescription('Work waiting on you to review'),
+    new SlashCommandBuilder()
+        .setName('run')
+        .setDescription('How the current payment run is doing'),
+    new SlashCommandBuilder()
+        .setName('whois')
+        .setDescription('Look someone up on the website')
+        .addUserOption(opt => opt.setName('member').setDescription('Who to look up').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('note')
+        .setDescription('Put a note on someone staff record')
+        .addUserOption(opt => opt.setName('member').setDescription('Who it is about').setRequired(true))
+        .addStringOption(opt => opt.setName('text').setDescription('What to record').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('warn')
+        .setDescription('Warn someone, recorded on their staff record')
+        .addUserOption(opt => opt.setName('member').setDescription('Who to warn').setRequired(true))
+        .addStringOption(opt => opt.setName('reason').setDescription('Why').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('health')
+        .setDescription('Check the bot and database are responding')
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -272,6 +299,426 @@ async function ticketEmbed(ticket) {
         .setTimestamp(new Date(ticket.created_at));
 }
 
+const BRAND = 0x3730D9;
+const OK_GREEN = 0x178A4C;
+const WARN_AMBER = 0xD8AC50;
+
+function siteLink(path) {
+    if (!APP_ORIGIN) return null;
+    return `${APP_ORIGIN.replace(/\/$/, '')}/#${path}`;
+}
+
+function moneyLine(amount, currency) {
+    if (!amount) return '';
+    return currency === 'USD' ? `$${Number(amount).toFixed(2)}` : `R$ ${Math.round(Number(amount)).toLocaleString()}`;
+}
+
+function dueLine(dueAt) {
+    if (!dueAt) return 'no due date';
+    const diff = new Date(dueAt).getTime() - Date.now();
+    const days = Math.round(Math.abs(diff) / 86400000);
+    if (diff < 0) return days === 0 ? 'due today' : `${days} ${days === 1 ? 'day' : 'days'} late`;
+    if (days === 0) return 'due today';
+    return `due in ${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+async function viewerContext(discordUserId) {
+    const { data: link } = await supabase
+        .from('discord_links')
+        .select('roblox_user_id, roblox_username')
+        .eq('discord_user_id', discordUserId)
+        .maybeSingle();
+    if (!link || link.roblox_user_id == null) return null;
+
+    const { data: assignments } = await supabase
+        .from('user_role_assignments')
+        .select('role_id')
+        .eq('roblox_user_id', link.roblox_user_id);
+    const roleIds = [...new Set((assignments || []).map(a => a.role_id).filter(id => id != null))];
+
+    const permissions = new Set();
+    const roleNames = [];
+    let maxHierarchy = 0;
+    if (roleIds.length) {
+        const { data: roles } = await supabase.from('roles').select('id, name, hierarchy, permissions').in('id', roleIds);
+        (roles || []).forEach(r => {
+            (r.permissions || []).forEach(p => permissions.add(p));
+            roleNames.push(r.name);
+            const h = Number(r.hierarchy) || 0;
+            if (h > maxHierarchy) maxHierarchy = h;
+        });
+    }
+    return {
+        robloxUserId: link.roblox_user_id,
+        robloxUsername: link.roblox_username,
+        permissions: [...permissions],
+        roles: roleNames,
+        maxHierarchy
+    };
+}
+
+function viewerCan(viewer, permission) {
+    return !!viewer && viewer.permissions.includes(permission);
+}
+
+async function requireLink(interaction) {
+    const viewer = await viewerContext(interaction.user.id);
+    if (!viewer) {
+        const link = siteLink('/');
+        await interaction.editReply(`Your Discord isn't linked to a PlayVerse account yet.${link ? ` Sign in at ${link} and link it from your account menu.` : ''}`);
+        return null;
+    }
+    return viewer;
+}
+
+async function botAudit({ action, actorUserId, actorUsername, targetUserId, targetUsername, details }) {
+    try {
+        await supabase.from('audit_logs').insert({
+            category: 'discord',
+            action,
+            actor_user_id: actorUserId != null ? actorUserId : null,
+            actor_username: actorUsername || 'bot',
+            target_user_id: targetUserId != null ? targetUserId : null,
+            target_username: targetUsername || null,
+            details: details || {},
+            reverted: false,
+            created_at: new Date().toISOString()
+        });
+    } catch (e) {
+        console.error('[bot] audit insert failed:', e.message);
+    }
+}
+
+async function dmRobloxUser(robloxUserId, text) {
+    try {
+        const { data: link } = await supabase
+            .from('discord_links')
+            .select('discord_user_id')
+            .eq('roblox_user_id', robloxUserId)
+            .maybeSingle();
+        if (!link || !link.discord_user_id) return false;
+        const user = await client.users.fetch(link.discord_user_id);
+        await user.send(text);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function reviewersForTask(task) {
+    const ids = new Set();
+    if (task.game_id) {
+        const { data: game } = await supabase.from('games').select('producer_user_id').eq('id', task.game_id).maybeSingle();
+        if (game && game.producer_user_id != null) ids.add(String(game.producer_user_id));
+    }
+    if (!ids.size && task.team_id != null) {
+        const { data: members } = await supabase.from('user_assignments').select('roblox_user_id').eq('team_id', task.team_id);
+        const memberIds = [...new Set((members || []).map(m => m.roblox_user_id).filter(id => id != null))];
+        if (memberIds.length) {
+            const { data: links } = await supabase.from('user_role_assignments').select('roblox_user_id, role_id').in('roblox_user_id', memberIds);
+            const { data: roles } = await supabase.from('roles').select('id, hierarchy');
+            const level = {};
+            (roles || []).forEach(r => { level[String(r.id)] = Number(r.hierarchy) || 0; });
+            const best = {};
+            (links || []).forEach(l => {
+                const key = String(l.roblox_user_id);
+                const h = level[String(l.role_id)] || 0;
+                if (!best[key] || h > best[key]) best[key] = h;
+            });
+            let top = 0;
+            Object.values(best).forEach(h => { if (h > top) top = h; });
+            if (top > 0) Object.keys(best).filter(k => best[k] === top).forEach(k => ids.add(k));
+        }
+    }
+    return [...ids].filter(id => String(id) !== String(task.assigned_to_user_id));
+}
+
+const COMMAND_HANDLERS = {
+    async me(interaction) {
+        const viewer = await requireLink(interaction);
+        if (!viewer) return;
+
+        const [tasksRes, requestsRes, runRes] = await Promise.all([
+            supabase.from('team_tasks').select('*').eq('assigned_to_user_id', viewer.robloxUserId).order('due_at', { ascending: true }).limit(40),
+            supabase.from('payment_requests').select('payment, currency, status, paid').eq('roblox_user_id', viewer.robloxUserId).eq('paid', false),
+            supabase.from('payment_runs').select('label, period_end').eq('status', 'open').limit(1)
+        ]);
+        const tasks = (tasksRes.data || []).filter(t => t.status !== 'done' && t.status !== 'cancelled');
+        const open = tasks.filter(t => t.status !== 'review');
+        const inReview = tasks.filter(t => t.status === 'review');
+
+        let usd = 0, robux = 0, proposed = 0;
+        (requestsRes.data || []).forEach(r => {
+            if (r.status === 'rejected') return;
+            if (r.status === 'proposed') { proposed++; return; }
+            if (r.currency === 'USD') usd += Number(r.payment) || 0;
+            else robux += Number(r.payment) || 0;
+        });
+        const run = (runRes.data || [])[0];
+
+        const embed = new EmbedBuilder()
+            .setTitle(`${viewer.robloxUsername}`)
+            .setColor(BRAND)
+            .addFields(
+                { name: 'Open tasks', value: String(open.length), inline: true },
+                { name: 'With your producer', value: String(inReview.length), inline: true },
+                { name: 'Requests pending', value: String(proposed), inline: true },
+                { name: 'Owed', value: [usd ? `$${usd.toFixed(2)}` : null, robux ? `R$ ${Math.round(robux).toLocaleString()}` : null].filter(Boolean).join(' and ') || 'Nothing right now' },
+                { name: 'Next run', value: run ? `${run.label}, closes ${run.period_end}` : 'No run open yet' }
+            );
+        if (open.length) {
+            embed.addFields({
+                name: 'What is on you',
+                value: open.slice(0, 8).map(t => `- ${t.title} (${dueLine(t.due_at)})${t.payment ? ' · ' + moneyLine(t.payment, t.currency) : ''}`).join('\n')
+            });
+        }
+        const link = siteLink('/home');
+        await interaction.editReply({ embeds: [embed], content: link ? `Full view: ${link}` : undefined });
+    },
+
+    async review(interaction) {
+        const viewer = await requireLink(interaction);
+        if (!viewer) return;
+
+        const { data: rows } = await supabase.from('team_tasks').select('*').eq('status', 'review').order('submitted_at', { ascending: true });
+        const all = rows || [];
+        const mine = [];
+        for (const t of all) {
+            if (String(t.assigned_to_user_id) === String(viewer.robloxUserId)) continue;
+            if (viewerCan(viewer, 'teams.manage')) { mine.push(t); continue; }
+            const reviewers = await reviewersForTask(t);
+            if (reviewers.includes(String(viewer.robloxUserId))) mine.push(t);
+        }
+        if (!mine.length) {
+            await interaction.editReply('Nothing is waiting on you right now.');
+            return;
+        }
+        const embed = new EmbedBuilder()
+            .setTitle(`Waiting on you (${mine.length})`)
+            .setColor(mine.length > 3 ? WARN_AMBER : BRAND)
+            .setDescription(mine.slice(0, 10).map(t => {
+                const link = siteLink(`/task/${t.id}`);
+                const who = t.assigned_to_username || 'someone';
+                return `- ${link ? `[${t.title}](${link})` : t.title} by ${who}${t.payment ? ' · ' + moneyLine(t.payment, t.currency) : ''}`;
+            }).join('\n'));
+        await interaction.editReply({ embeds: [embed] });
+    },
+
+    async run(interaction) {
+        const viewer = await requireLink(interaction);
+        if (!viewer) return;
+        if (!viewerCan(viewer, 'dashboard.view')) {
+            await interaction.editReply('You do not have access to the payments dashboard.');
+            return;
+        }
+        const { data: runs } = await supabase.from('payment_runs').select('*').order('period_start', { ascending: false }).limit(1);
+        const run = (runs || [])[0];
+        if (!run) { await interaction.editReply('No payment runs have been created yet.'); return; }
+
+        const { data: lines } = await supabase.from('payment_requests').select('payment, currency, paid').eq('run_id', run.id);
+        const rows = lines || [];
+        let usd = 0, robux = 0;
+        rows.forEach(r => { if (r.currency === 'USD') usd += Number(r.payment) || 0; else robux += Number(r.payment) || 0; });
+
+        const embed = new EmbedBuilder()
+            .setTitle(run.label)
+            .setColor(run.status === 'open' ? BRAND : run.status === 'closed' ? OK_GREEN : WARN_AMBER)
+            .addFields(
+                { name: 'Covers', value: `${run.period_start} to ${run.period_end}`, inline: true },
+                { name: 'Status', value: run.status, inline: true },
+                { name: 'Items', value: `${rows.filter(r => r.paid).length} paid of ${rows.length}`, inline: true },
+                { name: 'Cash', value: `$${usd.toFixed(2)}`, inline: true },
+                { name: 'Robux', value: `R$ ${Math.round(robux).toLocaleString()}`, inline: true }
+            );
+        const link = siteLink('/runs');
+        await interaction.editReply({ embeds: [embed], content: link ? link : undefined });
+    },
+
+    async whois(interaction) {
+        const viewer = await requireLink(interaction);
+        if (!viewer) return;
+        if (!viewerCan(viewer, 'staff.view_database')) {
+            await interaction.editReply('You do not have access to the staff database.');
+            return;
+        }
+        const target = interaction.options.getUser('member');
+        const theirs = await viewerContext(target.id);
+        if (!theirs) { await interaction.editReply(`${target.username} has not linked a PlayVerse account.`); return; }
+
+        const [teamsRes, tasksRes] = await Promise.all([
+            supabase.from('user_assignments').select('team_id').eq('roblox_user_id', theirs.robloxUserId),
+            supabase.from('team_tasks').select('status').eq('assigned_to_user_id', theirs.robloxUserId)
+        ]);
+        const teamIds = [...new Set((teamsRes.data || []).map(a => a.team_id).filter(id => id != null))];
+        let teamNames = [];
+        if (teamIds.length) {
+            const { data: teams } = await supabase.from('teams').select('name').in('id', teamIds);
+            teamNames = (teams || []).map(t => t.name);
+        }
+        const tasks = tasksRes.data || [];
+        const embed = new EmbedBuilder()
+            .setTitle(theirs.robloxUsername)
+            .setColor(BRAND)
+            .addFields(
+                { name: 'Discord', value: `<@${target.id}>`, inline: true },
+                { name: 'Roblox id', value: String(theirs.robloxUserId), inline: true },
+                { name: 'Roles', value: theirs.roles.join(', ') || 'None', inline: true },
+                { name: 'Teams', value: teamNames.join(', ') || 'None', inline: true },
+                { name: 'Open tasks', value: String(tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length), inline: true },
+                { name: 'Finished', value: String(tasks.filter(t => t.status === 'done').length), inline: true }
+            );
+        await interaction.editReply({ embeds: [embed] });
+    },
+
+    async note(interaction) {
+        const viewer = await requireLink(interaction);
+        if (!viewer) return;
+        if (!viewerCan(viewer, 'staff.moderate')) { await interaction.editReply('You do not have permission to add staff notes.'); return; }
+        const target = interaction.options.getUser('member');
+        const text = interaction.options.getString('text');
+        const theirs = await viewerContext(target.id);
+        if (!theirs) { await interaction.editReply(`${target.username} has not linked a PlayVerse account, so there is nothing to attach a note to.`); return; }
+        if (theirs.maxHierarchy >= viewer.maxHierarchy) { await interaction.editReply('Their role is at or above yours, so you cannot add notes to their record.'); return; }
+
+        await botAudit({
+            action: 'note', actorUserId: viewer.robloxUserId, actorUsername: viewer.robloxUsername,
+            targetUserId: theirs.robloxUserId, targetUsername: theirs.robloxUsername,
+            details: { note: text, via: 'discord' }
+        });
+        await interaction.editReply(`Noted on ${theirs.robloxUsername}'s record.`);
+    },
+
+    async warn(interaction) {
+        const viewer = await requireLink(interaction);
+        if (!viewer) return;
+        if (!viewerCan(viewer, 'staff.moderate')) { await interaction.editReply('You do not have permission to warn people.'); return; }
+        const target = interaction.options.getUser('member');
+        const reason = interaction.options.getString('reason');
+        const theirs = await viewerContext(target.id);
+        if (!theirs) { await interaction.editReply(`${target.username} has not linked a PlayVerse account, so a warning cannot be recorded.`); return; }
+        if (String(theirs.robloxUserId) === String(viewer.robloxUserId)) { await interaction.editReply('You cannot warn your own account.'); return; }
+        if (theirs.maxHierarchy >= viewer.maxHierarchy) { await interaction.editReply('Their role is at or above yours, so you cannot warn them.'); return; }
+
+        const { error } = await supabase.from('staff_warnings').insert({
+            roblox_user_id: theirs.robloxUserId,
+            roblox_username: theirs.robloxUsername,
+            reason,
+            issued_by: viewer.robloxUsername,
+            issued_by_user_id: viewer.robloxUserId,
+            created_at: new Date().toISOString()
+        });
+        if (error) {
+            console.error('[bot] warn insert failed:', error.message);
+            await interaction.editReply('Could not save that warning. Tell an admin.');
+            return;
+        }
+        await botAudit({
+            action: 'add_user_warning', actorUserId: viewer.robloxUserId, actorUsername: viewer.robloxUsername,
+            targetUserId: theirs.robloxUserId, targetUsername: theirs.robloxUsername,
+            details: { reason, via: 'discord' }
+        });
+        await dmRobloxUser(theirs.robloxUserId, `You've been given a warning on PlayVerse.\nReason: ${reason}`);
+        await interaction.editReply(`Warned ${theirs.robloxUsername}. They have been told why.`);
+    },
+
+    async health(interaction) {
+        const started = Date.now();
+        const { error } = await supabase.from('app_settings').select('id').eq('id', 1).maybeSingle();
+        const dbMs = Date.now() - started;
+        const up = Math.round(process.uptime());
+        const embed = new EmbedBuilder()
+            .setTitle('Bot health')
+            .setColor(error ? 0xB3311C : OK_GREEN)
+            .addFields(
+                { name: 'Database', value: error ? `Failing: ${error.message}` : `Responding in ${dbMs}ms`, inline: true },
+                { name: 'Gateway', value: `${Math.max(0, Math.round(client.ws.ping))}ms`, inline: true },
+                { name: 'Uptime', value: up > 3600 ? `${Math.round(up / 3600)}h` : `${Math.round(up / 60)}m`, inline: true }
+            );
+        await interaction.editReply({ embeds: [embed] });
+    }
+};
+
+const REVIEW_NAG_AFTER_MS = 48 * 60 * 60 * 1000;
+const JOB_INTERVAL_MS = 60 * 60 * 1000;
+const jobMarks = { reviewNag: new Map(), overdueNag: new Map(), freezeNag: null };
+
+function today() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+async function nagStaleReviews() {
+    const { data: rows } = await supabase.from('team_tasks').select('*').eq('status', 'review');
+    const stale = (rows || []).filter(t => t.submitted_at && Date.now() - new Date(t.submitted_at).getTime() > REVIEW_NAG_AFTER_MS);
+    if (!stale.length) return 0;
+
+    const perReviewer = new Map();
+    for (const t of stale) {
+        const reviewers = await reviewersForTask(t);
+        reviewers.forEach(id => {
+            if (!perReviewer.has(id)) perReviewer.set(id, []);
+            perReviewer.get(id).push(t);
+        });
+    }
+    let sent = 0;
+    for (const [reviewerId, tasks] of perReviewer) {
+        if (jobMarks.reviewNag.get(reviewerId) === today()) continue;
+        const lines = tasks.slice(0, 6).map(t => `- ${t.title} by ${t.assigned_to_username || 'someone'}`).join('\n');
+        const link = siteLink('/home');
+        const ok = await dmRobloxUser(Number(reviewerId),
+            `${tasks.length} ${tasks.length === 1 ? 'piece' : 'pieces'} of work ${tasks.length === 1 ? 'has' : 'have'} been waiting on your review for over two days.\n${lines}${link ? `\n${link}` : ''}`);
+        if (ok) { sent++; jobMarks.reviewNag.set(reviewerId, today()); }
+    }
+    return sent;
+}
+
+async function nagOverdueTasks() {
+    const { data: rows } = await supabase.from('team_tasks').select('*').eq('status', 'open');
+    const overdue = (rows || []).filter(t => t.due_at && new Date(t.due_at).getTime() < Date.now() && t.assigned_to_user_id != null);
+    let sent = 0;
+    for (const t of overdue) {
+        const key = String(t.id);
+        if (jobMarks.overdueNag.get(key) === today()) continue;
+        const link = siteLink(`/task/${t.id}`);
+        const ok = await dmRobloxUser(t.assigned_to_user_id,
+            `"${t.title}" is ${dueLine(t.due_at)}. If it is blocked, tell your producer rather than letting it sit.${link ? `\n${link}` : ''}`);
+        if (ok) sent++;
+        jobMarks.overdueNag.set(key, today());
+    }
+    return sent;
+}
+
+async function nagRunFreeze() {
+    const { data: runs } = await supabase.from('payment_runs').select('*').eq('status', 'open').limit(1);
+    const run = (runs || [])[0];
+    if (!run || !run.period_end) return false;
+    const daysLeft = Math.ceil((new Date(run.period_end + 'T23:59:59Z').getTime() - Date.now()) / 86400000);
+    if (daysLeft < 0 || daysLeft > 3) return false;
+    if (jobMarks.freezeNag === `${run.id}:${today()}`) return false;
+    if (!DISCORD_LEAD_CHANNEL_ID) return false;
+    try {
+        const channel = await client.channels.fetch(DISCORD_LEAD_CHANNEL_ID);
+        if (!channel || !channel.isTextBased()) return false;
+        await channel.send(`The **${run.label}** payment run closes in ${daysLeft === 0 ? 'under a day' : `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'}`}. Anything not approved by then rolls into the next one.`);
+        jobMarks.freezeNag = `${run.id}:${today()}`;
+        return true;
+    } catch (e) {
+        console.error('[bot] run freeze notice failed:', e.message);
+        return false;
+    }
+}
+
+async function runScheduledJobs() {
+    for (const [name, job] of [['stale reviews', nagStaleReviews], ['overdue tasks', nagOverdueTasks], ['run freeze', nagRunFreeze]]) {
+        try {
+            await job();
+        } catch (e) {
+            console.error(`[bot] job "${name}" failed:`, e && e.stack ? e.stack : e);
+        }
+    }
+    if (jobMarks.overdueNag.size > 2000) jobMarks.overdueNag.clear();
+    if (jobMarks.reviewNag.size > 500) jobMarks.reviewNag.clear();
+}
+
 client.once(Events.ClientReady, c => {
     console.log(`Logged in as ${c.user.tag}`);
 });
@@ -306,6 +753,18 @@ client.on(Events.InteractionCreate, async interaction => {
                 const { data: ticket, error } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
                 if (error || !ticket) { await interaction.editReply('No ticket found with that id.'); return; }
                 await interaction.editReply({ embeds: [await ticketEmbed(ticket)] });
+                return;
+            }
+
+            const handler = COMMAND_HANDLERS[interaction.commandName];
+            if (handler) {
+                await interaction.deferReply({ ephemeral: true });
+                try {
+                    await handler(interaction);
+                } catch (e) {
+                    console.error(`[bot] /${interaction.commandName} failed:`, e && e.stack ? e.stack : e);
+                    await interaction.editReply('Something went wrong running that. It has been logged.');
+                }
                 return;
             }
         }
@@ -424,6 +883,13 @@ http.createServer((req, res) => res.end('bot is alive')).listen(4000);
         console.error('initial reconcilePlacements failed:', e.message);
     }
     setInterval(reconcilePlacements, RECONCILE_INTERVAL_MS);
+
+    try {
+        await runScheduledJobs();
+    } catch (e) {
+        console.error('initial scheduled jobs failed:', e.message);
+    }
+    setInterval(runScheduledJobs, JOB_INTERVAL_MS);
 })();
 
 process.on('unhandledRejection', (reason) => {

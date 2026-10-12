@@ -1172,7 +1172,10 @@ async function notifyTaskEvent(task, teamId, kind, extra) {
         done: `Nice one, you finished "${task.title}" for ${teamName}.${task.due_at && new Date(task.completed_at || Date.now()) <= new Date(task.due_at) ? ' Right on time.' : ''}${taskMoneyLine(task)}`,
         reopened: `Your ${teamName} task "${task.title}" has been reopened.${due}`,
         cancelled: `Your ${teamName} task "${task.title}" has been cancelled. Nothing more to do.`,
-        deleted: `Your ${teamName} task "${task.title}" has been removed.`
+        deleted: `Your ${teamName} task "${task.title}" has been removed.`,
+        in_review: `Thanks, "${task.title}" is with your producer to review. You'll hear back once they've looked.`,
+        approved: `"${task.title}" was approved.${taskMoneyLine(task)}\nIt goes into the next payment run.`,
+        sent_back: `"${task.title}" needs another pass before it can be approved.`
     };
     let text = lines[kind] || lines.updated;
     if (extra) text += `\n${extra}`;
@@ -1187,6 +1190,44 @@ async function notifyTaskEvent(task, teamId, kind, extra) {
 
 async function notifyTaskAssigned(task, teamId) {
     return notifyTaskEvent(task, teamId, 'assigned');
+}
+
+async function reviewersForTask(task) {
+    const ids = new Set();
+    if (task && task.game_id) {
+        const { data: game } = await supabase
+            .from('games').select('producer_user_id').eq('id', task.game_id).maybeSingle();
+        if (game && game.producer_user_id != null) ids.add(String(game.producer_user_id));
+    }
+    if (!ids.size && task && task.team_id != null) {
+        const { data: members } = await supabase
+            .from('user_assignments').select('roblox_user_id').eq('team_id', task.team_id);
+        const memberIds = [...new Set((members || []).map(m => m.roblox_user_id).filter(id => id != null))];
+        let best = 0;
+        const levels = {};
+        for (const id of memberIds) {
+            const h = await getUserHierarchy(id);
+            levels[id] = h;
+            if (h > best) best = h;
+        }
+        if (best > 0) memberIds.filter(id => levels[id] === best).forEach(id => ids.add(String(id)));
+    }
+    return [...ids];
+}
+
+async function notifyTaskSubmitted(task, submittedBy) {
+    const reviewers = await reviewersForTask(task);
+    if (!reviewers.length) return 0;
+    const link = taskLink(task.id);
+    const text = `${submittedBy || 'A developer'} says "${task.title}" is finished and is waiting on your review.${link ? `\n${link}` : ''}`;
+    let sent = 0;
+    for (const id of reviewers) {
+        if (String(id) === String(task.assigned_to_user_id)) continue;
+        try {
+            if (await notifyModeratedUser(Number(id), text)) sent++;
+        } catch (e) { }
+    }
+    return sent;
 }
 
 async function legacyNotifyTaskAssigned(task, teamId) {
@@ -3496,6 +3537,458 @@ async function handleHrData(req, res) {
         return;
     }
 
+    if (action === 'get_home') {
+        const myId = session.roblox_user_id;
+        const myName = session.roblox_username;
+
+        const [myGamesRes, myAssignmentsRes, openRunRes] = await Promise.all([
+            supabase.from('games').select('*').eq('producer_user_id', myId),
+            supabase.from('user_assignments').select('team_id, skillset_id').eq('roblox_user_id', myId),
+            supabase.from('payment_runs').select('*').eq('status', 'open').limit(1)
+        ]);
+        const producedGames = myGamesRes.data || [];
+        const myTeamIds = [...new Set((myAssignmentsRes.data || []).map(a => a.team_id).filter(id => id != null))];
+        const openRun = (openRunRes.data || [])[0] || null;
+
+        const isExecutive = hasPermission(session, 'roles.manage') || hasPermission(session, 'dashboard.mark_paid');
+        const isProducer = !isExecutive && (canManageTeams(session) || producedGames.length > 0
+            || (myTeamIds.length > 0 && await canManageTeamTasks(session, myTeamIds[0])));
+        const view = isExecutive ? 'executive' : isProducer ? 'producer' : 'developer';
+
+        const home = { view, me: { robloxUserId: myId, robloxUsername: myName, roles: session.roles || [] }, openRun };
+
+        const { data: myTaskRows } = await supabase
+            .from('team_tasks')
+            .select('*')
+            .eq('assigned_to_user_id', myId)
+            .order('due_at', { ascending: true })
+            .limit(80);
+        const myTasks = (myTaskRows || []).filter(t => t.status !== 'cancelled' && t.status !== 'done');
+        home.myTasks = myTasks.map(t => ({
+            id: t.id, title: t.title, status: t.status, dueAt: t.due_at, gameId: t.game_id,
+            payment: t.payment, currency: t.currency, reviewNote: t.review_note, teamId: t.team_id
+        }));
+
+        const [minePendingById, minePendingByName] = await Promise.all([
+            supabase.from('payment_requests').select('*').eq('roblox_user_id', myId).eq('paid', false),
+            myName ? supabase.from('payment_requests').select('*').is('roblox_user_id', null).ilike('roblox_username', myName) : Promise.resolve({ data: [] })
+        ]);
+        const myRequests = [].concat(minePendingById.data || [], (minePendingByName.data || []).filter(r => !r.paid));
+        const { data: myMethodRow } = await supabase.from('payment_methods').select('*').eq('roblox_user_id', myId).maybeSingle();
+        const devexRate = await getDevexRate();
+        let owedUsd = 0, owedRobux = 0, awaitingDecision = 0;
+        myRequests.forEach(r => {
+            if (r.status === 'rejected') return;
+            if (r.status === 'proposed') { awaitingDecision++; return; }
+            const split = myMethodRow ? splitForRequest(r, myMethodRow, devexRate) : null;
+            if (split) { owedUsd += split.cashUsd; owedRobux += split.robux; }
+            else if (r.currency === 'USD') owedUsd += Number(r.payment) || 0;
+            else owedRobux += Number(r.payment) || 0;
+        });
+        home.owed = {
+            usd: Math.round(owedUsd * 100) / 100,
+            robux: Math.round(owedRobux),
+            awaitingDecision,
+            hasMethod: !!myMethodRow
+        };
+
+        if (view === 'developer') {
+            let producer = null;
+            const gameIds = [...new Set(myTasks.map(t => t.game_id).filter(Boolean))];
+            if (gameIds.length) {
+                const { data: games } = await supabase.from('games').select('id, name, producer_user_id, producer_username').in('id', gameIds);
+                const withProducer = (games || []).find(g => g.producer_username);
+                if (withProducer) producer = { robloxUserId: withProducer.producer_user_id, robloxUsername: withProducer.producer_username };
+            }
+            home.producer = producer;
+            res.json({ ok: true, data: home });
+            return;
+        }
+
+        const teamGameIds = [];
+        if (myTeamIds.length) {
+            const { data: links } = await supabase.from('team_games').select('game_id').in('team_id', myTeamIds);
+            (links || []).forEach(l => { if (l.game_id != null) teamGameIds.push(l.game_id); });
+        }
+        const scopeGameIds = [...new Set(producedGames.map(g => g.id).concat(teamGameIds))];
+
+        let scopeGames = producedGames;
+        if (scopeGameIds.length > producedGames.length) {
+            const { data: all } = await supabase.from('games').select('*').in('id', scopeGameIds);
+            scopeGames = all || producedGames;
+        }
+
+        const reviewTeamIds = [...new Set(myTeamIds)];
+        const { data: reviewRows } = await supabase.from('team_tasks').select('*').eq('status', 'review').order('submitted_at', { ascending: true });
+        const reviewQueue = [];
+        const canReview = {};
+        for (const t of (reviewRows || [])) {
+            if (String(t.assigned_to_user_id || '') === String(myId)) continue;
+            const key = String(t.team_id);
+            if (canReview[key] === undefined) {
+                canReview[key] = canManageTeams(session) || reviewTeamIds.includes(t.team_id)
+                    ? await canManageTeamTasks(session, t.team_id)
+                    : false;
+            }
+            if (canReview[key]) {
+                reviewQueue.push({
+                    id: t.id, title: t.title, teamId: t.team_id, gameId: t.game_id,
+                    assignedTo: t.assigned_to_username, assignedToUserId: t.assigned_to_user_id,
+                    submittedAt: t.submitted_at, payment: t.payment, currency: t.currency
+                });
+            }
+        }
+        home.reviewQueue = reviewQueue;
+
+        const teamScope = canManageTeams(session) ? null : reviewTeamIds;
+        let openTaskQuery = supabase.from('team_tasks').select('*').neq('status', 'done').neq('status', 'cancelled');
+        if (teamScope && teamScope.length) openTaskQuery = openTaskQuery.in('team_id', teamScope);
+        const { data: scopeTaskRows } = (teamScope && !teamScope.length) ? { data: [] } : await openTaskQuery;
+        const scopeTasks = scopeTaskRows || [];
+        const now = Date.now();
+        home.overdue = scopeTasks
+            .filter(t => t.due_at && new Date(t.due_at).getTime() < now)
+            .sort((a, b) => new Date(a.due_at) - new Date(b.due_at))
+            .slice(0, 25)
+            .map(t => ({
+                id: t.id, title: t.title, dueAt: t.due_at, teamId: t.team_id, gameId: t.game_id,
+                assignedTo: t.assigned_to_username, assignedToUserId: t.assigned_to_user_id, status: t.status
+            }));
+
+        const memberTeamIds = canManageTeams(session) ? null : reviewTeamIds;
+        let memberQuery = supabase.from('user_assignments').select('roblox_user_id, roblox_username, team_id');
+        if (memberTeamIds && memberTeamIds.length) memberQuery = memberQuery.in('team_id', memberTeamIds);
+        const { data: memberRows } = memberTeamIds && !memberTeamIds.length ? { data: [] } : await memberQuery;
+        const busy = new Set(scopeTasks.map(t => String(t.assigned_to_user_id)));
+        const idleSeen = new Set();
+        home.idleMembers = (memberRows || [])
+            .filter(m => m.roblox_user_id != null && String(m.roblox_user_id) !== String(myId))
+            .filter(m => {
+                const key = String(m.roblox_user_id);
+                if (busy.has(key) || idleSeen.has(key)) return false;
+                idleSeen.add(key);
+                return true;
+            })
+            .slice(0, 25)
+            .map(m => ({ robloxUserId: m.roblox_user_id, robloxUsername: m.roblox_username, teamId: m.team_id }));
+
+        let spend = [];
+        if (scopeGames.length) {
+            const gameIds = scopeGames.map(g => g.id);
+            const { data: spendRows } = await supabase
+                .from('payment_requests')
+                .select('game_id, payment, currency, status, created_at')
+                .in('game_id', gameIds);
+            const perGame = {};
+            (spendRows || []).forEach(r => {
+                if (r.status === 'rejected' || r.status === 'proposed') return;
+                if (openRun && r.created_at && (String(r.created_at).slice(0, 10) < openRun.period_start)) return;
+                const key = String(r.game_id);
+                perGame[key] = perGame[key] || { usd: 0, robux: 0 };
+                if (r.currency === 'USD') perGame[key].usd += Number(r.payment) || 0;
+                else perGame[key].robux += Number(r.payment) || 0;
+            });
+            spend = scopeGames.map(g => ({
+                id: g.id, name: g.name, iconUrl: g.icon_url || g.thumbnail_url || null,
+                producerUsername: g.producer_username || null,
+                budgetAmount: g.budget_amount != null ? Number(g.budget_amount) : null,
+                budgetCurrency: g.budget_currency || 'USD',
+                spent: perGame[String(g.id)] || { usd: 0, robux: 0 }
+            }));
+        }
+        home.games = spend;
+
+        if (view === 'executive') {
+            const [claimsRes, runsRes, pendingRes, staffRes] = await Promise.all([
+                supabase.from('payment_requests').select('id').eq('status', 'proposed'),
+                supabase.from('payment_runs').select('*').order('period_start', { ascending: false }).limit(5),
+                supabase.from('payment_requests').select('payment, currency, status, paid'),
+                supabase.from('user_assignments').select('roblox_user_id')
+            ]);
+            let pendingUsd = 0, pendingRobux = 0;
+            (pendingRes.data || []).forEach(r => {
+                if (r.paid || r.status !== 'pending') return;
+                if (r.currency === 'USD') pendingUsd += Number(r.payment) || 0;
+                else pendingRobux += Number(r.payment) || 0;
+            });
+            home.studio = {
+                openClaims: (claimsRes.data || []).length,
+                reviewWaiting: reviewQueue.length,
+                pendingUsd: Math.round(pendingUsd * 100) / 100,
+                pendingRobux: Math.round(pendingRobux),
+                headcount: [...new Set((staffRes.data || []).map(a => String(a.roblox_user_id)))].length,
+                recentRuns: runsRes.data || []
+            };
+        }
+
+        res.json({ ok: true, data: home });
+        return;
+    }
+
+    if (action === 'list_rate_bands') {
+        const { data } = await supabase.from('rate_bands').select('*').order('name', { ascending: true });
+        const rows = (data || []).filter(b => payload.includeInactive === true || b.active !== false);
+        res.json({ ok: true, data: rows });
+        return;
+    }
+
+    if (action === 'save_rate_band') {
+        if (!requirePermission(res, session, 'settings.manage_rate')) return;
+        const name = payload.name ? String(payload.name).trim().slice(0, 120) : '';
+        const amount = Number(payload.amount);
+        const currency = payload.currency === 'ROBUX' ? 'ROBUX' : 'USD';
+        const notes = payload.notes ? String(payload.notes).trim().slice(0, 400) : null;
+        const skillsetId = payload.skillsetId != null && payload.skillsetId !== '' ? Number(payload.skillsetId) : null;
+        if (!name || !Number.isFinite(amount) || amount <= 0) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+
+        const row = { name, amount, currency, notes, skillset_id: Number.isFinite(skillsetId) ? skillsetId : null, active: payload.active !== false };
+        if (payload.id) {
+            const { data: changed, error } = await supabase.from('rate_bands').update(row).eq('id', payload.id).select('id');
+            if (error) { console.error('[save_rate_band] update failed:', error.message); res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+            if (!changed || !changed.length) { res.status(404).json({ ok: false, error: 'rate_band_not_found' }); return; }
+            await logAudit(session, { category: 'payments', action: 'update_rate_band', details: { id: payload.id, ...row } });
+            res.json({ ok: true, id: payload.id });
+            return;
+        }
+        const { data: made, error } = await supabase.from('rate_bands')
+            .insert({ ...row, created_by: session.roblox_username, created_at: new Date().toISOString() })
+            .select('id').maybeSingle();
+        if (error) { console.error('[save_rate_band] insert failed:', error.message); res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+        await logAudit(session, { category: 'payments', action: 'create_rate_band', details: { id: made ? made.id : null, ...row } });
+        res.json({ ok: true, id: made ? made.id : null });
+        return;
+    }
+
+    if (action === 'delete_rate_band') {
+        if (!requirePermission(res, session, 'settings.manage_rate')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { error } = await supabase.from('rate_bands').update({ active: false }).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+        await logAudit(session, { category: 'payments', action: 'retire_rate_band', details: { id } });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'list_payment_runs') {
+        if (!requirePermission(res, session, 'dashboard.view')) return;
+        const { data } = await supabase.from('payment_runs').select('*').order('period_start', { ascending: false }).limit(40);
+        const runs = data || [];
+        const counts = {};
+        if (runs.length) {
+            const { data: rows } = await supabase.from('payment_requests').select('run_id, payment, currency, paid').not('run_id', 'is', null);
+            (rows || []).forEach(r => {
+                const key = String(r.run_id);
+                counts[key] = counts[key] || { lines: 0, paidLines: 0, usd: 0, robux: 0 };
+                counts[key].lines++;
+                if (r.paid) counts[key].paidLines++;
+                if (r.currency === 'USD') counts[key].usd += Number(r.payment) || 0;
+                else counts[key].robux += Number(r.payment) || 0;
+            });
+        }
+        res.json({ ok: true, data: runs.map(r => ({ ...r, totals: counts[String(r.id)] || { lines: 0, paidLines: 0, usd: 0, robux: 0 } })) });
+        return;
+    }
+
+    if (action === 'create_payment_run') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const label = payload.label ? String(payload.label).trim().slice(0, 80) : '';
+        const periodStart = payload.periodStart ? String(payload.periodStart).slice(0, 10) : '';
+        const periodEnd = payload.periodEnd ? String(payload.periodEnd).slice(0, 10) : '';
+        const payDate = payload.payDate ? String(payload.payDate).slice(0, 10) : null;
+        if (!label || !/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+            res.status(400).json({ ok: false, error: 'invalid_fields' });
+            return;
+        }
+        if (periodEnd < periodStart) { res.status(400).json({ ok: false, error: 'end_before_start' }); return; }
+
+        const { data: open } = await supabase.from('payment_runs').select('id, label').eq('status', 'open').limit(1);
+        if (open && open.length) { res.status(409).json({ ok: false, error: 'run_already_open' }); return; }
+
+        const { data: made, error } = await supabase.from('payment_runs').insert({
+            label, period_start: periodStart, period_end: periodEnd, pay_date: payDate,
+            status: 'open', created_by: session.roblox_username, created_at: new Date().toISOString()
+        }).select('id').maybeSingle();
+        if (error) { console.error('[create_payment_run] insert failed:', error.message); res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+        await logAudit(session, { category: 'payments', action: 'create_payment_run', details: { id: made ? made.id : null, label, periodStart, periodEnd } });
+        res.json({ ok: true, id: made ? made.id : null });
+        return;
+    }
+
+    if (action === 'freeze_payment_run') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: run } = await supabase.from('payment_runs').select('*').eq('id', id).maybeSingle();
+        if (!run) { res.status(404).json({ ok: false, error: 'run_not_found' }); return; }
+        if (run.status !== 'open') { res.status(409).json({ ok: false, error: 'run_not_open' }); return; }
+
+        const { data: waiting } = await supabase
+            .from('payment_requests')
+            .select('id')
+            .eq('status', 'pending')
+            .eq('paid', false)
+            .is('run_id', null);
+        const ids = (waiting || []).map(r => r.id);
+        if (ids.length) {
+            const { error: assignError } = await supabase.from('payment_requests').update({ run_id: id }).in('id', ids);
+            if (assignError) {
+                console.error('[freeze_payment_run] could not attach requests:', assignError.message);
+                res.status(500).json({ ok: false, error: 'update_failed' });
+                return;
+            }
+        }
+        const { error } = await supabase.from('payment_runs')
+            .update({ status: 'frozen', frozen_at: new Date().toISOString(), frozen_by: session.roblox_username })
+            .eq('id', id);
+        if (error) { console.error('[freeze_payment_run] update failed:', error.message); res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+
+        await logAudit(session, { category: 'payments', action: 'freeze_payment_run', details: { id, label: run.label, lines: ids.length } });
+        res.json({ ok: true, lines: ids.length });
+        return;
+    }
+
+    if (action === 'close_payment_run') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: run } = await supabase.from('payment_runs').select('*').eq('id', id).maybeSingle();
+        if (!run) { res.status(404).json({ ok: false, error: 'run_not_found' }); return; }
+        if (run.status === 'open') { res.status(409).json({ ok: false, error: 'freeze_run_first' }); return; }
+        if (run.status === 'closed') { res.json({ ok: true, already: true }); return; }
+
+        const { data: unpaid } = await supabase.from('payment_requests').select('id').eq('run_id', id).eq('paid', false);
+        if (unpaid && unpaid.length && payload.force !== true) {
+            res.status(409).json({ ok: false, error: 'run_has_unpaid', unpaid: unpaid.length });
+            return;
+        }
+        const { error } = await supabase.from('payment_runs')
+            .update({ status: 'closed', closed_at: new Date().toISOString(), closed_by: session.roblox_username })
+            .eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+        await logAudit(session, { category: 'payments', action: 'close_payment_run', details: { id, label: run.label, forced: payload.force === true } });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_payment_run') {
+        if (!requirePermission(res, session, 'dashboard.view')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: run } = await supabase.from('payment_runs').select('*').eq('id', id).maybeSingle();
+        if (!run) { res.status(404).json({ ok: false, error: 'run_not_found' }); return; }
+
+        const { data: rows } = await supabase.from('payment_requests').select('*').eq('run_id', id).order('created_at', { ascending: true });
+        const lines = rows || [];
+        const devexRate = await getDevexRate();
+
+        const userIds = [...new Set(lines.filter(r => r.roblox_user_id != null).map(r => r.roblox_user_id))];
+        const usernames = [...new Set(lines.filter(r => r.roblox_user_id == null && r.roblox_username).map(r => r.roblox_username))];
+        const [byId, byName] = await Promise.all([
+            userIds.length ? supabase.from('payment_methods').select('*').in('roblox_user_id', userIds) : Promise.resolve({ data: [] }),
+            usernames.length ? supabase.from('payment_methods').select('*').in('roblox_username', usernames) : Promise.resolve({ data: [] })
+        ]);
+        const methodById = {}, methodByName = {};
+        [].concat(byId.data || [], byName.data || []).forEach(m => {
+            if (m.roblox_user_id != null) methodById[String(m.roblox_user_id)] = m;
+            if (m.roblox_username) methodByName[String(m.roblox_username).toLowerCase()] = m;
+        });
+
+        const people = {};
+        lines.forEach(r => {
+            const key = r.roblox_user_id != null ? 'id:' + r.roblox_user_id : 'name:' + String(r.roblox_username || '').toLowerCase();
+            const method = r.roblox_user_id != null
+                ? methodById[String(r.roblox_user_id)]
+                : methodByName[String(r.roblox_username || '').toLowerCase()];
+            if (!people[key]) {
+                people[key] = {
+                    key,
+                    robloxUserId: r.roblox_user_id != null ? r.roblox_user_id : null,
+                    robloxUsername: r.roblox_username || null,
+                    method: method ? redactPayoutMethod(method, session) : null,
+                    usd: 0, robux: 0, lines: [], paidLines: 0
+                };
+            }
+            const person = people[key];
+            const split = method ? splitForRequest(r, method, devexRate) : null;
+            if (split) {
+                person.usd += split.cashUsd;
+                person.robux += split.robux;
+            } else if (r.currency === 'USD') {
+                person.usd += Number(r.payment) || 0;
+            } else {
+                person.robux += Number(r.payment) || 0;
+            }
+            if (r.paid) person.paidLines++;
+            person.lines.push({
+                id: r.id, taskName: r.task_name, game: r.game,
+                payment: Number(r.payment) || 0, currency: r.currency,
+                paid: !!r.paid, paidAt: r.paid_at, split
+            });
+        });
+
+        const sheet = Object.values(people)
+            .map(p => ({ ...p, usd: Math.round(p.usd * 100) / 100, robux: Math.round(p.robux) }))
+            .sort((a, b) => String(a.robloxUsername || '').localeCompare(String(b.robloxUsername || '')));
+
+        res.json({
+            ok: true,
+            data: {
+                run,
+                devexRate,
+                sheet,
+                totals: {
+                    people: sheet.length,
+                    lines: lines.length,
+                    paidLines: lines.filter(r => r.paid).length,
+                    usd: Math.round(sheet.reduce((s, p) => s + p.usd, 0) * 100) / 100,
+                    robux: sheet.reduce((s, p) => s + p.robux, 0)
+                }
+            }
+        });
+        return;
+    }
+
+    if (action === 'mark_run_person_paid') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const id = payload.id;
+        const robloxUserId = payload.robloxUserId != null ? Number(payload.robloxUserId) : null;
+        const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        if (!id || (robloxUserId == null && !robloxUsername)) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: run } = await supabase.from('payment_runs').select('*').eq('id', id).maybeSingle();
+        if (!run) { res.status(404).json({ ok: false, error: 'run_not_found' }); return; }
+        if (run.status === 'open') { res.status(409).json({ ok: false, error: 'freeze_run_first' }); return; }
+        if (run.status === 'closed') { res.status(409).json({ ok: false, error: 'run_closed' }); return; }
+
+        let query = supabase.from('payment_requests').select('id').eq('run_id', id).eq('paid', false);
+        query = robloxUserId != null ? query.eq('roblox_user_id', robloxUserId) : query.is('roblox_user_id', null).ilike('roblox_username', robloxUsername);
+        const { data: lines } = await query;
+        const ids = (lines || []).map(r => r.id);
+        if (!ids.length) { res.json({ ok: true, count: 0 }); return; }
+
+        const paidAt = new Date().toISOString();
+        const { error } = await supabase.from('payment_requests')
+            .update({ paid: true, paid_at: paidAt, status: 'paid' })
+            .in('id', ids);
+        if (error) { console.error('[mark_run_person_paid] update failed:', error.message); res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+
+        if (run.status === 'frozen') {
+            await supabase.from('payment_runs').update({ status: 'paying' }).eq('id', id);
+        }
+        await logAudit(session, {
+            category: 'payments', action: 'mark_run_person_paid',
+            targetUserId: robloxUserId, targetUsername: robloxUsername,
+            details: { runId: id, label: run.label, count: ids.length }
+        });
+        if (robloxUserId != null) {
+            try {
+                await notifyModeratedUser(robloxUserId, `You've been paid for ${ids.length} ${ids.length === 1 ? 'item' : 'items'} in the ${run.label} payment run.`);
+            } catch (e) { }
+        }
+        res.json({ ok: true, count: ids.length });
+        return;
+    }
+
     if (action === 'list_requests') {
         if (!requirePermission(res, session, 'dashboard.view')) return;
         const now = Date.now();
@@ -5571,6 +6064,131 @@ async function handleHrData(req, res) {
         const notified = row.assigned_to_user_id ? await notifyTaskAssigned(row, teamId) : false;
         await logAudit(session, { category: 'teams', action: 'create_task', details: { teamId, title, dueAt: row.due_at } });
         res.json({ ok: true, created: 1, notified: notified ? 1 : 0 });
+        return;
+    }
+
+    if (action === 'submit_task_for_review') {
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const { data: task } = await supabase.from('team_tasks').select('*').eq('id', id).maybeSingle();
+        if (!task) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
+        const mine = String(task.assigned_to_user_id || '') === String(session.roblox_user_id);
+        if (!mine && !(await canManageTeamTasks(session, task.team_id))) {
+            res.status(403).json({ ok: false, error: 'not_your_task' });
+            return;
+        }
+        if (task.status === 'done') { res.status(400).json({ ok: false, error: 'task_already_approved' }); return; }
+        if (task.status === 'cancelled') { res.status(400).json({ ok: false, error: 'task_cancelled' }); return; }
+        if (task.status === 'review') { res.json({ ok: true, already: true }); return; }
+
+        const note = payload.note ? String(payload.note).trim().slice(0, 1000) : '';
+        const { data: changed, error } = await supabase.from('team_tasks').update({
+            status: 'review',
+            submitted_at: new Date().toISOString(),
+            submitted_by: session.roblox_username,
+            review_note: note || null
+        }).eq('id', id).select('id');
+        if (error) {
+            console.error('[submit_task_for_review] update failed:', error.message);
+            res.status(500).json({ ok: false, error: 'update_failed' });
+            return;
+        }
+        if (!changed || !changed.length) { res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+
+        const notified = await notifyTaskSubmitted(task, session.roblox_username);
+        if (!mine) await notifyTaskEvent({ ...task, status: 'review' }, task.team_id, 'in_review');
+        await logAudit(session, {
+            category: 'teams', action: 'task_submitted',
+            targetUserId: task.assigned_to_user_id, targetUsername: task.assigned_to_username,
+            details: { taskId: id, title: task.title, note }
+        });
+        res.json({ ok: true, notified });
+        return;
+    }
+
+    if (action === 'decide_task_review') {
+        const id = payload.id;
+        const decision = payload.decision === 'approve' ? 'approve' : payload.decision === 'send_back' ? 'send_back' : null;
+        if (!id || !decision) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: task } = await supabase.from('team_tasks').select('*').eq('id', id).maybeSingle();
+        if (!task) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
+        if (!(await canManageTeamTasks(session, task.team_id))) { res.status(403).json({ ok: false, error: 'missing_permission' }); return; }
+        if (String(task.assigned_to_user_id || '') === String(session.roblox_user_id)) {
+            res.status(403).json({ ok: false, error: 'cannot_review_own_work' });
+            return;
+        }
+        if (task.status === 'cancelled') { res.status(400).json({ ok: false, error: 'task_cancelled' }); return; }
+        if (decision === 'approve' && task.status === 'done') { res.json({ ok: true, already: true }); return; }
+        if (decision === 'send_back' && task.status !== 'review') { res.status(400).json({ ok: false, error: 'task_not_in_review' }); return; }
+
+        const note = payload.note ? String(payload.note).trim().slice(0, 1000) : '';
+        const now = new Date().toISOString();
+        const update = decision === 'approve'
+            ? { status: 'done', completed_at: now, completed_by: task.assigned_to_username || session.roblox_username, approved_at: now, approved_by: session.roblox_username, review_note: note || null }
+            : { status: 'open', submitted_at: null, submitted_by: null, completed_at: null, completed_by: null, approved_at: null, approved_by: null, review_note: note || null, reminders_sent: [] };
+
+        const { data: changed, error } = await supabase.from('team_tasks').update(update).eq('id', id).select('id');
+        if (error) {
+            console.error('[decide_task_review] update failed:', error.message);
+            res.status(500).json({ ok: false, error: 'update_failed' });
+            return;
+        }
+        if (!changed || !changed.length) { res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+
+        const merged = { ...task, ...update };
+        const notified = await notifyTaskEvent(merged, task.team_id, decision === 'approve' ? 'approved' : 'sent_back', note || null);
+
+        let repeated = null;
+        if (decision === 'approve' && task.repeat_every) {
+            const nextDue = nextDueDate(task.due_at, task.repeat_every);
+            if (nextDue) {
+                const { data: made } = await supabase.from('team_tasks').insert({
+                    team_id: task.team_id,
+                    batch_id: task.batch_id || null,
+                    game_id: task.game_id,
+                    title: task.title,
+                    details: task.details,
+                    assigned_to_user_id: task.assigned_to_user_id,
+                    assigned_to_username: task.assigned_to_username,
+                    due_at: nextDue,
+                    repeat_every: task.repeat_every,
+                    payment: task.payment,
+                    currency: task.currency,
+                    rate_band_id: task.rate_band_id || null,
+                    reminders_sent: [],
+                    status: 'open',
+                    created_by: task.created_by,
+                    created_at: new Date().toISOString()
+                }).select('id, due_at').maybeSingle();
+                repeated = made ? made.due_at : nextDue;
+            }
+        }
+
+        await logAudit(session, {
+            category: 'teams', action: decision === 'approve' ? 'task_approved' : 'task_sent_back',
+            targetUserId: task.assigned_to_user_id, targetUsername: task.assigned_to_username,
+            details: { taskId: id, title: task.title, note, payment: task.payment, currency: task.currency, repeated }
+        });
+        res.json({ ok: true, notified, repeated });
+        return;
+    }
+
+    if (action === 'list_review_queue') {
+        const { data: rows } = await supabase
+            .from('team_tasks')
+            .select('*')
+            .eq('status', 'review')
+            .order('submitted_at', { ascending: true });
+        const tasks = rows || [];
+        const mine = [];
+        const seen = {};
+        for (const t of tasks) {
+            if (String(t.assigned_to_user_id || '') === String(session.roblox_user_id)) continue;
+            const key = String(t.team_id);
+            if (seen[key] === undefined) seen[key] = await canManageTeamTasks(session, t.team_id);
+            if (seen[key]) mine.push(t);
+        }
+        res.json({ ok: true, data: mine });
         return;
     }
 
