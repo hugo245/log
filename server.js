@@ -273,24 +273,128 @@ async function logSecurityEvent({ kind, severity, session, actorUsername, target
 async function securityGate(res, session, action) {
     const state = await getSecurityState();
     if (state.level === 'normal') return true;
-    if (hasPermission(session, 'security.manage')) return true;
-    if (SECURITY_ALWAYS_ALLOWED.has(action)) return true;
 
-    if (state.level === 'lockdown') {
+    if (SECURITY_MONEY_ACTIONS.has(action)) {
+        res.status(423).json({
+            ok: false, error: 'security_hold',
+            security: { level: state.level, note: state.note }
+        });
+        return false;
+    }
+
+    if (state.level === 'lockdown'
+        && !hasPermission(session, 'security.manage')
+        && !SECURITY_ALWAYS_ALLOWED.has(action)) {
         res.status(423).json({
             ok: false, error: 'locked_down',
             security: { level: 'lockdown', note: state.note }
         });
         return false;
     }
-    if (state.level === 'heightened' && SECURITY_MONEY_ACTIONS.has(action)) {
-        res.status(423).json({
-            ok: false, error: 'security_hold',
-            security: { level: 'heightened', note: state.note }
-        });
+    return true;
+}
+
+async function accountHoldFor(robloxUserId) {
+    if (robloxUserId == null) return null;
+    const { data } = await supabase
+        .from('security_holds')
+        .select('*')
+        .eq('roblox_user_id', robloxUserId)
+        .maybeSingle();
+    return data || null;
+}
+
+async function blockedByAccountHold(res, robloxUserId, what) {
+    const hold = await accountHoldFor(robloxUserId);
+    if (!hold) return false;
+    res.status(423).json({
+        ok: false, error: 'account_held',
+        hold: { reason: hold.reason || null, placedBy: hold.placed_by || null, what: what || null }
+    });
+    return true;
+}
+
+async function getAutoRaiseConfig() {
+    try {
+        const { data } = await supabase
+            .from('app_settings')
+            .select('security_auto_raise, security_method_window_minutes, security_method_threshold')
+            .eq('id', 1)
+            .maybeSingle();
+        return {
+            enabled: !data || data.security_auto_raise !== false,
+            windowMinutes: data && data.security_method_window_minutes != null ? Number(data.security_method_window_minutes) : 60,
+            threshold: data && data.security_method_threshold != null ? Number(data.security_method_threshold) : 3
+        };
+    } catch (e) {
+        return { enabled: false, windowMinutes: 60, threshold: 3 };
+    }
+}
+
+async function checkPayoutChangeBurst(session) {
+    const config = await getAutoRaiseConfig();
+    if (!config.enabled || !(config.threshold > 0)) return false;
+    const state = await getSecurityState();
+    if (state.level !== 'normal') return false;
+
+    const since = new Date(Date.now() - config.windowMinutes * 60 * 1000).toISOString();
+    const { data } = await supabase
+        .from('security_events')
+        .select('actor_username, created_at')
+        .eq('kind', 'payout_method_changed')
+        .gte('created_at', since);
+    const recent = (data || []).length;
+    if (recent < config.threshold) return false;
+
+    const note = `${recent} payout methods changed in ${config.windowMinutes} minutes, so the protocol raised itself.`;
+    const { error } = await supabase.from('app_settings').update({
+        security_level: 'heightened',
+        security_note: note,
+        security_set_by: 'System',
+        security_set_at: new Date().toISOString()
+    }).eq('id', 1);
+    if (error) {
+        console.error('[security] auto raise failed:', error.message);
         return false;
     }
+    securityCache.readAt = 0;
+    await logSecurityEvent({
+        kind: 'security_level_changed', severity: 'alert', session: null, actorUsername: 'System',
+        detail: `normal to heightened: ${note}`,
+        context: { from: 'normal', to: 'heightened', automatic: true, changes: recent, windowMinutes: config.windowMinutes }
+    });
+    console.warn('[security] auto raised to heightened after', recent, 'payout method changes');
     return true;
+}
+
+async function securityPosture(session) {
+    const [sessionsRes, holdsRes, linksRes, methodsRes, rolesRes] = await Promise.all([
+        supabase.from('hr_sessions').select('roblox_user_id, last_seen_at, created_at'),
+        supabase.from('security_holds').select('roblox_user_id'),
+        supabase.from('discord_links').select('roblox_user_id'),
+        supabase.from('payment_methods').select('roblox_user_id, method'),
+        supabase.from('roles').select('name, permissions')
+    ]);
+    const sessions = sessionsRes.data || [];
+    const weekAgo = Date.now() - 7 * 86400000;
+    const linked = new Set((linksRes.data || []).map(r => String(r.roblox_user_id)));
+    const methods = methodsRes.data || [];
+    const roles = rolesRes.data || [];
+
+    const payRoles = roles.filter(r => (r.permissions || []).includes('dashboard.mark_paid'));
+    const bankRoles = roles.filter(r => (r.permissions || []).includes('payouts.view_bank_details'));
+    const securityRoles = roles.filter(r => (r.permissions || []).includes('security.manage'));
+
+    return {
+        sessions: sessions.length,
+        staleSessions: sessions.filter(r => new Date(r.last_seen_at || r.created_at || 0).getTime() < weekAgo).length,
+        holds: (holdsRes.data || []).length,
+        unlinkedWithMethod: methods.filter(m => m.roblox_user_id != null && !linked.has(String(m.roblox_user_id))).length,
+        bankAccounts: methods.filter(m => m.method === 'BANK_TRANSFER').length,
+        rolesThatCanPay: payRoles.map(r => r.name),
+        rolesThatSeeBank: bankRoles.map(r => r.name),
+        rolesThatManageSecurity: securityRoles.map(r => r.name)
+    };
 }
 
 async function noteSensitiveAccess(session, viewedUsernames) {
@@ -2490,8 +2594,20 @@ function hasPermission(session, permission) {
     return !!session && Array.isArray(session.permissions) && session.permissions.includes(permission);
 }
 
+const SENSITIVE_PERMISSIONS = new Set([
+    'security.manage', 'roles.manage', 'dashboard.mark_paid',
+    'payouts.view_bank_details', 'staff.moderate', 'backups.manage'
+]);
+
 function requirePermission(res, session, permission) {
     if (hasPermission(session, permission)) return true;
+    if (SENSITIVE_PERMISSIONS.has(permission)) {
+        logSecurityEvent({
+            kind: 'permission_denied', severity: 'notice', session,
+            detail: `Tried something needing ${permission}`,
+            context: { permission }
+        });
+    }
     res.status(403).json({ ok: false, error: 'missing_permission' });
     return false;
 }
@@ -3451,6 +3567,7 @@ async function handleHrData(req, res) {
     }
 
     if (action === 'submit_claim') {
+        if (await blockedByAccountHold(res, session.roblox_user_id, 'send a payment request')) return;
         const taskName = payload.taskName ? String(payload.taskName).trim() : '';
         const game = payload.game ? String(payload.game).trim() : null;
         const amount = Number(payload.payment);
@@ -3705,6 +3822,123 @@ async function handleHrData(req, res) {
             details: { from: before.level, to: level, note, sessionsRevoked: revoked }
         });
         res.json({ ok: true, level, revoked });
+        return;
+    }
+
+    if (action === 'list_account_holds') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const { data } = await supabase.from('security_holds').select('*').order('placed_at', { ascending: false });
+        res.json({ ok: true, data: data || [] });
+        return;
+    }
+
+    if (action === 'place_account_hold') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const robloxUserId = payload.robloxUserId != null ? Number(payload.robloxUserId) : null;
+        const reason = payload.reason ? String(payload.reason).trim().slice(0, 400) : '';
+        if (!Number.isFinite(robloxUserId) || !reason) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        if (String(robloxUserId) === String(session.roblox_user_id)) { res.status(400).json({ ok: false, error: 'cannot_hold_self' }); return; }
+
+        const targetHierarchy = await getUserHierarchy(robloxUserId);
+        if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
+
+        let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
+        if (!username) {
+            const { data: known } = await supabase.from('payment_methods').select('roblox_username').eq('roblox_user_id', robloxUserId).maybeSingle();
+            username = known ? known.roblox_username : null;
+        }
+
+        const { error } = await supabase.from('security_holds').upsert({
+            roblox_user_id: robloxUserId,
+            roblox_username: username,
+            reason,
+            placed_by: session.roblox_username,
+            placed_by_user_id: session.roblox_user_id,
+            placed_at: new Date().toISOString()
+        }, { onConflict: 'roblox_user_id' });
+        if (error) {
+            console.error('[place_account_hold] failed:', error.message);
+            res.status(500).json({ ok: false, error: 'update_failed' });
+            return;
+        }
+
+        const { data: theirSessions } = await supabase.from('hr_sessions').select('token').eq('roblox_user_id', robloxUserId);
+        const tokens = (theirSessions || []).map(r => r.token);
+        if (payload.signThemOut === true && tokens.length) {
+            await supabase.from('hr_sessions').delete().in('token', tokens);
+        }
+
+        await logSecurityEvent({
+            kind: 'account_held', severity: 'alert', session,
+            targetUserId: robloxUserId, targetUsername: username,
+            detail: `Put a payout hold on ${username || robloxUserId}: ${reason}`,
+            context: { reason, signedOut: payload.signThemOut === true ? tokens.length : 0 }
+        });
+        await logAudit(session, {
+            category: 'security', action: 'place_account_hold',
+            targetUserId: robloxUserId, targetUsername: username,
+            details: { reason }
+        });
+        try {
+            await notifyModeratedUser(robloxUserId, `Your payouts are on hold while something is checked.\nReason: ${reason}\nNothing you are owed has been removed.`);
+        } catch (e) { }
+        res.json({ ok: true, signedOut: payload.signThemOut === true ? tokens.length : 0 });
+        return;
+    }
+
+    if (action === 'lift_account_hold') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const robloxUserId = payload.robloxUserId != null ? Number(payload.robloxUserId) : null;
+        if (!Number.isFinite(robloxUserId)) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: hold } = await supabase.from('security_holds').select('*').eq('roblox_user_id', robloxUserId).maybeSingle();
+        if (!hold) { res.json({ ok: true, already: true }); return; }
+
+        await supabase.from('security_holds').delete().eq('roblox_user_id', robloxUserId);
+        await logSecurityEvent({
+            kind: 'account_hold_lifted', severity: 'notice', session,
+            targetUserId: robloxUserId, targetUsername: hold.roblox_username,
+            detail: `Lifted the payout hold on ${hold.roblox_username || robloxUserId}`
+        });
+        await logAudit(session, {
+            category: 'security', action: 'lift_account_hold',
+            targetUserId: robloxUserId, targetUsername: hold.roblox_username, details: {}
+        });
+        try {
+            await notifyModeratedUser(robloxUserId, 'The hold on your payouts has been lifted. Everything is back to normal.');
+        } catch (e) { }
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'get_security_posture') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const [posture, config] = await Promise.all([securityPosture(session), getAutoRaiseConfig()]);
+        res.json({ ok: true, data: { ...posture, autoRaise: config } });
+        return;
+    }
+
+    if (action === 'save_security_settings') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const enabled = payload.autoRaise !== false;
+        const threshold = Number(payload.threshold);
+        const windowMinutes = Number(payload.windowMinutes);
+        if (!Number.isFinite(threshold) || threshold < 2 || threshold > 50) { res.status(400).json({ ok: false, error: 'invalid_threshold' }); return; }
+        if (!Number.isFinite(windowMinutes) || windowMinutes < 5 || windowMinutes > 1440) { res.status(400).json({ ok: false, error: 'invalid_window' }); return; }
+
+        const { error } = await supabase.from('app_settings').update({
+            security_auto_raise: enabled,
+            security_method_threshold: Math.round(threshold),
+            security_method_window_minutes: Math.round(windowMinutes)
+        }).eq('id', 1);
+        if (error) { res.status(500).json({ ok: false, error: 'update_failed' }); return; }
+        await logSecurityEvent({
+            kind: 'security_settings_changed', severity: 'notice', session,
+            detail: enabled
+                ? `Auto raise on at ${Math.round(threshold)} payout changes in ${Math.round(windowMinutes)} minutes`
+                : 'Auto raise turned off',
+            context: { enabled, threshold, windowMinutes }
+        });
+        res.json({ ok: true });
         return;
     }
 
@@ -4252,6 +4486,8 @@ async function handleHrData(req, res) {
         if (run.status === 'open') { res.status(409).json({ ok: false, error: 'freeze_run_first' }); return; }
         if (run.status === 'closed') { res.status(409).json({ ok: false, error: 'run_closed' }); return; }
 
+        if (robloxUserId != null && await blockedByAccountHold(res, robloxUserId, 'be paid')) return;
+
         let query = supabase.from('payment_requests').select('id').eq('run_id', id).eq('paid', false);
         query = robloxUserId != null ? query.eq('roblox_user_id', robloxUserId) : query.is('roblox_user_id', null).ilike('roblox_username', robloxUsername);
         const { data: lines } = await query;
@@ -4379,6 +4615,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
+        if (existing && await blockedByAccountHold(res, existing.roblox_user_id, 'be paid')) return;
         const { error } = await supabase
             .from('payment_requests')
             .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
@@ -4400,6 +4637,7 @@ async function handleHrData(req, res) {
         const robloxUserId = payload.robloxUserId != null && payload.robloxUserId !== '' ? Number(payload.robloxUserId) : null;
         const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : '';
         if (robloxUserId == null && !robloxUsername) { res.status(400).json({ ok: false, error: 'missing_user' }); return; }
+        if (robloxUserId != null && await blockedByAccountHold(res, robloxUserId, 'be paid')) return;
 
         let query = supabase.from('payment_requests').select('id').eq('status', 'pending');
         query = robloxUserId != null
@@ -4485,6 +4723,7 @@ async function handleHrData(req, res) {
     }
 
     if (action === 'convert_my_request') {
+        if (await blockedByAccountHold(res, session.roblox_user_id, 'change a request')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: row } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
@@ -4680,6 +4919,7 @@ async function handleHrData(req, res) {
     }
 
     if (action === 'save_payment_method') {
+        if (await blockedByAccountHold(res, session.roblox_user_id, 'change your payout method')) return;
         const method = payload.method;
         const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
         const methodDef = PAYMENT_METHOD_TYPES[method];
@@ -4703,7 +4943,7 @@ async function handleHrData(req, res) {
 
         const { data: priorMethod } = await supabase
             .from('payment_methods')
-            .select('details')
+            .select('method, details')
             .eq('roblox_user_id', session.roblox_user_id)
             .maybeSingle();
         const keptSplit = Number(((priorMethod || {}).details || {}).splitRobuxPercent) || 0;
@@ -4717,8 +4957,23 @@ async function handleHrData(req, res) {
             updated_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
         if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+
+        const priorWas = (priorMethod && priorMethod.method) || null;
+        await logSecurityEvent({
+            kind: 'payout_method_changed',
+            severity: method === 'BANK_TRANSFER' || priorWas === 'BANK_TRANSFER' ? 'notice' : 'info',
+            session,
+            targetUserId: session.roblox_user_id,
+            targetUsername: session.roblox_username,
+            detail: priorWas && priorWas !== method
+                ? `Changed their payout method from ${priorWas} to ${method}`
+                : `Saved their ${method} payout details`,
+            context: { from: priorWas, to: method }
+        });
+        const raised = await checkPayoutChangeBurst(session);
+
         await convertPendingForUser(session.roblox_user_id, session.roblox_username);
-        res.json({ ok: true, splitRobuxPercent: cleanDetails.splitRobuxPercent || 0 });
+        res.json({ ok: true, splitRobuxPercent: cleanDetails.splitRobuxPercent || 0, securityRaised: raised });
         return;
     }
 

@@ -1256,6 +1256,57 @@
       }
     }
 
+    .sec-strip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 20px;
+      font-size: 13px;
+      background: var(--warn-bg);
+      color: var(--warn-text);
+      border-bottom: 1px solid var(--warn-line);
+    }
+
+    .sec-strip.red {
+      background: var(--err-bg);
+      color: var(--err-text);
+      border-bottom-color: var(--err-line);
+    }
+
+    .sec-strip-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+      animation: secPulse 1.8s ease-in-out infinite;
+    }
+
+    @keyframes secPulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: .35;
+      }
+    }
+
+    .sec-strip a {
+      margin-left: auto;
+      color: inherit;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .sec-strip-dot {
+        animation: none;
+      }
+    }
+
     .sec-level-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -6795,6 +6846,10 @@
       team_removed: 'Your team was removed, so this is on hold until a lead places you on another one.',
       claim_not_found: 'That request is no longer waiting for a decision. The list has been refreshed.',
       locked_down: 'The site is in lockdown, so that is on hold until leadership clears it.',
+      account_held: 'That account has a payout hold on it, so this is paused until the hold is lifted.',
+      cannot_hold_self: "You can't put a hold on your own account.",
+      invalid_threshold: 'Pick a number of changes between 2 and 50.',
+      invalid_window: 'Pick a window between 5 minutes and 24 hours.',
       security_hold: 'Payments are on hold while the security protocol is raised. Anything you were part way through is safe.',
       invalid_security_level: 'That is not one of the protocol levels.',
       security_note_required: 'Write a short reason before raising the level.',
@@ -8869,7 +8924,7 @@
                </div>
              </details>`}
       </div>
-    </div>`;
+    </div>${securityStrip()}`;
     }
 
     function wireTopbarSignOut() {
@@ -10393,8 +10448,23 @@
         paint();
         try {
           const json = await callHrData('get_home');
-          data = json.data || null;
-          if (!data) loadError = 'Could not read your home screen.';
+          const raw = json && json.data && typeof json.data === 'object' && !Array.isArray(json.data) ? json.data : null;
+          if (!raw) {
+            data = null;
+            loadError = 'Could not read your home screen.';
+          } else {
+            data = {
+              ...raw,
+              view: raw.view === 'executive' || raw.view === 'producer' ? raw.view : 'developer',
+              myTasks: Array.isArray(raw.myTasks) ? raw.myTasks : [],
+              reviewQueue: Array.isArray(raw.reviewQueue) ? raw.reviewQueue : [],
+              overdue: Array.isArray(raw.overdue) ? raw.overdue : [],
+              idleMembers: Array.isArray(raw.idleMembers) ? raw.idleMembers : [],
+              games: Array.isArray(raw.games) ? raw.games : [],
+              owed: raw.owed && typeof raw.owed === 'object' ? raw.owed : { usd: 0, robux: 0, awaitingDecision: 0, hasMethod: true },
+              studio: raw.studio && typeof raw.studio === 'object' ? raw.studio : {}
+            };
+          }
         } catch (e) {
           loadError = e.message || 'Could not load your home screen.';
         }
@@ -10453,7 +10523,7 @@
               ${allPaid
             ? '<span class="pp-tag">Paid</span>'
             : canPay && active && active.status !== 'open' && active.status !== 'closed'
-              ? `<button type="button" class="btn btn-ok btn-sm" data-run-pay="${esc(key)}">Mark paid</button>`
+              ? `<button type="button" class="btn btn-ok btn-sm" data-run-pay="${esc(key)}"${frozenAttrs()}>Mark paid</button>`
               : ''}
             </div>
           </div>`;
@@ -10536,8 +10606,8 @@
           ${sheet.sheet.length ? sheet.sheet.map(sheetRow).join('') : '<div class="home-empty">Nothing in this run yet.</div>'}` : '<div class="home-empty">Loading the payout sheet...</div>'}
           ${canPay ? `
           <div style="padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);">
-            ${active.status === 'open' ? '<button type="button" class="btn btn-primary btn-sm" id="runFreezeBtn">Freeze this run</button>' : ''}
-            ${active.status === 'frozen' || active.status === 'paying' ? '<button type="button" class="btn btn-ok btn-sm" id="runCloseBtn">Close the run</button>' : ''}
+            ${active.status === 'open' ? `<button type="button" class="btn btn-primary btn-sm" id="runFreezeBtn"${frozenAttrs()}>Freeze this run</button>` : ''}
+            ${active.status === 'frozen' || active.status === 'paying' ? `<button type="button" class="btn btn-ok btn-sm" id="runCloseBtn"${frozenAttrs()}>Close the run</button>` : ''}
             ${sheet && sheet.sheet.length ? '<button type="button" class="btn btn-ghost btn-sm" id="runCopyBtn">Copy payout sheet</button>' : ''}
           </div>` : ''}`}
         </div>
@@ -10650,8 +10720,14 @@
         try {
           const json = await callHrData('get_payment_run', { id: selectedId });
           if (myGen !== renderGen) return;
-          sheet = json.data;
-          active = json.data.run;
+          const payload = json.data;
+          if (!payload || !payload.run || !Array.isArray(payload.sheet) || !payload.totals) {
+            sheet = null;
+            toast('That run came back in a shape we did not expect. Try refreshing.', 'err');
+          } else {
+            sheet = payload;
+            active = payload.run;
+          }
         } catch (e) {
           sheet = null;
           toast(e.message || 'Could not read that run.', 'err');
@@ -10710,6 +10786,8 @@
       let state = null;
       let events = [];
       let sessions = [];
+      let holds = [];
+      let posture = null;
       let loading = true;
       let loadError = null;
       let working = false;
@@ -10776,6 +10854,7 @@
         <div class="tabs">
           <button type="button" class="tab-btn ${tab === 'protocol' ? 'active' : ''}" data-sec-tab="protocol">Protocol</button>
           <button type="button" class="tab-btn ${tab === 'sessions' ? 'active' : ''}" data-sec-tab="sessions">Signed in (${sessions.length})</button>
+          <button type="button" class="tab-btn ${tab === 'holds' ? 'active' : ''}" data-sec-tab="holds">Holds (${holds.length})</button>
           <button type="button" class="tab-btn ${tab === 'log' ? 'active' : ''}" data-sec-tab="log">Security log</button>
         </div>
       </div>
@@ -10796,6 +10875,63 @@
           <button type="button" class="btn btn-ghost btn-sm" id="secSignOutAll" ${working ? 'disabled' : ''}>Sign out everyone below me</button>
         </div>`
               : '<div class="home-note">You can see the level but not change it. Someone with the security permission can.</div>'}
+      </div>
+      ${canManage && posture ? `
+      <div class="home-grid" style="margin-top:16px;">
+        <div class="home-card">
+          <div class="home-card-head"><h2>Where you stand</h2></div>
+          <div class="home-stats" style="padding:14px 16px;margin:0;">
+            ${statCard('Signed in', posture.sessions, posture.staleSessions ? posture.staleSessions + ' not used in a week' : 'All recent', posture.staleSessions > 0)}
+            ${statCard('Accounts on hold', posture.holds, posture.holds ? 'Payouts paused' : 'None', posture.holds > 0)}
+            ${statCard('Bank payouts', posture.bankAccounts, 'People you hold details for')}
+            ${statCard('No Discord linked', posture.unlinkedWithMethod, posture.unlinkedWithMethod ? 'But has a payout method' : 'All linked', posture.unlinkedWithMethod > 0)}
+          </div>
+          <div class="home-row"><div class="home-row-main"><div class="home-row-title">Roles that can pay people</div><div class="home-row-meta"><span>${esc(posture.rolesThatCanPay.join(', ') || 'None')}</span></div></div></div>
+          <div class="home-row"><div class="home-row-main"><div class="home-row-title">Roles that see bank details</div><div class="home-row-meta"><span>${esc(posture.rolesThatSeeBank.join(', ') || 'None')}</span></div></div></div>
+          <div class="home-row"><div class="home-row-main"><div class="home-row-title">Roles that can change this page</div><div class="home-row-meta"><span>${esc(posture.rolesThatManageSecurity.join(', ') || 'None')}</span></div></div></div>
+        </div>
+        <div class="home-card">
+          <div class="home-card-head"><h2>Raise itself automatically</h2></div>
+          <div class="home-note">If a lot of payout methods change in a short window, that is what an account takeover looks like. The site can go to Heightened on its own and wait for a human.</div>
+          <div style="padding:14px 16px;">
+            <label class="perm-check-item" style="margin-bottom:12px;">
+              <input type="checkbox" id="secAutoRaise" ${posture.autoRaise.enabled ? 'checked' : ''}>
+              Raise to Heightened on a burst of payout changes
+            </label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div class="field"><label for="secThreshold">Changes</label><input type="number" id="secThreshold" min="2" max="50" value="${esc(posture.autoRaise.threshold)}"></div>
+              <div class="field"><label for="secWindow">Within (minutes)</label><input type="number" id="secWindow" min="5" max="1440" value="${esc(posture.autoRaise.windowMinutes)}"></div>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="secSaveSettings" ${working ? 'disabled' : ''}>Save</button>
+          </div>
+        </div>
+      </div>` : ''}` : tab === 'holds' ? `
+      <div class="home-card">
+        <div class="home-card-head"><h2>Payout holds</h2><span class="count">${holds.length}</span></div>
+        <div class="home-note">A hold freezes one person without touching anyone else. They cannot be paid, change their payout details or send new requests until it is lifted. Nothing they are owed is removed.</div>
+        ${holds.length ? holds.map(h => `
+          <div class="home-row">
+            <div class="home-row-main">
+              <div class="home-row-title">${userLink(h.roblox_user_id, h.roblox_username || h.roblox_user_id)}</div>
+              <div class="home-row-meta">
+                <span>${esc(h.reason || 'No reason recorded')}</span>
+                <span>by ${esc(h.placed_by || 'someone')} ${esc(relTime(h.placed_at))}</span>
+              </div>
+            </div>
+            <div class="home-row-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-hold-lift="${esc(h.roblox_user_id)}">Lift</button>
+            </div>
+          </div>`).join('') : '<div class="home-empty">No accounts are on hold.</div>'}
+        ${canManage ? `
+        <div style="padding:16px;border-top:1px solid var(--line);">
+          <h3 style="margin:0 0 12px;font-size:14px;">Put an account on hold</h3>
+          <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;">
+            <div class="field"><label for="holdUserId">Roblox user ID</label><input type="number" id="holdUserId" placeholder="e.g. 1234567"></div>
+            <div class="field"><label for="holdReason">Reason <span class="hint">(they see this)</span></label><input type="text" id="holdReason" placeholder="e.g. payout email changed from a new country"></div>
+          </div>
+          <label class="perm-check-item" style="margin-bottom:10px;"><input type="checkbox" id="holdSignOut"> Sign their devices out as well</label>
+          <button type="button" class="btn btn-primary btn-sm" id="holdPlaceBtn" ${working ? 'disabled' : ''}>Place the hold</button>
+        </div>` : ''}
       </div>` : tab === 'sessions' ? `
       <div class="home-card">
         <div class="home-card-head"><h2>Signed in right now</h2><span class="count">${sessions.length}</span></div>
@@ -10853,6 +10989,55 @@
           paint();
         }));
 
+        const saveSettings = document.getElementById('secSaveSettings');
+        if (saveSettings) saveSettings.addEventListener('click', async () => {
+          const autoRaise = (document.getElementById('secAutoRaise') || {}).checked === true;
+          const threshold = Number((document.getElementById('secThreshold') || {}).value);
+          const windowMinutes = Number((document.getElementById('secWindow') || {}).value);
+          working = true; paint();
+          try {
+            await callHrData('save_security_settings', { autoRaise, threshold, windowMinutes });
+            toast('Saved');
+            await load();
+          } catch (e) {
+            toast(e.message || 'Could not save that.', 'err');
+          }
+          working = false;
+          paint();
+        });
+
+        const holdPlace = document.getElementById('holdPlaceBtn');
+        if (holdPlace) holdPlace.addEventListener('click', async () => {
+          const robloxUserId = Number((document.getElementById('holdUserId') || {}).value);
+          const reason = ((document.getElementById('holdReason') || {}).value || '').trim();
+          const signThemOut = (document.getElementById('holdSignOut') || {}).checked === true;
+          if (!(robloxUserId > 0) || !reason) { toast('Need a Roblox user ID and a reason.', 'err'); return; }
+          working = true; paint();
+          try {
+            const json = await callHrData('place_account_hold', { robloxUserId, reason, signThemOut });
+            toast(json.signedOut ? `Hold placed, ${json.signedOut} signed out` : 'Hold placed');
+            await load();
+          } catch (e) {
+            toast(e.message || 'Could not place that hold.', 'err');
+          }
+          working = false;
+          paint();
+        });
+
+        document.querySelectorAll('[data-hold-lift]').forEach(el => el.addEventListener('click', async () => {
+          el.disabled = true;
+          el.textContent = 'Lifting...';
+          try {
+            await callHrData('lift_account_hold', { robloxUserId: Number(el.dataset.holdLift) });
+            toast('Hold lifted');
+            await load();
+          } catch (e) {
+            el.disabled = false;
+            el.textContent = 'Lift';
+            toast(e.message || 'Could not lift that hold.', 'err');
+          }
+        }));
+
         const signOutAll = document.getElementById('secSignOutAll');
         if (signOutAll) signOutAll.addEventListener('click', async () => {
           if (!confirm('Sign out everyone whose role is below yours?\n\nThey will need to sign in again. Your own session stays.')) return;
@@ -10889,11 +11074,36 @@
           const results = await Promise.all([
             callHrData('get_security_state', { force: true }),
             canManage ? callHrData('list_sessions') : Promise.resolve({ data: [] }),
-            canManage ? callHrData('list_security_events', { limit: 80 }) : Promise.resolve({ data: [] })
+            canManage ? callHrData('list_security_events', { limit: 80 }) : Promise.resolve({ data: [] }),
+            canManage ? callHrData('list_account_holds') : Promise.resolve({ data: [] }),
+            canManage ? callHrData('get_security_posture') : Promise.resolve({ data: null })
           ]);
-          state = results[0].data || null;
-          sessions = results[1].data || [];
-          events = results[2].data || [];
+          const asList = v => (Array.isArray(v) ? v : []);
+          const raw = results[0].data;
+          state = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+          sessions = asList(results[1].data);
+          events = asList(results[2].data);
+          holds = asList(results[3].data);
+          const rawPosture = results[4].data;
+          posture = rawPosture && typeof rawPosture === 'object' && !Array.isArray(rawPosture)
+            ? {
+              sessions: Number(rawPosture.sessions) || 0,
+              staleSessions: Number(rawPosture.staleSessions) || 0,
+              holds: Number(rawPosture.holds) || 0,
+              unlinkedWithMethod: Number(rawPosture.unlinkedWithMethod) || 0,
+              bankAccounts: Number(rawPosture.bankAccounts) || 0,
+              rolesThatCanPay: asList(rawPosture.rolesThatCanPay),
+              rolesThatSeeBank: asList(rawPosture.rolesThatSeeBank),
+              rolesThatManageSecurity: asList(rawPosture.rolesThatManageSecurity),
+              autoRaise: rawPosture.autoRaise && typeof rawPosture.autoRaise === 'object'
+                ? rawPosture.autoRaise
+                : { enabled: true, windowMinutes: 60, threshold: 3 }
+            }
+            : null;
+          if (state) {
+            securityLevel = state.level || 'normal';
+            lockdownNote = state.note || '';
+          }
         } catch (e) {
           loadError = e.message || 'Could not load the security centre.';
         }
@@ -11005,7 +11215,7 @@
               <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
               <td class="actions-cell">
                 <div class="actions-group">
-                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-xs" data-paid="${esc(r.id)}">Paid</button>` : ''}
+                  ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-xs" data-paid="${esc(r.id)}"${frozenAttrs()}>Paid</button>` : ''}
                   ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-xs" data-reject="${esc(r.id)}">Reject</button>` : ''}
                   ${r.status !== 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ghost btn-xs" data-reopen="${esc(r.id)}">Reopen</button>` : ''}
                   ${canMarkPaid ? `<button type="button" class="btn btn-danger-ghost btn-xs" data-delete-request="${esc(r.id)}">Delete</button>` : ''}
@@ -11365,7 +11575,7 @@
                     <option value="ROBUX" ${c.currency === 'ROBUX' ? 'selected' : ''}>Robux</option>
                     <option value="USD" ${c.currency === 'USD' ? 'selected' : ''}>USD</option>
                   </select>
-                  <button type="button" class="btn btn-ok btn-sm" data-claim-decide="${esc(c.id)}" data-decision="approve">Approve</button>
+                  <button type="button" class="btn btn-ok btn-sm" data-claim-decide="${esc(c.id)}" data-decision="approve"${frozenAttrs()}>Approve</button>
                   <button type="button" class="btn btn-ghost btn-sm" data-claim-decide="${esc(c.id)}" data-decision="reject">Turn down</button>
                 </div>
               </div>
@@ -12026,7 +12236,7 @@
           <table class="an-table">
             <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th>${canMarkPaid ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(o.paymentMethod)}>${esc(methodDisplayLabel(o.paymentMethod))}${o.paymentMethod.method === 'BANK_TRANSFER' && !o.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(o.sampleRequestId)}">Payment details</button>` : ''}</div>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}">Mark all paid</button></td>` : ''}</tr>`).join('')}
+              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(o.paymentMethod)}>${esc(methodDisplayLabel(o.paymentMethod))}${o.paymentMethod.method === 'BANK_TRANSFER' && !o.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(o.sampleRequestId)}">Payment details</button>` : ''}</div>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}"${frozenAttrs()}>Mark all paid</button></td>` : ''}</tr>`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -15030,6 +15240,26 @@
       }
 
       load();
+    }
+
+    function moneyFrozen() {
+      return securityLevel === 'heightened' || securityLevel === 'lockdown';
+    }
+
+    function frozenAttrs() {
+      if (!moneyFrozen()) return '';
+      return ' disabled title="Payments are frozen while the security protocol is raised."';
+    }
+
+    function securityStrip() {
+      if (securityLevel === 'normal' || !isHrAuthed) return '';
+      const heavy = securityLevel === 'lockdown';
+      return `
+    <div class="sec-strip${heavy ? ' red' : ''}" role="status">
+      <span class="sec-strip-dot"></span>
+      <span><strong>${heavy ? 'Lockdown' : 'Heightened security'}</strong> is on, so payments are frozen.${lockdownNote ? ' ' + esc(lockdownNote.replace(/[.!?]*$/, '')) + '.' : ''}</span>
+      ${canSeeSecurity() ? '<a href="#/security">Open security</a>' : ''}
+    </div>`;
     }
 
     function canSeeSecurity() {
