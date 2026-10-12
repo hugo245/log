@@ -18,6 +18,7 @@ const ROBLOX_GROUP_API_KEY = process.env.ROBLOX_GROUP_API_KEY;
 const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 const STATE_LIFETIME_MS = 10 * 60 * 1000;
 const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
@@ -91,6 +92,7 @@ const PERMISSIONS = [
     'recruitment.finalise',
     'recruitment.analytics',
     'payouts.view_bank_details',
+    'security.manage',
     'teams.view',
     'teams.manage'
 ];
@@ -208,6 +210,99 @@ const USD_METHOD_LABELS = { PAYPAL: 'PayPal', VENMO: 'Venmo', BANK_TRANSFER: 'ba
 
 function canSeeSensitivePayoutDetails(session) {
     return hasPermission(session, 'payouts.view_bank_details');
+}
+
+const SECURITY_LEVELS = ['normal', 'heightened', 'lockdown'];
+
+const SECURITY_MONEY_ACTIONS = new Set([
+    'mark_paid', 'mark_all_paid', 'mark_run_person_paid', 'reject_request', 'reopen_request',
+    'delete_request', 'submit_request', 'submit_claim', 'decide_claim', 'pay_team_task',
+    'save_payment_method', 'delete_payment_method', 'convert_my_request',
+    'create_payment_run', 'freeze_payment_run', 'close_payment_run',
+    'save_rate_band', 'delete_rate_band', 'set_devex_rate', 'set_usd_minimum'
+]);
+
+const SECURITY_ALWAYS_ALLOWED = new Set([
+    'get_security_state', 'set_security_level', 'list_security_events',
+    'list_sessions', 'revoke_session', 'revoke_all_sessions',
+    'list_my_sessions', 'revoke_my_session', 'get_home'
+]);
+
+const securityCache = { level: 'normal', note: null, setBy: null, setAt: null, readAt: 0 };
+const SECURITY_CACHE_MS = 10 * 1000;
+
+async function getSecurityState(force) {
+    if (!force && Date.now() - securityCache.readAt < SECURITY_CACHE_MS) return securityCache;
+    try {
+        const { data, error } = await supabase
+            .from('app_settings')
+            .select('security_level, security_note, security_set_by, security_set_at')
+            .eq('id', 1)
+            .maybeSingle();
+        if (!error && data) {
+            securityCache.level = SECURITY_LEVELS.includes(data.security_level) ? data.security_level : 'normal';
+            securityCache.note = data.security_note || null;
+            securityCache.setBy = data.security_set_by || null;
+            securityCache.setAt = data.security_set_at || null;
+        }
+    } catch (e) {
+        console.error('getSecurityState failed, treating the site as normal:', e.message);
+    }
+    securityCache.readAt = Date.now();
+    return securityCache;
+}
+
+async function logSecurityEvent({ kind, severity, session, actorUsername, targetUserId, targetUsername, detail, context }) {
+    try {
+        await supabase.from('security_events').insert({
+            kind,
+            severity: severity || 'info',
+            actor_user_id: session ? session.roblox_user_id : null,
+            actor_username: session ? session.roblox_username : (actorUsername || 'system'),
+            target_user_id: targetUserId != null ? targetUserId : null,
+            target_username: targetUsername || null,
+            detail: detail || null,
+            context: context || {},
+            created_at: new Date().toISOString()
+        });
+    } catch (e) {
+        console.error('logSecurityEvent failed:', e.message);
+    }
+}
+
+async function securityGate(res, session, action) {
+    const state = await getSecurityState();
+    if (state.level === 'normal') return true;
+    if (hasPermission(session, 'security.manage')) return true;
+    if (SECURITY_ALWAYS_ALLOWED.has(action)) return true;
+
+    if (state.level === 'lockdown') {
+        res.status(423).json({
+            ok: false, error: 'locked_down',
+            security: { level: 'lockdown', note: state.note }
+        });
+        return false;
+    }
+    if (state.level === 'heightened' && SECURITY_MONEY_ACTIONS.has(action)) {
+        res.status(423).json({
+            ok: false, error: 'security_hold',
+            security: { level: 'heightened', note: state.note }
+        });
+        return false;
+    }
+    return true;
+}
+
+async function noteSensitiveAccess(session, viewedUsernames) {
+    const names = [...new Set((viewedUsernames || []).filter(Boolean))];
+    if (!names.length) return;
+    await logSecurityEvent({
+        kind: 'bank_details_viewed',
+        severity: 'notice',
+        session,
+        detail: `Saw full bank details for ${names.length} ${names.length === 1 ? 'person' : 'people'}`,
+        context: { people: names.slice(0, 50) }
+    });
 }
 
 function redactPayoutMethod(method, session) {
@@ -2587,6 +2682,17 @@ async function getSession(req) {
         data.team_removed = false;
     }
 
+    try {
+        const lastSeen = data.last_seen_at ? new Date(data.last_seen_at).getTime() : 0;
+        if (Date.now() - lastSeen > SESSION_TOUCH_INTERVAL_MS) {
+            const touch = { last_seen_at: new Date().toISOString() };
+            const agent = req.headers && req.headers['user-agent'];
+            if (agent && !data.user_agent) touch.user_agent = String(agent).slice(0, 200);
+            await supabase.from('hr_sessions').update(touch).eq('token', token);
+            data.last_seen_at = touch.last_seen_at;
+        }
+    } catch (e) { }
+
     const lastSynced = data.last_synced_at ? new Date(data.last_synced_at).getTime() : 0;
     if (Date.now() - lastSynced > ACCESS_SYNC_INTERVAL_MS) {
         try {
@@ -3269,6 +3375,8 @@ async function handleHrData(req, res) {
     const action = req.body && req.body.action;
     const payload = (req.body && req.body.payload) || {};
 
+    if (!(await securityGate(res, session, action))) return;
+
     if (action === 'submit_request') {
         if (!requirePermission(res, session, 'dashboard.submit_request')) return;
 
@@ -3534,6 +3642,180 @@ async function handleHrData(req, res) {
         }
         runPaymentMethodConversionSweep({ robloxUserId: row.roblox_user_id });
         res.json({ ok: true, changed });
+        return;
+    }
+
+    if (action === 'get_security_state') {
+        const state = await getSecurityState(payload.force === true);
+        res.json({
+            ok: true,
+            data: {
+                level: state.level,
+                note: state.note,
+                setBy: state.setBy,
+                setAt: state.setAt,
+                canManage: hasPermission(session, 'security.manage')
+            }
+        });
+        return;
+    }
+
+    if (action === 'set_security_level') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const level = SECURITY_LEVELS.includes(payload.level) ? payload.level : null;
+        const note = payload.note ? String(payload.note).trim().slice(0, 400) : '';
+        if (!level) { res.status(400).json({ ok: false, error: 'invalid_security_level' }); return; }
+        if (level !== 'normal' && !note) { res.status(400).json({ ok: false, error: 'security_note_required' }); return; }
+
+        const before = await getSecurityState(true);
+        if (before.level === level) { res.json({ ok: true, already: true, level }); return; }
+
+        const { error } = await supabase.from('app_settings').update({
+            security_level: level,
+            security_note: note || null,
+            security_set_by: session.roblox_username,
+            security_set_at: new Date().toISOString()
+        }).eq('id', 1);
+        if (error) {
+            console.error('[set_security_level] update failed:', error.message);
+            res.status(500).json({ ok: false, error: 'update_failed' });
+            return;
+        }
+        securityCache.readAt = 0;
+
+        let revoked = 0;
+        if (level === 'lockdown' && payload.signEveryoneOut === true) {
+            const { data: others } = await supabase.from('hr_sessions').select('token, roblox_user_id');
+            const drop = (others || []).filter(row => String(row.roblox_user_id) !== String(session.roblox_user_id));
+            if (drop.length) {
+                await supabase.from('hr_sessions').delete().in('token', drop.map(r => r.token));
+                revoked = drop.length;
+            }
+        }
+
+        await logSecurityEvent({
+            kind: 'security_level_changed',
+            severity: level === 'normal' ? 'notice' : 'alert',
+            session,
+            detail: `${before.level} to ${level}${note ? ': ' + note : ''}`,
+            context: { from: before.level, to: level, note, sessionsRevoked: revoked }
+        });
+        await logAudit(session, {
+            category: 'security', action: 'set_security_level',
+            details: { from: before.level, to: level, note, sessionsRevoked: revoked }
+        });
+        res.json({ ok: true, level, revoked });
+        return;
+    }
+
+    if (action === 'list_security_events') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const limit = Math.min(200, Math.max(10, Number(payload.limit) || 60));
+        const { data } = await supabase
+            .from('security_events')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(limit);
+        res.json({ ok: true, data: data || [] });
+        return;
+    }
+
+    if (action === 'list_sessions') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const { data } = await supabase
+            .from('hr_sessions')
+            .select('token, roblox_user_id, roblox_username, roles, max_hierarchy, created_at, last_seen_at, expires_at, user_agent')
+            .order('roblox_username', { ascending: true });
+        const rows = (data || []).map(r => ({
+            id: String(r.token).slice(-8),
+            token: r.token,
+            robloxUserId: r.roblox_user_id,
+            robloxUsername: r.roblox_username,
+            roles: r.roles || [],
+            maxHierarchy: r.max_hierarchy || 0,
+            createdAt: r.created_at,
+            lastSeenAt: r.last_seen_at,
+            expiresAt: r.expires_at,
+            userAgent: r.user_agent || null,
+            isYou: r.token === getBearerToken(req)
+        }));
+        res.json({ ok: true, data: rows });
+        return;
+    }
+
+    if (action === 'revoke_session') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const token = payload.token ? String(payload.token) : '';
+        if (!token) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: target } = await supabase.from('hr_sessions').select('roblox_user_id, roblox_username, max_hierarchy').eq('token', token).maybeSingle();
+        if (!target) { res.status(404).json({ ok: false, error: 'session_not_found' }); return; }
+        if (String(target.roblox_user_id) !== String(session.roblox_user_id)
+            && !requireHigherHierarchy(res, session, target.max_hierarchy)) return;
+
+        await supabase.from('hr_sessions').delete().eq('token', token);
+        await logSecurityEvent({
+            kind: 'session_revoked', severity: 'notice', session,
+            targetUserId: target.roblox_user_id, targetUsername: target.roblox_username,
+            detail: `Signed out ${target.roblox_username}`
+        });
+        res.json({ ok: true });
+        return;
+    }
+
+    if (action === 'revoke_all_sessions') {
+        if (!requirePermission(res, session, 'security.manage')) return;
+        const myToken = getBearerToken(req);
+        const { data: all } = await supabase.from('hr_sessions').select('token, roblox_user_id, max_hierarchy');
+        const mine = Number(session.max_hierarchy) || 0;
+        const drop = (all || []).filter(r => r.token !== myToken && (Number(r.max_hierarchy) || 0) < mine);
+        if (drop.length) await supabase.from('hr_sessions').delete().in('token', drop.map(r => r.token));
+        await logSecurityEvent({
+            kind: 'all_sessions_revoked', severity: 'alert', session,
+            detail: `Signed out ${drop.length} ${drop.length === 1 ? 'person' : 'people'}`,
+            context: { count: drop.length }
+        });
+        await logAudit(session, { category: 'security', action: 'revoke_all_sessions', details: { count: drop.length } });
+        res.json({ ok: true, count: drop.length });
+        return;
+    }
+
+    if (action === 'list_my_sessions') {
+        const { data } = await supabase
+            .from('hr_sessions')
+            .select('token, created_at, last_seen_at, expires_at, user_agent')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .order('last_seen_at', { ascending: false });
+        const myToken = getBearerToken(req);
+        res.json({
+            ok: true,
+            data: (data || []).map(r => ({
+                id: String(r.token).slice(-8),
+                token: r.token,
+                createdAt: r.created_at,
+                lastSeenAt: r.last_seen_at,
+                expiresAt: r.expires_at,
+                userAgent: r.user_agent || null,
+                isYou: r.token === myToken
+            }))
+        });
+        return;
+    }
+
+    if (action === 'revoke_my_session') {
+        const token = payload.token ? String(payload.token) : '';
+        if (!token) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
+        const { data: target } = await supabase.from('hr_sessions').select('roblox_user_id').eq('token', token).maybeSingle();
+        if (!target || String(target.roblox_user_id) !== String(session.roblox_user_id)) {
+            res.status(403).json({ ok: false, error: 'not_your_session' });
+            return;
+        }
+        await supabase.from('hr_sessions').delete().eq('token', token);
+        await logSecurityEvent({
+            kind: 'session_revoked', severity: 'info', session,
+            targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
+            detail: 'Signed out one of their own devices'
+        });
+        res.json({ ok: true });
         return;
     }
 
@@ -3889,10 +4171,20 @@ async function handleHrData(req, res) {
             usernames.length ? supabase.from('payment_methods').select('*').in('roblox_username', usernames) : Promise.resolve({ data: [] })
         ]);
         const methodById = {}, methodByName = {};
-        [].concat(byId.data || [], byName.data || []).forEach(m => {
+        const runMethods = [].concat(byId.data || [], byName.data || []);
+        runMethods.forEach(m => {
             if (m.roblox_user_id != null) methodById[String(m.roblox_user_id)] = m;
             if (m.roblox_username) methodByName[String(m.roblox_username).toLowerCase()] = m;
         });
+
+        noteSensitiveAccess(session, runMethods
+            .filter(m => {
+                const def = PAYMENT_METHOD_TYPES[m.method];
+                if (!def || !def.sensitive) return false;
+                return String(m.roblox_user_id || '') !== String(session.roblox_user_id)
+                    && canSeeSensitivePayoutDetails(session);
+            })
+            .map(m => m.roblox_username));
 
         const people = {};
         lines.forEach(r => {
@@ -4031,6 +4323,15 @@ async function handleHrData(req, res) {
             methodByUserId[m.roblox_user_id] = m;
             if (m.roblox_username) methodByUsername[m.roblox_username.toLowerCase()] = m;
         });
+
+        noteSensitiveAccess(session, methodRows
+            .filter(m => {
+                const def = PAYMENT_METHOD_TYPES[m.method];
+                if (!def || !def.sensitive) return false;
+                return String(m.roblox_user_id || '') !== String(session.roblox_user_id)
+                    && canSeeSensitivePayoutDetails(session);
+            })
+            .map(m => m.roblox_username));
 
         let rolesByUserId = {};
         let assignsByUserId = {};

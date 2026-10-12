@@ -1256,6 +1256,192 @@
       }
     }
 
+    .sec-level-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .sec-level {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px 15px;
+      text-align: left;
+      background: var(--surface);
+      cursor: pointer;
+      font: inherit;
+      color: inherit;
+      transition: border-color .12s ease, background .12s ease;
+    }
+
+    .sec-level:hover {
+      border-color: var(--accent);
+    }
+
+    .sec-level[disabled] {
+      cursor: default;
+      opacity: .6;
+    }
+
+    .sec-level.current[disabled] {
+      opacity: 1;
+    }
+
+    .sec-level.current {
+      border-color: var(--accent);
+      border-width: 2px;
+      padding: 13px 14px;
+    }
+
+    .sec-level.red.current {
+      border-color: var(--danger, #e05c4b);
+    }
+
+    .sec-level.amber.current {
+      border-color: var(--warn-text, #9a7b1f);
+    }
+
+    .sec-level-name {
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sec-level-now {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .sec-level p {
+      margin: 0 0 8px;
+      font-size: 12.5px;
+      color: var(--ink-soft);
+      line-height: 1.5;
+    }
+
+    .sec-level ul {
+      margin: 0;
+      padding-left: 16px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .sec-banner {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 14px 16px;
+      border-radius: 14px;
+      margin-bottom: 18px;
+      border: 1px solid var(--warn-line);
+      background: var(--warn-bg);
+      color: var(--warn-text);
+    }
+
+    .sec-banner.red {
+      border-color: var(--err-line);
+      background: var(--err-bg);
+      color: var(--err-text);
+    }
+
+    .sec-banner strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .sec-banner span {
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+
+    .sec-ev {
+      display: flex;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12.5px;
+    }
+
+    .sec-ev:last-child {
+      border-bottom: 0;
+    }
+
+    .sec-ev-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      margin-top: 6px;
+      flex-shrink: 0;
+      background: var(--muted);
+    }
+
+    .sec-ev-dot.notice {
+      background: var(--accent);
+    }
+
+    .sec-ev-dot.alert {
+      background: var(--danger, #e05c4b);
+    }
+
+    .sec-ev-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .sec-ev-when {
+      color: var(--muted);
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
+
+    .lock-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 998;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px 20px;
+    }
+
+    .lock-inner {
+      max-width: 440px;
+      text-align: center;
+    }
+
+    .lock-inner h1 {
+      margin: 18px 0 10px;
+      font-size: 24px;
+      letter-spacing: -.02em;
+    }
+
+    .lock-inner p {
+      margin: 0 0 10px;
+      color: var(--ink-soft);
+      line-height: 1.6;
+      font-size: 14.5px;
+    }
+
+    .lock-why {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: var(--ink);
+      text-align: left;
+      margin-top: 16px;
+    }
+
     .indev-shell {
       position: fixed;
       inset: 0;
@@ -6012,6 +6198,9 @@
     let hrUserId = null;
     let hrRoles = [];
     let hrPermissions = [];
+    let siteLocked = false;
+    let lockdownNote = '';
+    let securityLevel = 'normal';
     let hrMaxHierarchy = 0;
     let authReady = false;
     let appDataReady = false;
@@ -6471,6 +6660,18 @@
       return target;
     }
 
+    async function checkSecurityProtocol() {
+      try {
+        const json = await callHrData('get_security_state');
+        const data = json.data || {};
+        securityLevel = data.level || 'normal';
+        lockdownNote = data.note || '';
+        siteLocked = securityLevel === 'lockdown' && !data.canManage;
+      } catch (e) {
+        if (e && e.code === 'locked_down') siteLocked = true;
+      }
+    }
+
     async function verifySession() {
       const token = getStoredToken();
       if (!token) { isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; teamRemoved = false; return; }
@@ -6547,6 +6748,14 @@
           teamRemoved = true;
           if (currentPath() !== '#/team-removed') window.location.hash = '#/team-removed';
         }
+        if (code === 'locked_down') {
+          lockdownNote = (json.security && json.security.note) || '';
+          if (!siteLocked) {
+            siteLocked = true;
+            if (currentPath() !== '#/locked') window.location.hash = '#/locked';
+            else route();
+          }
+        }
         const err = new Error(friendlyError(code));
         err.code = code;
         throw err;
@@ -6585,6 +6794,12 @@
       roblox_game_not_found: "Roblox doesn't have a game with that place ID.",
       team_removed: 'Your team was removed, so this is on hold until a lead places you on another one.',
       claim_not_found: 'That request is no longer waiting for a decision. The list has been refreshed.',
+      locked_down: 'The site is in lockdown, so that is on hold until leadership clears it.',
+      security_hold: 'Payments are on hold while the security protocol is raised. Anything you were part way through is safe.',
+      invalid_security_level: 'That is not one of the protocol levels.',
+      security_note_required: 'Write a short reason before raising the level.',
+      session_not_found: 'That session has already ended.',
+      not_your_session: 'That session belongs to someone else.',
       claim_withdrawn: 'That request is gone. The person who sent it withdrew it, so there is nothing to decide.',
       claim_already_approved: 'That request was already approved by someone else. It is now in the pending list.',
       claim_already_paid: 'That request has already been paid out, so it cannot be changed here.',
@@ -8333,6 +8548,7 @@
       if (siteState.closed) { renderClosedScreen(); return; }
       if (siteState.indev && !hasIndevPreview()) { renderInDevScreen(); return; }
       await Promise.all([verifySession(), loadAppData()]);
+      if (isHrAuthed) await checkSecurityProtocol();
       authReady = true;
       route();
     }
@@ -8423,6 +8639,15 @@
         return;
       }
 
+      if (isHrAuthed && siteLocked && path !== '#/locked') {
+        window.location.hash = '#/locked';
+        return;
+      }
+      if (isHrAuthed && !siteLocked && path === '#/locked') {
+        window.location.hash = '#/home';
+        return;
+      }
+
       if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
         window.location.hash = '#/onboarding';
         return;
@@ -8440,6 +8665,12 @@
         if (isHrAuthed) renderPolicyPage('aup'); else renderHrGate();
       } else if (path === '#/team-removed') {
         if (isHrAuthed) renderTeamRemovedPage(); else renderHrGate();
+      } else if (path === '#/locked') {
+        if (isHrAuthed) renderLockedOut(); else renderHrGate();
+      } else if (path === '#/security') {
+        if (isHrAuthed && (hasPermission('security.manage') || hasPermission('roles.manage'))) renderSecurity();
+        else if (isHrAuthed) window.location.hash = '#/home';
+        else renderHrGate();
       } else if (path === '#/home') {
         if (isHrAuthed) renderHome(); else renderHrGate();
       } else if (path === '#/runs') {
@@ -8578,32 +8809,61 @@
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
              </details>`
-            : `${pill('#/home', 'Home', ['#/home', '#/', ''])}${pill('#/my', 'My payments', ['#/my'])}${canSubmitRequests() ? pill('#/new', 'New request') : ''}${pill('#/request', 'Request payment')}${canSeeDashboard ? pill('#/dashboard', 'Dashboard', ['#/dashboard', '#/hr'], '<span class="dot-live"></span>') : ''}${canSeeTeams() ? pill('#/teams', 'Teams', ['#/teams']) : ''}${(() => {
-              const more = [
-                canSeeStaff ? { href: '#/staff', label: 'Staff', paths: ['#/staff'] } : null,
-                canSeeRecruitment ? { href: '#/recruitment', label: 'Recruitment', paths: ['#/recruitment', '#/recruitment-analytics'] } : null,
-                canSeeAnalytics() ? { href: '#/analytics', label: 'Analytics', paths: ['#/analytics'] } : null,
-                canSeeDashboard ? { href: '#/runs', label: 'Payment runs', paths: ['#/runs'] } : null,
-                hasPermission('audit.view') ? { href: '#/audit', label: 'Audit logs', paths: ['#/audit'] } : null,
-                canSeeManage() ? { href: '#/manage', label: 'Manage', paths: ['#/manage'] } : null
-              ].filter(Boolean);
-              if (!more.length) return '';
-              if (more.length === 1) return pill(more[0].href, more[0].label, more[0].paths);
-              const activeOne = more.find(m => m.paths.includes(path));
-              return `<details class="acct-menu">
-                <summary class="hr-pill${activeOne ? ' active' : ''}">${activeOne ? esc(activeOne.label) : 'More'} <span style="opacity:.6;">&#9662;</span></summary>
-                <div class="acct-menu-list">
-                  ${more.map(m => `<a href="${m.href}"${m.paths.includes(path) ? ' aria-current="page"' : ''}>${esc(m.label)}</a>`).join('')}
-                </div>
-              </details>`;
-            })()}
-             <details class="acct-menu">
+            : `${pill('#/home', 'Home', ['#/home', '#/', ''])}${(() => {
+              const groups = [
+                {
+                  id: 'money', label: 'Money',
+                  items: [
+                    { href: '#/my', label: 'My payments', paths: ['#/my'] },
+                    { href: '#/request', label: 'Request payment', paths: ['#/request'] },
+                    canSubmitRequests() ? { href: '#/new', label: 'Log work for someone', paths: ['#/new'] } : null,
+                    canSeeDashboard ? { href: '#/dashboard', label: 'Payments dashboard', paths: ['#/dashboard', '#/hr'] } : null,
+                    canSeeDashboard ? { href: '#/runs', label: 'Payment runs', paths: ['#/runs'] } : null
+                  ].filter(Boolean)
+                },
+                {
+                  id: 'work', label: 'Work',
+                  items: [
+                    canSeeTeams() ? { href: '#/teams', label: 'Teams and games', paths: ['#/teams'] } : null,
+                    canSeeAnalytics() ? { href: '#/analytics', label: 'Analytics', paths: ['#/analytics'] } : null
+                  ].filter(Boolean)
+                },
+                {
+                  id: 'people', label: 'People',
+                  items: [
+                    canSeeStaff ? { href: '#/staff', label: 'Staff', paths: ['#/staff'] } : null,
+                    canSeeRecruitment ? { href: '#/recruitment', label: 'Recruitment', paths: ['#/recruitment', '#/recruitment-analytics'] } : null
+                  ].filter(Boolean)
+                },
+                {
+                  id: 'admin', label: 'Admin',
+                  items: [
+                    canSeeManage() ? { href: '#/manage', label: 'Settings', paths: ['#/manage'] } : null,
+                    canSeeSecurity() ? { href: '#/security', label: 'Security', paths: ['#/security'] } : null,
+                    hasPermission('audit.view') ? { href: '#/audit', label: 'Audit log', paths: ['#/audit'] } : null
+                  ].filter(Boolean)
+                }
+              ].filter(g => g.items.length);
+
+              return groups.map(g => {
+                if (g.items.length === 1) return pill(g.items[0].href, g.items[0].label, g.items[0].paths);
+                const activeOne = g.items.find(m => m.paths.includes(path));
+                return `<details class="acct-menu">
+                  <summary class="hr-pill${activeOne ? ' active' : ''}">${activeOne ? esc(activeOne.label) : esc(g.label)} <span style="opacity:.6;">&#9662;</span></summary>
+                  <div class="acct-menu-list">
+                    ${g.items.map(m => `<a href="${m.href}"${m.paths.includes(path) ? ' aria-current="page"' : ''}>${esc(m.label)}</a>`).join('')}
+                  </div>
+                </details>`;
+              }).join('');
+            })()}<details class="acct-menu">
                <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
                <div class="acct-menu-list">
-                 <a href="#/my">My teams &amp; skillsets</a>
-                 <a href="#/tos">Terms of Service</a>
-                 <a href="#/aup">Acceptable Use Policy</a>
+                 <a href="#/my">My payments</a>
+                 <a href="#/request">Request payment</a>
+                 <div class="acct-menu-divider"></div>
                  <a href="https://www.playverse.cc" target="_blank" rel="noopener">playverse.cc</a>
+                 <a href="#/tos">Terms</a>
+                 <a href="#/aup">Acceptable use</a>
                  <div class="acct-menu-divider"></div>
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
@@ -10420,6 +10680,251 @@
       }
 
       load();
+    }
+
+    const SECURITY_LEVELS = [
+      {
+        id: 'normal', name: 'Normal', tone: '',
+        blurb: 'Everything works the way it normally does.',
+        points: ['Everyone signs in as usual', 'Payments and requests run normally', 'Bank details follow the usual permission']
+      },
+      {
+        id: 'heightened', name: 'Heightened', tone: 'amber',
+        blurb: 'The site stays open, but money stops moving until someone clears it.',
+        points: ['No payouts can be marked paid', 'No new requests or approvals', 'Payout methods cannot be changed', 'Everything else keeps working']
+      },
+      {
+        id: 'lockdown', name: 'Lockdown', tone: 'red',
+        blurb: 'Only people who can manage security get in. Everyone else sees a notice.',
+        points: ['Everyone else is locked out of the site', 'All money actions stop', 'You can sign every other device out', 'Use this if an account may be compromised']
+      }
+    ];
+
+    function securityLevelName(level) {
+      const found = SECURITY_LEVELS.find(l => l.id === level);
+      return found ? found.name : level;
+    }
+
+    function renderSecurity() {
+      const myGen = renderGen;
+      let state = null;
+      let events = [];
+      let sessions = [];
+      let loading = true;
+      let loadError = null;
+      let working = false;
+      let tab = 'protocol';
+      const canManage = hasPermission('security.manage');
+
+      function eventRow(e) {
+        return `
+          <div class="sec-ev">
+            <span class="sec-ev-dot ${esc(e.severity || 'info')}"></span>
+            <div class="sec-ev-main">
+              <div>${esc(e.detail || e.kind)}</div>
+              <div class="home-row-meta">
+                <span>${esc(e.actor_username || 'system')}</span>
+                ${e.target_username && e.target_username !== e.actor_username ? `<span>about ${esc(e.target_username)}</span>` : ''}
+                <span>${esc(String(e.kind).replace(/_/g, ' '))}</span>
+              </div>
+            </div>
+            <span class="sec-ev-when">${esc(relTime(e.created_at))}</span>
+          </div>`;
+      }
+
+      function sessionRow(sn) {
+        return `
+          <div class="home-row">
+            <div class="home-row-main">
+              <div class="home-row-title">${userLink(sn.robloxUserId, sn.robloxUsername)}${sn.isYou ? ' <span class="pp-tag">this device</span>' : ''}</div>
+              <div class="home-row-meta">
+                <span>${(sn.roles || []).join(', ') || 'No roles'}</span>
+                <span>Last used ${esc(relTime(sn.lastSeenAt || sn.createdAt))}</span>
+                ${sn.userAgent ? `<span>${esc(String(sn.userAgent).slice(0, 40))}</span>` : ''}
+              </div>
+            </div>
+            <div class="home-row-actions">
+              ${sn.isYou ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-sec-revoke="${esc(sn.token)}">Sign out</button>`}
+            </div>
+          </div>`;
+      }
+
+      function paint() {
+        const level = state ? state.level : 'normal';
+        const def = SECURITY_LEVELS.find(l => l.id === level) || SECURITY_LEVELS[0];
+        app.innerHTML = `
+    ${topbar()}
+    <div class="home-shell">
+      <div class="home-head">
+        <div>
+          <h1>Security</h1>
+          <p class="sub" style="margin:0;">The protocol decides what the whole site will let people do. Raise it the moment something looks wrong, drop it when you are sure.</p>
+        </div>
+      </div>
+
+      ${loadError ? `<div class="error-box"><span>${esc(loadError)}</span></div>` : ''}
+
+      ${level !== 'normal' ? `
+      <div class="sec-banner ${def.tone === 'red' ? 'red' : ''}">
+        <div>
+          <strong>${esc(def.name)} is active</strong>
+          <span>${state && state.note ? esc(state.note.replace(/[.!?]*$/, '')) + '.' : 'No reason was recorded.'}${state && state.setBy ? ` Set by ${esc(state.setBy)}${state.setAt ? ' ' + esc(relTime(state.setAt)) : ''}.` : ''}</span>
+        </div>
+      </div>` : ''}
+
+      <div class="filter-bar">
+        <div class="tabs">
+          <button type="button" class="tab-btn ${tab === 'protocol' ? 'active' : ''}" data-sec-tab="protocol">Protocol</button>
+          <button type="button" class="tab-btn ${tab === 'sessions' ? 'active' : ''}" data-sec-tab="sessions">Signed in (${sessions.length})</button>
+          <button type="button" class="tab-btn ${tab === 'log' ? 'active' : ''}" data-sec-tab="log">Security log</button>
+        </div>
+      </div>
+
+      ${loading ? '<div class="home-card"><div class="home-empty">Loading...</div></div>' : tab === 'protocol' ? `
+      <div class="home-card">
+        <div class="home-card-head"><h2>Protocol level</h2><span class="count">Now: ${esc(def.name)}</span></div>
+        <div class="sec-level-grid">
+          ${SECURITY_LEVELS.map(l => `
+            <button type="button" class="sec-level ${esc(l.tone)} ${l.id === level ? 'current' : ''}" data-sec-level="${esc(l.id)}" ${!canManage || working || l.id === level ? 'disabled' : ''}>
+              <div class="sec-level-name">${esc(l.name)}${l.id === level ? '<span class="sec-level-now">Active</span>' : ''}</div>
+              <p>${esc(l.blurb)}</p>
+              <ul>${l.points.map(pt => `<li>${esc(pt)}</li>`).join('')}</ul>
+            </button>`).join('')}
+        </div>
+        ${canManage ? `
+        <div style="padding:0 16px 16px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost btn-sm" id="secSignOutAll" ${working ? 'disabled' : ''}>Sign out everyone below me</button>
+        </div>`
+              : '<div class="home-note">You can see the level but not change it. Someone with the security permission can.</div>'}
+      </div>` : tab === 'sessions' ? `
+      <div class="home-card">
+        <div class="home-card-head"><h2>Signed in right now</h2><span class="count">${sessions.length}</span></div>
+        ${sessions.length ? sessions.map(sessionRow).join('') : '<div class="home-empty">Nobody is signed in.</div>'}
+      </div>` : `
+      <div class="home-card">
+        <div class="home-card-head"><h2>Security log</h2><span class="count">${events.length}</span></div>
+        ${events.length ? events.map(eventRow).join('') : '<div class="home-empty">Nothing recorded yet.</div>'}
+      </div>`}
+    </div>`;
+
+        wireTopbarSignOut();
+
+        document.querySelectorAll('[data-sec-tab]').forEach(el => el.addEventListener('click', () => {
+          tab = el.dataset.secTab;
+          paint();
+        }));
+
+        document.querySelectorAll('[data-sec-level]').forEach(el => el.addEventListener('click', async () => {
+          const next = el.dataset.secLevel;
+          const target = SECURITY_LEVELS.find(l => l.id === next);
+          let note = '';
+          if (next !== 'normal') {
+            note = await askForText({
+              title: `Turn on ${target.name}`,
+              hint: 'Say what prompted this. It shows on the security log and to anyone who gets locked out.',
+              placeholder: 'For example: two payout methods changed overnight from an unfamiliar device.',
+              confirmLabel: `Turn on ${target.name}`,
+              required: true,
+              requiredMessage: 'Write a short reason first.'
+            });
+            if (note === null) return;
+          } else {
+            note = await askForText({
+              title: 'Back to normal',
+              hint: 'Optional, but useful later: what resolved it?',
+              placeholder: 'For example: it was a staff member on a new laptop.',
+              confirmLabel: 'Back to normal'
+            });
+            if (note === null) return;
+          }
+          let signEveryoneOut = false;
+          if (next === 'lockdown') {
+            signEveryoneOut = confirm('Sign every other device out as well?\n\nOK signs everyone out. Cancel leaves sessions alone.');
+          }
+          working = true; paint();
+          try {
+            const json = await callHrData('set_security_level', { level: next, note, signEveryoneOut });
+            toast(json.revoked ? `${target.name} on, ${json.revoked} signed out` : `${target.name} is on`);
+            await load();
+          } catch (e) {
+            toast(e.message || 'Could not change the level.', 'err');
+          }
+          working = false;
+          paint();
+        }));
+
+        const signOutAll = document.getElementById('secSignOutAll');
+        if (signOutAll) signOutAll.addEventListener('click', async () => {
+          if (!confirm('Sign out everyone whose role is below yours?\n\nThey will need to sign in again. Your own session stays.')) return;
+          working = true; paint();
+          try {
+            const json = await callHrData('revoke_all_sessions');
+            toast(json.count ? `Signed out ${json.count}` : 'Nobody to sign out');
+            await load();
+          } catch (e) {
+            toast(e.message || 'That did not go through.', 'err');
+          }
+          working = false;
+          paint();
+        });
+
+        document.querySelectorAll('[data-sec-revoke]').forEach(el => el.addEventListener('click', async () => {
+          el.disabled = true;
+          el.textContent = 'Signing out...';
+          try {
+            await callHrData('revoke_session', { token: el.dataset.secRevoke });
+            toast('Signed out');
+            await load();
+          } catch (e) {
+            el.disabled = false;
+            el.textContent = 'Sign out';
+            toast(e.message || 'Could not sign them out.', 'err');
+          }
+        }));
+      }
+
+      async function load() {
+        loadError = null;
+        try {
+          const results = await Promise.all([
+            callHrData('get_security_state', { force: true }),
+            canManage ? callHrData('list_sessions') : Promise.resolve({ data: [] }),
+            canManage ? callHrData('list_security_events', { limit: 80 }) : Promise.resolve({ data: [] })
+          ]);
+          state = results[0].data || null;
+          sessions = results[1].data || [];
+          events = results[2].data || [];
+        } catch (e) {
+          loadError = e.message || 'Could not load the security centre.';
+        }
+        if (myGen !== renderGen) return;
+        loading = false;
+        paint();
+      }
+
+      load();
+    }
+
+    function renderLockedOut() {
+      const note = lockdownNote;
+      app.innerHTML = `
+    <div class="lock-screen">
+      <div class="lock-inner">
+        <div class="closed-icon">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="10.5" width="16" height="10.5" rx="2.5"></rect>
+            <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"></path>
+          </svg>
+        </div>
+        <h1>The site is locked</h1>
+        <p>PlayVerse has been put into lockdown while something is looked into. Nobody is being paid or charged during this, and nothing you submitted has been lost.</p>
+        <p>It will open again once leadership clears it.</p>
+        ${note ? `<div class="lock-why"><strong>Reason given:</strong><br>${esc(note)}</div>` : ''}
+        <div style="margin-top:18px;"><button type="button" class="btn btn-ghost btn-sm" id="lockSignOut">Sign out</button></div>
+      </div>
+    </div>`;
+      const out = document.getElementById('lockSignOut');
+      if (out) out.addEventListener('click', hrSignOut);
     }
 
     function renderDashboard() {
@@ -14525,6 +15030,10 @@
       }
 
       load();
+    }
+
+    function canSeeSecurity() {
+      return hasPermission('security.manage') || hasPermission('roles.manage');
     }
 
     function canSeeTeams() {
