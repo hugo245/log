@@ -6213,7 +6213,7 @@
       { id: 'people', label: 'People', hint: 'Staff records and moderation', match: p => p.startsWith('staff.') || p.startsWith('payouts.') },
       { id: 'teams', label: 'Teams & games', hint: 'Teams, games, boards and deadlines', match: p => p.startsWith('teams.') },
       { id: 'recruitment', label: 'Recruitment', hint: 'Applications and hiring', match: p => p.startsWith('recruitment.') },
-      { id: 'settings', label: 'Settings', hint: 'Configuration that affects everyone', match: p => p.startsWith('settings.') || p.startsWith('roles.') || p.startsWith('broadcasts.') },
+      { id: 'settings', label: 'Settings', hint: 'Configuration that affects everyone', match: p => p.startsWith('settings.') || p.startsWith('roles.') || p.startsWith('broadcasts.') || p.startsWith('security.') },
       { id: 'records', label: 'Records', hint: 'Audit log and backups', match: p => p.startsWith('audit.') || p.startsWith('backups.') }
     ];
 
@@ -6248,6 +6248,7 @@
       'recruitment.finalise': 'Finalise recruitment placements (grant roles/access)',
       'recruitment.analytics': 'View recruitment analytics',
       'payouts.view_bank_details': 'View full bank transfer details (name, address, SWIFT and IBAN)',
+      'security.manage': 'Manage security (raise the protocol, hold accounts, sign people out)',
       'teams.view': 'View teams, their games and deadlines',
       'teams.manage': 'Assign games to teams and manage team deadlines'
     };
