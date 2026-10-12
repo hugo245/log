@@ -8,7 +8,7 @@
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Caveat:wght@500;600;700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
     rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
@@ -1273,23 +1273,9 @@
 
     .tour-ring {
       position: absolute;
-      border: 2.5px solid #FFD166;
-      border-radius: 14px;
+      border: 2px solid var(--accent);
+      border-radius: 12px;
       pointer-events: none;
-      animation: tourRing 1.6s ease-in-out infinite;
-      box-shadow: 0 0 0 4px rgba(255, 209, 102, .18);
-    }
-
-    @keyframes tourRing {
-
-      0%,
-      100% {
-        box-shadow: 0 0 0 4px rgba(255, 209, 102, .18);
-      }
-
-      50% {
-        box-shadow: 0 0 0 9px rgba(255, 209, 102, .08);
-      }
     }
 
     .tour-arrow {
@@ -1298,105 +1284,70 @@
       overflow: visible;
     }
 
+    .tour-note:focus {
+      outline: none;
+    }
+
     .tour-note {
       position: absolute;
-      max-width: 330px;
-      background: #FFFDF5;
-      color: #1F2430;
-      border: 2px solid #1F2430;
+      width: 320px;
+      max-width: calc(100vw - 32px);
+      background: var(--surface);
+      border: 1px solid var(--line);
       border-radius: 16px;
-      padding: 16px 18px 14px;
-      box-shadow: 5px 6px 0 rgba(31, 36, 48, .85);
+      padding: 18px 20px 16px;
+      box-shadow: 0 18px 48px rgba(10, 12, 18, .28);
       pointer-events: auto;
-      transform: rotate(-.7deg);
     }
 
     .tour-note h3 {
-      margin: 0 0 6px;
-      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
-      font-size: 27px;
-      line-height: 1.1;
+      margin: 0 0 7px;
+      font-size: 16.5px;
+      line-height: 1.3;
       font-weight: 700;
+      letter-spacing: -.01em;
+      color: var(--ink);
     }
 
     .tour-note p {
       margin: 0;
-      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
-      font-size: 19px;
-      line-height: 1.32;
-      color: #333A49;
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--ink-soft);
     }
 
     .tour-note-foot {
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-top: 13px;
+      gap: 8px;
+      margin-top: 18px;
     }
 
-    .tour-step {
-      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
-      font-size: 17px;
-      color: #6B7280;
+    .tour-dots {
+      display: flex;
+      gap: 5px;
       margin-right: auto;
     }
 
-    .tour-btn {
-      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
-      font-size: 19px;
-      font-weight: 700;
-      border: 2px solid #1F2430;
-      background: #1F2430;
-      color: #FFFDF5;
-      border-radius: 11px;
-      padding: 4px 15px 6px;
-      cursor: pointer;
-      line-height: 1.2;
+    .tour-dots i {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--line);
+      display: block;
     }
 
-    .tour-btn.ghost {
-      background: transparent;
-      color: #1F2430;
-    }
-
-    .tour-btn:hover {
-      transform: translateY(-1px);
-    }
-
-    .tour-badge {
-      position: fixed;
-      left: 50%;
-      transform: translateX(-50%);
-      bottom: 26px;
-      z-index: 1201;
-      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
-      font-size: 19px;
-      background: #1F2430;
-      color: #FFFDF5;
-      border-radius: 999px;
-      padding: 7px 18px 9px;
-      pointer-events: auto;
-      cursor: pointer;
-      border: none;
+    .tour-dots i.on {
+      background: var(--accent);
     }
 
     @media (max-width: 700px) {
       .tour-note {
-        max-width: calc(100vw - 36px);
+        width: calc(100vw - 32px);
       }
 
       .tour-note h3 {
-        font-size: 24px;
-      }
-
-      .tour-note p {
-        font-size: 17.5px;
-      }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .tour-ring {
-        animation: none;
+        font-size: 16px;
       }
     }
 
@@ -11296,14 +11247,14 @@
       const steps = [
         {
           find: () => document.querySelector('.topbar .hr-pill[href="#/home"]'),
-          title: 'Start here now',
-          body: 'Home is new. It shows what needs you today, and it looks different depending on whether you build things, run a team, or run the studio.',
+          title: 'Home is the new starting point',
+          body: 'It shows what needs you today, and it changes depending on whether you build, run a team, or run the studio.',
           place: 'below'
         },
         {
           find: () => document.querySelector('.topbar .acct-menu summary'),
-          title: 'Everything got grouped',
-          body: 'The row of eight buttons is gone. Money, Work, People and Admin, and nothing is more than two clicks away.',
+          title: 'Four menus instead of eight buttons',
+          body: 'Money, Work, People and Admin. Everything that was here before is still here, just one level in.',
           place: 'below'
         }
       ];
@@ -11311,8 +11262,8 @@
       if (hasPermission('dashboard.submit_request') || hasPermission('teams.view')) {
         steps.push({
           find: () => document.querySelector('[data-home-submit]') || document.querySelector('.home-card'),
-          title: 'Finishing work has a step now',
-          body: 'You mark a task done, your producer checks it, and only then does it count for pay. If it comes back, the note tells you exactly what to change.',
+          title: 'Work gets reviewed before it gets paid',
+          body: 'Mark a task done, your producer checks it, then it counts towards pay. If it comes back, the note says what to change.',
           place: 'right'
         });
       }
@@ -11321,7 +11272,7 @@
         steps.push({
           find: () => document.querySelector('.topbar .acct-menu summary'),
           title: 'Payments go out in runs',
-          body: 'Approved work collects in one open run. Freeze it on the 14th or the end of the month, pay the sheet, close it. No more chasing one request at a time.',
+          body: 'Approved work collects in one open run. Freeze it on the cut-off, pay the sheet, close it. Under Money, Payment runs.',
           place: 'below'
         });
       }
@@ -11329,8 +11280,8 @@
       if (hasPermission('settings.manage_rate')) {
         steps.push({
           find: () => document.querySelector('.topbar .acct-menu summary'),
-          title: 'There is a rate card',
-          body: 'Set a standard price per kind of job once, under Admin, Settings. Same work, same pay, whoever assigns it.',
+          title: 'Pay rates are written down',
+          body: 'Set a standard amount per kind of job once, under Admin, Settings. Same work, same pay, whoever assigns it.',
           place: 'below'
         });
       }
@@ -11338,29 +11289,50 @@
       if (hasPermission('security.manage') || hasPermission('roles.manage')) {
         steps.push({
           find: () => document.querySelector('.topbar .acct-menu summary'),
-          title: 'And a big red handle',
-          body: 'Admin, Security. Raise the protocol and every payment on the site stops, including yours. Lockdown goes further and shuts everyone else out.',
+          title: 'Security has a switch',
+          body: 'Under Admin. Raising the protocol stops every payment on the site, including your own. Lockdown also shuts everyone else out.',
           place: 'below'
         });
       }
 
       steps.push({
         find: () => null,
-        title: "That's the tour",
-        body: 'Nothing you had before has gone anywhere. Poke around, and tell a lead if something feels wrong.',
+        title: "That's everything",
+        body: 'Nothing that was here before has gone. If something looks wrong, tell a lead. You can reopen this from the menu under your name.',
         place: 'centre'
       });
 
       return steps;
     }
 
-    function tourArrowPath(from, to) {
+    function inkArrow(from, to) {
       const dx = to.x - from.x;
       const dy = to.y - from.y;
-      const bend = Math.min(80, Math.max(26, Math.abs(dx) * 0.35 + Math.abs(dy) * 0.2));
-      const cx = from.x + dx * 0.45 + (dy > 0 ? bend : -bend) * 0.5;
-      const cy = from.y + dy * 0.55 - bend * 0.6;
-      return `M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+      const bow = Math.min(46, len * 0.22);
+      const p1 = { x: from.x + dx * 0.32 + nx * bow, y: from.y + dy * 0.32 + ny * bow };
+      const p2 = { x: from.x + dx * 0.68 + nx * bow * 0.72, y: from.y + dy * 0.68 + ny * bow * 0.72 };
+      const shaft = `M ${from.x.toFixed(1)} ${from.y.toFixed(1)} C ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}, ${to.x.toFixed(1)} ${to.y.toFixed(1)}`;
+
+      const tx = to.x - p2.x;
+      const ty = to.y - p2.y;
+      const tl = Math.sqrt(tx * tx + ty * ty) || 1;
+      const ux = tx / tl;
+      const uy = ty / tl;
+      const head = 11;
+      const spread = 0.46;
+      const a1 = {
+        x: to.x - head * (ux * Math.cos(spread) - uy * Math.sin(spread)),
+        y: to.y - head * (uy * Math.cos(spread) + ux * Math.sin(spread))
+      };
+      const a2 = {
+        x: to.x - head * (ux * Math.cos(-spread) - uy * Math.sin(-spread)),
+        y: to.y - head * (uy * Math.cos(-spread) + ux * Math.sin(-spread))
+      };
+      const tip = `M ${a1.x.toFixed(1)} ${a1.y.toFixed(1)} L ${to.x.toFixed(1)} ${to.y.toFixed(1)} L ${a2.x.toFixed(1)} ${a2.y.toFixed(1)}`;
+      return { shaft, tip };
     }
 
     function paintTourStep(index, steps) {
@@ -11381,25 +11353,19 @@
       if (target) {
         const r = target.getBoundingClientRect();
         if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < vh) {
-          box = { x: r.left - 6, y: r.top - 6, w: r.width + 12, h: r.height + 12 };
+          box = { x: r.left - 5, y: r.top - 5, w: r.width + 10, h: r.height + 10 };
         }
       }
 
-      const holeRect = box
-        ? `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="14" fill="black"></rect>`
-        : '';
       root.innerHTML = `
         <svg class="tour-dim" aria-hidden="true">
           <defs>
             <mask id="tourMask">
               <rect width="100%" height="100%" fill="white"></rect>
-              ${holeRect}
+              ${box ? `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="12" fill="black"></rect>` : ''}
             </mask>
-            <marker id="tourArrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0 0L10 5L0 10z" fill="#FFD166"></path>
-            </marker>
           </defs>
-          <rect width="100%" height="100%" fill="rgba(16,18,24,.62)" mask="url(#tourMask)"></rect>
+          <rect width="100%" height="100%" fill="rgba(12,14,20,.58)" mask="url(#tourMask)"></rect>
         </svg>`;
 
       if (box) {
@@ -11414,46 +11380,66 @@
 
       const note = document.createElement('div');
       note.className = 'tour-note';
+      note.setAttribute('role', 'dialog');
+      note.setAttribute('aria-modal', 'true');
+      note.setAttribute('aria-label', step.title);
+      note.setAttribute('tabindex', '-1');
       note.innerHTML = `
         <h3>${esc(step.title)}</h3>
         <p>${esc(step.body)}</p>
         <div class="tour-note-foot">
-          <span class="tour-step">${index + 1} of ${steps.length}</span>
-          ${index > 0 ? '<button type="button" class="tour-btn ghost" id="tourBack">Back</button>' : '<button type="button" class="tour-btn ghost" id="tourSkip">Skip</button>'}
-          <button type="button" class="tour-btn" id="tourNext">${index === steps.length - 1 ? 'Got it' : 'Next'}</button>
+          <span class="tour-dots" aria-label="Step ${index + 1} of ${steps.length}">${steps.map((s, i) => `<i class="${i === index ? 'on' : ''}"></i>`).join('')}</span>
+          ${index > 0
+          ? '<button type="button" class="btn btn-ghost btn-sm" id="tourBack">Back</button>'
+          : '<button type="button" class="btn btn-ghost btn-sm" id="tourSkip">Skip</button>'}
+          <button type="button" class="btn btn-primary btn-sm" id="tourNext">${index === steps.length - 1 ? 'Done' : 'Next'}</button>
         </div>`;
       root.appendChild(note);
 
       const noteBox = note.getBoundingClientRect();
+      const gap = 44;
       let nx, ny;
       if (!box) {
-        nx = Math.max(18, vw / 2 - noteBox.width / 2);
-        ny = Math.max(18, vh / 2 - noteBox.height / 2);
-      } else if (step.place === 'right' && box.x + box.w + noteBox.width + 60 < vw) {
-        nx = box.x + box.w + 52;
-        ny = Math.min(vh - noteBox.height - 18, Math.max(18, box.y));
+        nx = Math.max(16, vw / 2 - noteBox.width / 2);
+        ny = Math.max(16, vh / 2 - noteBox.height / 2);
+      } else if (step.place === 'right' && box.x + box.w + noteBox.width + gap + 16 < vw) {
+        nx = box.x + box.w + gap;
+        ny = Math.min(vh - noteBox.height - 16, Math.max(16, box.y - 8));
       } else {
-        nx = Math.min(vw - noteBox.width - 18, Math.max(18, box.x + box.w / 2 - noteBox.width / 2));
-        ny = box.y + box.h + 58;
-        if (ny + noteBox.height > vh - 12) ny = Math.max(18, box.y - noteBox.height - 58);
+        nx = Math.min(vw - noteBox.width - 16, Math.max(16, box.x + box.w / 2 - noteBox.width / 2));
+        ny = box.y + box.h + gap;
+        if (ny + noteBox.height > vh - 12) ny = Math.max(16, box.y - noteBox.height - gap);
       }
-      note.style.left = nx + 'px';
-      note.style.top = ny + 'px';
+      note.style.left = Math.round(nx) + 'px';
+      note.style.top = Math.round(ny) + 'px';
 
       if (box) {
-        const noteNow = note.getBoundingClientRect();
-        const targetPoint = { x: box.x + box.w / 2, y: noteNow.top > box.y ? box.y + box.h + 4 : box.y - 4 };
-        const startPoint = {
-          x: Math.min(Math.max(noteNow.left + 34, box.x - 40), noteNow.right - 34),
-          y: noteNow.top > box.y ? noteNow.top - 6 : noteNow.bottom + 6
-        };
+        const n = note.getBoundingClientRect();
+        const above = n.top > box.y + box.h;
+        const beside = n.left > box.x + box.w;
+        let start, end;
+        if (beside) {
+          start = { x: n.left - 10, y: n.top + 30 };
+          end = { x: box.x + box.w + 8, y: box.y + box.h / 2 };
+        } else if (above) {
+          start = { x: Math.min(Math.max(n.left + 44, box.x), n.right - 44), y: n.top - 10 };
+          end = { x: box.x + box.w / 2, y: box.y + box.h + 8 };
+        } else {
+          start = { x: Math.min(Math.max(n.left + 44, box.x), n.right - 44), y: n.bottom + 10 };
+          end = { x: box.x + box.w / 2, y: box.y - 8 };
+        }
+        const path = inkArrow(start, end);
         const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         arrow.setAttribute('class', 'tour-arrow');
         arrow.setAttribute('width', String(vw));
         arrow.setAttribute('height', String(vh));
         arrow.style.left = '0';
         arrow.style.top = '0';
-        arrow.innerHTML = `<path d="${tourArrowPath(startPoint, targetPoint)}" fill="none" stroke="#FFD166" stroke-width="2.6" stroke-linecap="round" marker-end="url(#tourArrowHead)"></path>`;
+        arrow.innerHTML = `
+          <g fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="${path.shaft}"></path>
+            <path d="${path.tip}"></path>
+          </g>`;
         root.appendChild(arrow);
       }
 
@@ -11466,6 +11452,7 @@
       });
       if (back) back.addEventListener('click', () => paintTourStep(index - 1, steps));
       if (skip) skip.addEventListener('click', finishTour);
+      note.focus({ preventScroll: true });
     }
 
     async function finishTour() {
