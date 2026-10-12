@@ -8,7 +8,7 @@
   <link rel="icon" href="favicon.ico" sizes="any">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Caveat:wght@500;600;700&display=swap"
     rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
@@ -1253,6 +1253,150 @@
 
       .home-row-actions .btn {
         flex: 1;
+      }
+    }
+
+    .tour-veil {
+      position: fixed;
+      inset: 0;
+      z-index: 1200;
+      pointer-events: none;
+    }
+
+    .tour-veil svg.tour-dim {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: auto;
+    }
+
+    .tour-ring {
+      position: absolute;
+      border: 2.5px solid #FFD166;
+      border-radius: 14px;
+      pointer-events: none;
+      animation: tourRing 1.6s ease-in-out infinite;
+      box-shadow: 0 0 0 4px rgba(255, 209, 102, .18);
+    }
+
+    @keyframes tourRing {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 4px rgba(255, 209, 102, .18);
+      }
+
+      50% {
+        box-shadow: 0 0 0 9px rgba(255, 209, 102, .08);
+      }
+    }
+
+    .tour-arrow {
+      position: absolute;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    .tour-note {
+      position: absolute;
+      max-width: 330px;
+      background: #FFFDF5;
+      color: #1F2430;
+      border: 2px solid #1F2430;
+      border-radius: 16px;
+      padding: 16px 18px 14px;
+      box-shadow: 5px 6px 0 rgba(31, 36, 48, .85);
+      pointer-events: auto;
+      transform: rotate(-.7deg);
+    }
+
+    .tour-note h3 {
+      margin: 0 0 6px;
+      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
+      font-size: 27px;
+      line-height: 1.1;
+      font-weight: 700;
+    }
+
+    .tour-note p {
+      margin: 0;
+      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
+      font-size: 19px;
+      line-height: 1.32;
+      color: #333A49;
+    }
+
+    .tour-note-foot {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 13px;
+    }
+
+    .tour-step {
+      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
+      font-size: 17px;
+      color: #6B7280;
+      margin-right: auto;
+    }
+
+    .tour-btn {
+      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
+      font-size: 19px;
+      font-weight: 700;
+      border: 2px solid #1F2430;
+      background: #1F2430;
+      color: #FFFDF5;
+      border-radius: 11px;
+      padding: 4px 15px 6px;
+      cursor: pointer;
+      line-height: 1.2;
+    }
+
+    .tour-btn.ghost {
+      background: transparent;
+      color: #1F2430;
+    }
+
+    .tour-btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .tour-badge {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 26px;
+      z-index: 1201;
+      font-family: Caveat, 'Patrick Hand', 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive;
+      font-size: 19px;
+      background: #1F2430;
+      color: #FFFDF5;
+      border-radius: 999px;
+      padding: 7px 18px 9px;
+      pointer-events: auto;
+      cursor: pointer;
+      border: none;
+    }
+
+    @media (max-width: 700px) {
+      .tour-note {
+        max-width: calc(100vw - 36px);
+      }
+
+      .tour-note h3 {
+        font-size: 24px;
+      }
+
+      .tour-note p {
+        font-size: 17.5px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tour-ring {
+        animation: none;
       }
     }
 
@@ -6085,7 +6229,7 @@
     const SUPABASE_URL = 'https://tixfcxypoyedqbkiwbtx.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpeGZjeHlwb3llZHFia2l3YnR4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2NzExMDUsImV4cCI6MjEwMTI0NzEwNX0.0biB2dg46s1Cy_Gpq6ZuL3fHnSLJP2xJO8RHpKRGaS8';
     const EDGE_BASE = 'https://api.playverseinternal.cc'
-    const GAMES_TABLE = 'games';
+    const GAMES_TABLE = 'public_games';
     const PUBLIC_SETTINGS_VIEW = 'public_app_settings';
     const SESSION_STORAGE_KEY = 'pv_hr_session_token';
     const RETURN_HASH_KEY = 'pv_return_hash';
@@ -8920,6 +9064,7 @@
                  <a href="#/tos">Terms</a>
                  <a href="#/aup">Acceptable use</a>
                  <div class="acct-menu-divider"></div>
+                 <button type="button" id="replayTourBtn">What's new</button>
                  <button type="button" id="signOutBtn">Sign out</button>
                </div>
              </details>`}
@@ -8930,6 +9075,11 @@
     function wireTopbarSignOut() {
       const btn = document.getElementById('signOutBtn');
       if (btn) btn.addEventListener('click', hrSignOut);
+      const tourBtn = document.getElementById('replayTourBtn');
+      if (tourBtn) tourBtn.addEventListener('click', () => {
+        if (currentPath() === '#/home' || currentPath() === '#/' || currentPath() === '') startTour();
+        else window.location.hash = '#/home';
+      });
       const themeBtn = document.getElementById('themeToggleBtn');
       if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
     }
@@ -10472,6 +10622,7 @@
         busy.clear();
         loading = false;
         paint();
+        maybeOfferTour();
       }
 
       load();
@@ -11135,6 +11286,227 @@
     </div>`;
       const out = document.getElementById('lockSignOut');
       if (out) out.addEventListener('click', hrSignOut);
+    }
+
+    const REVAMP_TOUR_VERSION = 1;
+    let tourState = null;
+    let tourRunning = false;
+
+    function tourSteps() {
+      const steps = [
+        {
+          find: () => document.querySelector('.topbar .hr-pill[href="#/home"]'),
+          title: 'Start here now',
+          body: 'Home is new. It shows what needs you today, and it looks different depending on whether you build things, run a team, or run the studio.',
+          place: 'below'
+        },
+        {
+          find: () => document.querySelector('.topbar .acct-menu summary'),
+          title: 'Everything got grouped',
+          body: 'The row of eight buttons is gone. Money, Work, People and Admin, and nothing is more than two clicks away.',
+          place: 'below'
+        }
+      ];
+
+      if (hasPermission('dashboard.submit_request') || hasPermission('teams.view')) {
+        steps.push({
+          find: () => document.querySelector('[data-home-submit]') || document.querySelector('.home-card'),
+          title: 'Finishing work has a step now',
+          body: 'You mark a task done, your producer checks it, and only then does it count for pay. If it comes back, the note tells you exactly what to change.',
+          place: 'right'
+        });
+      }
+
+      if (hasPermission('dashboard.view')) {
+        steps.push({
+          find: () => document.querySelector('.topbar .acct-menu summary'),
+          title: 'Payments go out in runs',
+          body: 'Approved work collects in one open run. Freeze it on the 14th or the end of the month, pay the sheet, close it. No more chasing one request at a time.',
+          place: 'below'
+        });
+      }
+
+      if (hasPermission('settings.manage_rate')) {
+        steps.push({
+          find: () => document.querySelector('.topbar .acct-menu summary'),
+          title: 'There is a rate card',
+          body: 'Set a standard price per kind of job once, under Admin, Settings. Same work, same pay, whoever assigns it.',
+          place: 'below'
+        });
+      }
+
+      if (hasPermission('security.manage') || hasPermission('roles.manage')) {
+        steps.push({
+          find: () => document.querySelector('.topbar .acct-menu summary'),
+          title: 'And a big red handle',
+          body: 'Admin, Security. Raise the protocol and every payment on the site stops, including yours. Lockdown goes further and shuts everyone else out.',
+          place: 'below'
+        });
+      }
+
+      steps.push({
+        find: () => null,
+        title: "That's the tour",
+        body: 'Nothing you had before has gone anywhere. Poke around, and tell a lead if something feels wrong.',
+        place: 'centre'
+      });
+
+      return steps;
+    }
+
+    function tourArrowPath(from, to) {
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const bend = Math.min(80, Math.max(26, Math.abs(dx) * 0.35 + Math.abs(dy) * 0.2));
+      const cx = from.x + dx * 0.45 + (dy > 0 ? bend : -bend) * 0.5;
+      const cy = from.y + dy * 0.55 - bend * 0.6;
+      return `M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`;
+    }
+
+    function paintTourStep(index, steps) {
+      const existing = document.getElementById('tourRoot');
+      if (existing) existing.remove();
+      const step = steps[index];
+      if (!step) return;
+
+      const root = document.createElement('div');
+      root.id = 'tourRoot';
+      root.className = 'tour-veil';
+      document.body.appendChild(root);
+
+      const target = step.find ? step.find() : null;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let box = null;
+      if (target) {
+        const r = target.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < vh) {
+          box = { x: r.left - 6, y: r.top - 6, w: r.width + 12, h: r.height + 12 };
+        }
+      }
+
+      const holeRect = box
+        ? `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="14" fill="black"></rect>`
+        : '';
+      root.innerHTML = `
+        <svg class="tour-dim" aria-hidden="true">
+          <defs>
+            <mask id="tourMask">
+              <rect width="100%" height="100%" fill="white"></rect>
+              ${holeRect}
+            </mask>
+            <marker id="tourArrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0L10 5L0 10z" fill="#FFD166"></path>
+            </marker>
+          </defs>
+          <rect width="100%" height="100%" fill="rgba(16,18,24,.62)" mask="url(#tourMask)"></rect>
+        </svg>`;
+
+      if (box) {
+        const ring = document.createElement('div');
+        ring.className = 'tour-ring';
+        ring.style.left = box.x + 'px';
+        ring.style.top = box.y + 'px';
+        ring.style.width = box.w + 'px';
+        ring.style.height = box.h + 'px';
+        root.appendChild(ring);
+      }
+
+      const note = document.createElement('div');
+      note.className = 'tour-note';
+      note.innerHTML = `
+        <h3>${esc(step.title)}</h3>
+        <p>${esc(step.body)}</p>
+        <div class="tour-note-foot">
+          <span class="tour-step">${index + 1} of ${steps.length}</span>
+          ${index > 0 ? '<button type="button" class="tour-btn ghost" id="tourBack">Back</button>' : '<button type="button" class="tour-btn ghost" id="tourSkip">Skip</button>'}
+          <button type="button" class="tour-btn" id="tourNext">${index === steps.length - 1 ? 'Got it' : 'Next'}</button>
+        </div>`;
+      root.appendChild(note);
+
+      const noteBox = note.getBoundingClientRect();
+      let nx, ny;
+      if (!box) {
+        nx = Math.max(18, vw / 2 - noteBox.width / 2);
+        ny = Math.max(18, vh / 2 - noteBox.height / 2);
+      } else if (step.place === 'right' && box.x + box.w + noteBox.width + 60 < vw) {
+        nx = box.x + box.w + 52;
+        ny = Math.min(vh - noteBox.height - 18, Math.max(18, box.y));
+      } else {
+        nx = Math.min(vw - noteBox.width - 18, Math.max(18, box.x + box.w / 2 - noteBox.width / 2));
+        ny = box.y + box.h + 58;
+        if (ny + noteBox.height > vh - 12) ny = Math.max(18, box.y - noteBox.height - 58);
+      }
+      note.style.left = nx + 'px';
+      note.style.top = ny + 'px';
+
+      if (box) {
+        const noteNow = note.getBoundingClientRect();
+        const targetPoint = { x: box.x + box.w / 2, y: noteNow.top > box.y ? box.y + box.h + 4 : box.y - 4 };
+        const startPoint = {
+          x: Math.min(Math.max(noteNow.left + 34, box.x - 40), noteNow.right - 34),
+          y: noteNow.top > box.y ? noteNow.top - 6 : noteNow.bottom + 6
+        };
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        arrow.setAttribute('class', 'tour-arrow');
+        arrow.setAttribute('width', String(vw));
+        arrow.setAttribute('height', String(vh));
+        arrow.style.left = '0';
+        arrow.style.top = '0';
+        arrow.innerHTML = `<path d="${tourArrowPath(startPoint, targetPoint)}" fill="none" stroke="#FFD166" stroke-width="2.6" stroke-linecap="round" marker-end="url(#tourArrowHead)"></path>`;
+        root.appendChild(arrow);
+      }
+
+      const next = document.getElementById('tourNext');
+      const back = document.getElementById('tourBack');
+      const skip = document.getElementById('tourSkip');
+      if (next) next.addEventListener('click', () => {
+        if (index === steps.length - 1) finishTour();
+        else paintTourStep(index + 1, steps);
+      });
+      if (back) back.addEventListener('click', () => paintTourStep(index - 1, steps));
+      if (skip) skip.addEventListener('click', finishTour);
+    }
+
+    async function finishTour() {
+      tourRunning = false;
+      const root = document.getElementById('tourRoot');
+      if (root) root.remove();
+      const badge = document.getElementById('tourBadge');
+      if (badge) badge.remove();
+      document.removeEventListener('keydown', tourKey);
+      try {
+        await callHrData('mark_tour_seen', { version: REVAMP_TOUR_VERSION });
+        if (tourState) tourState.seen = REVAMP_TOUR_VERSION;
+      } catch (e) { }
+    }
+
+    function tourKey(e) {
+      if (e.key === 'Escape') finishTour();
+    }
+
+    function startTour() {
+      if (tourRunning) return;
+      const steps = tourSteps();
+      if (!steps.length) return;
+      tourRunning = true;
+      document.addEventListener('keydown', tourKey);
+      paintTourStep(0, steps);
+    }
+
+    async function maybeOfferTour() {
+      if (tourRunning || siteLocked || !isHrAuthed) return;
+      if (!tourState) {
+        try {
+          const json = await callHrData('get_tour_state');
+          tourState = json.data || null;
+        } catch (e) {
+          return;
+        }
+      }
+      if (!tourState || Number(tourState.seen) >= REVAMP_TOUR_VERSION) return;
+      if (currentPath() !== '#/home' && currentPath() !== '#/' && currentPath() !== '') return;
+      setTimeout(() => { if (!tourRunning && document.querySelector('.home-shell')) startTour(); }, 650);
     }
 
     function renderDashboard() {

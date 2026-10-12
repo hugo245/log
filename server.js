@@ -19,6 +19,7 @@ const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
 const STATE_LIFETIME_MS = 10 * 60 * 1000;
 const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+const REVAMP_TOUR_VERSION = 1;
 
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
@@ -3759,6 +3760,42 @@ async function handleHrData(req, res) {
         }
         runPaymentMethodConversionSweep({ robloxUserId: row.roblox_user_id });
         res.json({ ok: true, changed });
+        return;
+    }
+
+    if (action === 'get_tour_state') {
+        const { data } = await supabase
+            .from('user_flags')
+            .select('tour_version, tour_seen_at')
+            .eq('roblox_user_id', session.roblox_user_id)
+            .maybeSingle();
+        res.json({
+            ok: true,
+            data: {
+                current: REVAMP_TOUR_VERSION,
+                seen: data && data.tour_version != null ? Number(data.tour_version) : 0,
+                seenAt: data ? data.tour_seen_at : null
+            }
+        });
+        return;
+    }
+
+    if (action === 'mark_tour_seen') {
+        const version = Number(payload.version);
+        const seen = Number.isFinite(version) && version > 0 ? Math.min(version, REVAMP_TOUR_VERSION) : REVAMP_TOUR_VERSION;
+        const { error } = await supabase.from('user_flags').upsert({
+            roblox_user_id: session.roblox_user_id,
+            roblox_username: session.roblox_username,
+            tour_version: seen,
+            tour_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'roblox_user_id' });
+        if (error) {
+            console.error('[mark_tour_seen] failed:', error.message);
+            res.status(500).json({ ok: false, error: 'update_failed' });
+            return;
+        }
+        res.json({ ok: true, seen });
         return;
     }
 
