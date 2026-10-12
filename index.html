@@ -6347,6 +6347,10 @@
     let siteLocked = false;
     let lockdownNote = '';
     let securityLevel = 'normal';
+    const REVAMP_TOUR_VERSION = 1;
+    let tourState = null;
+    let tourRunning = false;
+    let tourRequested = false;
     let hrMaxHierarchy = 0;
     let authReady = false;
     let appDataReady = false;
@@ -9028,8 +9032,13 @@
       if (btn) btn.addEventListener('click', hrSignOut);
       const tourBtn = document.getElementById('replayTourBtn');
       if (tourBtn) tourBtn.addEventListener('click', () => {
-        if (currentPath() === '#/home' || currentPath() === '#/' || currentPath() === '') startTour();
-        else window.location.hash = '#/home';
+        const onHome = currentPath() === '#/home' || currentPath() === '#/' || currentPath() === '';
+        if (onHome) {
+          startTour();
+          return;
+        }
+        tourRequested = true;
+        window.location.hash = '#/home';
       });
       const themeBtn = document.getElementById('themeToggleBtn');
       if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
@@ -11239,9 +11248,6 @@
       if (out) out.addEventListener('click', hrSignOut);
     }
 
-    const REVAMP_TOUR_VERSION = 1;
-    let tourState = null;
-    let tourRunning = false;
 
     function tourSteps() {
       const steps = [
@@ -11483,6 +11489,11 @@
 
     async function maybeOfferTour() {
       if (tourRunning || siteLocked || !isHrAuthed) return;
+      if (tourRequested) {
+        tourRequested = false;
+        setTimeout(() => { if (!tourRunning && document.querySelector('.home-shell')) startTour(); }, 250);
+        return;
+      }
       if (!tourState) {
         try {
           const json = await callHrData('get_tour_state');
