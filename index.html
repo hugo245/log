@@ -177,6 +177,7 @@
     .acct-menu-list {
       position: absolute;
       right: 0;
+      max-width: calc(100vw - 16px);
       top: calc(100% + 6px);
       background: var(--surface);
       border: 1px solid var(--line);
@@ -9043,6 +9044,22 @@
       });
       const themeBtn = document.getElementById('themeToggleBtn');
       if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+      document.querySelectorAll('.topbar .acct-menu').forEach(d => {
+        if (d.dataset.clamp) return;
+        d.dataset.clamp = '1';
+        d.addEventListener('toggle', () => {
+          const list = d.querySelector('.acct-menu-list');
+          if (!list) return;
+          list.style.transform = '';
+          if (!d.open) return;
+          const pad = 8, vw = document.documentElement.clientWidth;
+          const r = list.getBoundingClientRect();
+          let dx = 0;
+          if (r.left < pad) dx = pad - r.left;
+          else if (r.right > vw - pad) dx = vw - pad - r.right;
+          if (dx) list.style.transform = 'translateX(' + dx + 'px)';
+        });
+      });
     }
 
     function renderHrGate() {
@@ -10478,6 +10495,7 @@
         </div>
         <button type="button" class="btn btn-ghost btn-sm" id="homeRefresh">Refresh</button>
       </div>
+      ${needsDiscordLink ? `<div class="warn-box" style="flex-wrap:wrap;"><span><strong>Link your Discord account.</strong> ${parseHashQuery().get('discordLinkError') ? esc(DISCORD_LINK_ERROR_MESSAGES[parseHashQuery().get('discordLinkError')] || 'Could not link that Discord account. Try again.') : "It's required so we can reach you about your team and payments."}</span><a class="btn btn-primary btn-sm" href="${EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(getStoredToken() || '') + '&return=' + encodeURIComponent('#/home')}">Link Discord</a></div>` : ''}
       ${loadError
             ? `<div class="error-box"><span>${esc(loadError)}</span></div>`
             : loading
@@ -13119,7 +13137,11 @@
             <p style="color:var(--ink-soft);font-size:13px;margin-bottom:14px;">Linked to <strong>${esc(discordLink.discord_username)}</strong>.</p>
             <button type="button" class="btn btn-ghost btn-sm" id="unlinkDiscordBtn" ${unlinkingDiscord ? 'disabled' : ''}>${unlinkingDiscord ? 'Unlinking...' : 'Unlink Discord account'}</button>
             <p class="sub" style="margin:10px 0 0;">Unlinking locks My payments until you relink and rejoin your team's Roblox groups.</p>
-          ` : `<p style="color:var(--ink-soft);font-size:13px;">No Discord account linked.</p>`}
+          ` : `
+            ${discordLinkError ? `<div class="error-box"><span>${esc(DISCORD_LINK_ERROR_MESSAGES[discordLinkError] || 'Could not link that Discord account. Try again.')}</span></div>` : ''}
+            <p style="color:var(--ink-soft);font-size:13px;margin-bottom:14px;">No Discord account linked. Link it so we can message you about your team and payments.</p>
+            <a class="btn btn-primary btn-sm" id="myLinkDiscordBtn" href="${EDGE_BASE + '/discord-auth-start-staff?token=' + encodeURIComponent(getStoredToken() || '') + '&return=' + encodeURIComponent('#/my')}">${discordLinkError ? 'Try again' : 'Link Discord account'}</a>
+          `}
         </div>
 
         <div class="panel">
