@@ -2891,6 +2891,9 @@ app.get('/roblox-auth-start', async (req, res) => {
 // and retries on network errors, 429 and 5xx. A 400/401 (bad/used code, bad credentials) is not retried.
 async function exchangeRobloxCode(code, codeVerifier, tag) {
     let last = { ok: false, reason: 'token_exchange_failed', status: 0, detail: '' };
+    console.log(`[roblox-auth] ${tag} exchange inputs: client_id=...${String(ROBLOX_CLIENT_ID).slice(-4)} (len ${String(ROBLOX_CLIENT_ID).length}) secret_len=${String(ROBLOX_CLIENT_SECRET).length}`
+        + ` secret_has_whitespace=${/\s/.test(String(ROBLOX_CLIENT_SECRET))} code_len=${String(code).length} verifier_len=${String(codeVerifier || '').length}`
+        + ` instance=${process.env.RENDER_INSTANCE_ID || process.env.HOSTNAME || 'unknown'}`);
     for (let attempt = 1; attempt <= 3; attempt++) {
         const started = Date.now();
         let tokenRes;
@@ -2944,7 +2947,8 @@ async function exchangeRobloxCode(code, codeVerifier, tag) {
         );
         last = { ok: false, reason: 'token_exchange_failed', status: tokenRes.status, detail: robloxError || (blocked ? 'cloudflare_block' : 'http_' + tokenRes.status) };
 
-        if (tokenRes.status === 429 || tokenRes.status >= 500) {
+        const retryableGrant = robloxError === 'invalid_grant' && /client credentials/i.test(robloxDesc) && attempt === 1;
+        if (tokenRes.status === 429 || tokenRes.status >= 500 || retryableGrant) {
             let waitMs = 800 * attempt;
             const headerWait = Number(retryAfter);
             if (headerWait > 0) waitMs = Math.max(waitMs, headerWait * 1000);
@@ -2955,6 +2959,20 @@ async function exchangeRobloxCode(code, codeVerifier, tag) {
         break;
     }
     return last;
+}
+
+const autoRetryRecent = new Map();
+const AUTO_RETRY_WINDOW_MS = 2 * 60 * 1000;
+
+// True once per client per window, so a failed sign-in can silently restart itself one time
+// without ever looping.
+function takeAutoRetry(req) {
+    const now = Date.now();
+    for (const [k, t] of autoRetryRecent) if (now - t > AUTO_RETRY_WINDOW_MS) autoRetryRecent.delete(k);
+    const key = `${String(req.headers['x-forwarded-for'] || req.ip).split(',')[0].trim()}|${String(req.headers['user-agent'] || '').slice(0, 80)}`;
+    if (autoRetryRecent.has(key)) return false;
+    autoRetryRecent.set(key, now);
+    return true;
 }
 
 app.get('/roblox-auth-callback', async (req, res) => {
@@ -2991,7 +3009,16 @@ app.get('/roblox-auth-callback', async (req, res) => {
         console.log(`[roblox-auth] ${tag} state ok, age=${Math.round(stateAgeMs / 1000)}s, exchanging code`);
 
         const exchange = await exchangeRobloxCode(code, stateRow.code_verifier, tag);
-        if (!exchange.ok) { fail('token_exchange_failed', `status=${exchange.status} ${exchange.detail}`); return; }
+        if (!exchange.ok) {
+            if (exchange.detail === 'invalid_grant' && takeAutoRetry(req)) {
+                console.warn(`[roblox-auth] ${tag} invalid_grant persisted after retry, restarting sign-in automatically (once)`);
+                const again = stateRow.ref_token ? `?ref=${encodeURIComponent(stateRow.ref_token)}` : '';
+                res.redirect(`/roblox-auth-start${again}`);
+                return;
+            }
+            fail('token_exchange_failed', `status=${exchange.status} ${exchange.detail}`);
+            return;
+        }
         const tokenJson = exchange.tokenJson;
 
         let userInfoRes;
