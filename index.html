@@ -1741,6 +1741,94 @@
       }
     }
 
+    /* Services-down screen (reuses the .indev-* layout) */
+    .down-tag {
+      color: #B3311C;
+      background: rgba(179, 49, 28, .08);
+    }
+
+    .down-list {
+      list-style: none;
+      margin: 30px auto 0;
+      padding: 0;
+      max-width: 380px;
+      border: 1px solid #ECEDF3;
+      border-radius: 14px;
+      overflow: hidden;
+      text-align: left;
+    }
+
+    .down-list li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #171A21;
+      border-top: 1px solid #ECEDF3;
+    }
+
+    .down-list li:first-child {
+      border-top: 0;
+    }
+
+    .down-dot {
+      flex: none;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #B3311C;
+      box-shadow: 0 0 0 0 rgba(179, 49, 28, .45);
+      animation: downPulse 2s ease-out infinite;
+    }
+
+    .down-name {
+      flex: 1;
+    }
+
+    .down-status {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #B3311C;
+    }
+
+    .down-retry {
+      margin-top: 28px;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      color: #FFFFFF;
+      background: #171A21;
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 24px;
+      cursor: pointer;
+    }
+
+    .down-retry:hover {
+      background: #2B303B;
+    }
+
+    @keyframes downPulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(179, 49, 28, .45);
+      }
+
+      70%,
+      100% {
+        box-shadow: 0 0 0 8px rgba(179, 49, 28, 0);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .down-dot {
+        animation: none;
+      }
+    }
+
     .dash-shell {
       max-width: 1280px;
       margin: 0 auto;
@@ -6711,17 +6799,24 @@
     }
 
     async function checkSiteState() {
-      if (!supabaseClient) return { closed: true, indev: false };
+      if (!supabaseClient) return { closed: true, indev: false, servicesDown: false };
       try {
+        // services_down is the manual "services are down" switch. If the column isn't in the
+        // public view yet, fall back to the older selects so nothing else breaks.
+        const withDown = await supabaseClient.from(PUBLIC_SETTINGS_VIEW).select('closed, indev, services_down').eq('id', 1).maybeSingle();
+        if (!withDown.error) {
+          const d = withDown.data;
+          return { closed: !!(d && d.closed), indev: !!(d && d.indev), servicesDown: !!(d && d.services_down) };
+        }
         const full = await supabaseClient.from(PUBLIC_SETTINGS_VIEW).select('closed, indev').eq('id', 1).maybeSingle();
         if (!full.error) {
-          return { closed: !!(full.data && full.data.closed), indev: !!(full.data && full.data.indev) };
+          return { closed: !!(full.data && full.data.closed), indev: !!(full.data && full.data.indev), servicesDown: false };
         }
         const basic = await supabaseClient.from(PUBLIC_SETTINGS_VIEW).select('closed').eq('id', 1).maybeSingle();
-        if (basic.error) return { closed: true, indev: false };
-        return { closed: !!(basic.data && basic.data.closed), indev: false };
+        if (basic.error) return { closed: true, indev: false, servicesDown: false };
+        return { closed: !!(basic.data && basic.data.closed), indev: false, servicesDown: false };
       } catch (e) {
-        return { closed: true, indev: false };
+        return { closed: true, indev: false, servicesDown: false };
       }
     }
 
@@ -6749,10 +6844,33 @@
         <div class="indev-mark">
           <img src="${PV_MARK}" alt="PlayVerse" width="64" height="64">
         </div>
-        <span class="indev-tag">Update in progress</span>
-        <h1>We're updating our servers</h1>
-        <p>The internal tool is closed while we are updating it. Payments, teams, tasks and everything else will be back soon.</p>
+        <span class="indev-tag">Revamp in progress</span>
+        <h1>We're rebuilding PlayVerse</h1>
+        <p>The internal tool is closed while we rebuild it from the ground up. Payments, teams, tasks and everything else are coming back, in better shape than before.</p>
         <div class="indev-bar"><span></span></div>
+        <div class="indev-foot">Nothing you submitted has been lost.<br><strong>Your lead will post in Discord the moment it's back.</strong></div>
+      </div>
+    </div>`;
+    }
+
+    // Shown when app_settings.services_down is true (manual switch).
+    function renderServicesDownScreen() {
+      const services = ['Authentication', 'Payments & requests', 'Teams & tasks', 'Discord bot & notifications'];
+      document.documentElement.style.background = '#FFFFFF';
+      document.body.style.background = '#FFFFFF';
+      app.innerHTML = `
+    <div class="indev-shell">
+      <div class="indev-inner">
+        <div class="indev-mark">
+          <img src="${PV_MARK}" alt="PlayVerse" width="64" height="64">
+        </div>
+        <span class="indev-tag down-tag">Services unavailable</span>
+        <h1>Our services are down</h1>
+        <p>We can't reach our servers right now, so sign-in and the rest of the internal tool are unavailable. We're working on getting everything back up.</p>
+        <ul class="down-list">
+          ${services.map(name => `<li><span class="down-dot"></span><span class="down-name">${name}</span><span class="down-status">Down</span></li>`).join('')}
+        </ul>
+        <button type="button" class="down-retry" onclick="window.location.reload()">Check again</button>
         <div class="indev-foot">Nothing you submitted has been lost.<br><strong>Your lead will post in Discord the moment it's back.</strong></div>
       </div>
     </div>`;
@@ -8702,6 +8820,7 @@
     async function initAuth() {
       const siteState = await checkSiteState();
       if (siteState.closed) { renderClosedScreen(); return; }
+      if (siteState.servicesDown && !hasIndevPreview()) { renderServicesDownScreen(); return; }
       if (siteState.indev && !hasIndevPreview()) { renderInDevScreen(); return; }
       await Promise.all([verifySession(), loadAppData()]);
       if (isHrAuthed) await checkSecurityProtocol();
