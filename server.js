@@ -15,7 +15,7 @@ const ROBLOX_CLIENT_ID = process.env.ROBLOX_CLIENT_ID;
 const ROBLOX_CLIENT_SECRET = process.env.ROBLOX_CLIENT_SECRET;
 const ROBLOX_REDIRECT_URI = process.env.ROBLOX_REDIRECT_URI;
 const ROBLOX_GROUP_API_KEY = process.env.ROBLOX_GROUP_API_KEY;
-const SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000;
+const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000; // sliding: renewed on activity (see getSession)
 const STATE_LIFETIME_MS = 10 * 60 * 1000;
 const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
@@ -1197,6 +1197,16 @@ async function fetchRobloxGroupRoles(robloxUserId) {
     return (json && json.data) || [];
 }
 
+// Same as above but throws when Roblox fails (429/5xx/network), so callers that decide
+// whether someone keeps their session don't mistake an API failure for "not in the group".
+async function fetchRobloxGroupRolesStrict(robloxUserId) {
+    const res = await fetch(`https://groups.roblox.com/v1/users/${robloxUserId}/groups/roles`);
+    if (!res.ok) throw new Error(`roblox_groups_${res.status}`);
+    const json = await res.json().catch(() => null);
+    if (!json || !Array.isArray(json.data)) throw new Error('roblox_groups_bad_response');
+    return json.data;
+}
+
 async function resolveRobloxUserId(username) {
     const res = await fetch('https://users.roblox.com/v1/usernames/users', {
         method: 'POST',
@@ -2290,7 +2300,7 @@ async function checkBaseAccess(robloxUserId) {
     let isMember = false;
 
     if (groups.length) {
-        const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
+        const groupRoles = await fetchRobloxGroupRolesStrict(robloxUserId);
         isMember = groups.some(g => {
             const membership = groupRoles.find(gr => gr.group && gr.group.id === Number(g.roblox_group_id));
             return !!membership && (g.min_rank == null || membership.role.rank >= g.min_rank);
@@ -2320,7 +2330,7 @@ async function computeAccess(robloxUserId) {
     if (manualErr) throw manualErr;
     const manualRoleIds = new Set((manualRows || []).map(r => r.role_id));
 
-    const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
+    const groupRoles = await fetchRobloxGroupRolesStrict(robloxUserId);
     const rankByGroupId = {};
     groupRoles.forEach(g => { rankByGroupId[g.group.id] = g.role.rank; });
 
@@ -2802,11 +2812,15 @@ async function getSession(req) {
     try {
         const lastSeen = data.last_seen_at ? new Date(data.last_seen_at).getTime() : 0;
         if (Date.now() - lastSeen > SESSION_TOUCH_INTERVAL_MS) {
-            const touch = { last_seen_at: new Date().toISOString() };
+            const touch = {
+                last_seen_at: new Date().toISOString(),
+                expires_at: new Date(Date.now() + SESSION_LIFETIME_MS).toISOString()
+            };
             const agent = req.headers && req.headers['user-agent'];
             if (agent && !data.user_agent) touch.user_agent = String(agent).slice(0, 200);
             await supabase.from('hr_sessions').update(touch).eq('token', token);
             data.last_seen_at = touch.last_seen_at;
+            data.expires_at = touch.expires_at;
         }
     } catch (e) { }
 
