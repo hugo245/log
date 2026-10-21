@@ -2869,9 +2869,11 @@ app.get('/roblox-auth-start', async (req, res) => {
     });
 
     if (error) {
+        console.error('[roblox-auth] could not store oauth state:', error.message);
         res.status(500).send('Could not start the sign-in flow.');
         return;
     }
+    console.log(`[roblox-auth] state=${state.slice(0, 6)} started ip=${req.headers['x-forwarded-for'] || req.ip}${refToken ? ' (with invite ref)' : ''}`);
 
     const authorizeUrl = new URL('https://apis.roblox.com/oauth/v1/authorize');
     authorizeUrl.searchParams.set('client_id', ROBLOX_CLIENT_ID);
@@ -2885,110 +2887,197 @@ app.get('/roblox-auth-start', async (req, res) => {
     res.redirect(authorizeUrl.toString());
 });
 
+// Exchanges the Roblox OAuth code for a token. Logs every attempt (never the code, secret or tokens)
+// and retries on network errors, 429 and 5xx. A 400/401 (bad/used code, bad credentials) is not retried.
+async function exchangeRobloxCode(code, codeVerifier, tag) {
+    let last = { ok: false, reason: 'token_exchange_failed', status: 0, detail: '' };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        const started = Date.now();
+        let tokenRes;
+        try {
+            tokenRes = await fetch('https://apis.roblox.com/oauth/v1/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code,
+                    client_id: ROBLOX_CLIENT_ID,
+                    client_secret: ROBLOX_CLIENT_SECRET,
+                    redirect_uri: ROBLOX_REDIRECT_URI,
+                    code_verifier: codeVerifier
+                }),
+                signal: AbortSignal.timeout(15000)
+            });
+        } catch (e) {
+            const cause = e && e.cause ? ` cause=${e.cause.code || e.cause.message}` : '';
+            console.error(`[roblox-auth] ${tag} token exchange NETWORK ERROR attempt ${attempt}/3 after ${Date.now() - started}ms: ${e.name}: ${e.message}${cause}`);
+            last = { ok: false, reason: 'token_exchange_failed', status: 0, detail: `network:${e.message}` };
+            await new Promise(r => setTimeout(r, 600 * attempt));
+            continue;
+        }
+
+        const text = await tokenRes.text().catch(() => '');
+        const ms = Date.now() - started;
+        if (tokenRes.ok) {
+            try {
+                const json = JSON.parse(text);
+                console.log(`[roblox-auth] ${tag} token exchange OK attempt ${attempt}/3 in ${ms}ms`);
+                return { ok: true, tokenJson: json };
+            } catch (e) {
+                console.error(`[roblox-auth] ${tag} token exchange returned 200 but invalid JSON (attempt ${attempt}/3, ${ms}ms): ${text.slice(0, 200)}`);
+                last = { ok: false, reason: 'token_exchange_failed', status: 200, detail: 'bad_json' };
+                continue;
+            }
+        }
+
+        let robloxError = '';
+        let robloxDesc = '';
+        try { const j = JSON.parse(text); robloxError = j.error || ''; robloxDesc = j.error_description || ''; } catch (e) { }
+        const cfRay = tokenRes.headers.get('cf-ray');
+        const retryAfter = tokenRes.headers.get('retry-after');
+        const blocked = isCloudflareBlock(tokenRes.status, text);
+        console.error(
+            `[roblox-auth] ${tag} token exchange FAILED attempt ${attempt}/3 status=${tokenRes.status} in ${ms}ms`
+            + ` error="${robloxError}" desc="${robloxDesc}" cloudflareBlock=${blocked}`
+            + `${cfRay ? ` cf-ray=${cfRay}` : ''}${retryAfter ? ` retry-after=${retryAfter}` : ''}`
+            + ` redirect_uri=${ROBLOX_REDIRECT_URI} body=${text.slice(0, 400).replace(/\s+/g, ' ')}`
+        );
+        last = { ok: false, reason: 'token_exchange_failed', status: tokenRes.status, detail: robloxError || (blocked ? 'cloudflare_block' : 'http_' + tokenRes.status) };
+
+        if (tokenRes.status === 429 || tokenRes.status >= 500) {
+            let waitMs = 800 * attempt;
+            const headerWait = Number(retryAfter);
+            if (headerWait > 0) waitMs = Math.max(waitMs, headerWait * 1000);
+            if (waitMs > 5000) break;
+            await new Promise(r => setTimeout(r, waitMs));
+            continue;
+        }
+        break;
+    }
+    return last;
+}
+
 app.get('/roblox-auth-callback', async (req, res) => {
     const code = req.query.code;
     const state = req.query.state;
+    const startedAt = Date.now();
+    const tag = `state=${String(state || '').slice(0, 6)}`;
+    const clientInfo = `ip=${req.headers['x-forwarded-for'] || req.ip} ua="${String(req.headers['user-agent'] || '').slice(0, 120)}"`;
 
-    function fail(reason) {
+    function fail(reason, detail) {
+        console.warn(`[roblox-auth] ${tag} FAILED reason=${reason}${detail ? ` detail=${detail}` : ''} after ${Date.now() - startedAt}ms ${clientInfo}`);
         res.redirect(`${APP_ORIGIN}/#/auth-callback?error=${encodeURIComponent(reason)}`);
     }
 
-    if (!code || !state) { fail('missing_code_or_state'); return; }
-
-    const { data: stateRow } = await supabase
-        .from('oauth_states')
-        .select('*')
-        .eq('state', state)
-        .maybeSingle();
-
-    await supabase.from('oauth_states').delete().eq('state', state);
-
-    if (!stateRow) { fail('invalid_state'); return; }
-    if (Date.now() - new Date(stateRow.created_at).getTime() > STATE_LIFETIME_MS) { fail('state_expired'); return; }
-
-    const tokenRes = await fetch('https://apis.roblox.com/oauth/v1/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code,
-            client_id: ROBLOX_CLIENT_ID,
-            client_secret: ROBLOX_CLIENT_SECRET,
-            redirect_uri: ROBLOX_REDIRECT_URI,
-            code_verifier: stateRow.code_verifier
-        })
-    });
-
-    if (!tokenRes.ok) { fail('token_exchange_failed'); return; }
-    const tokenJson = await tokenRes.json();
-
-    const userInfoRes = await fetch('https://apis.roblox.com/oauth/v1/userinfo', {
-        headers: { Authorization: `Bearer ${tokenJson.access_token}` }
-    });
-
-    if (!userInfoRes.ok) { fail('userinfo_failed'); return; }
-    const userInfo = await userInfoRes.json();
-    const robloxUserId = Number(userInfo.sub);
-    const robloxUsername = userInfo.preferred_username || userInfo.nickname || String(robloxUserId);
-
-    if (!robloxUserId) { fail('userinfo_failed'); return; }
-
-    syncRobloxUsername(robloxUserId, robloxUsername);
+    console.log(`[roblox-auth] ${tag} callback hit hasCode=${!!code} ${clientInfo}`);
+    if (req.query.error) {
+        console.warn(`[roblox-auth] ${tag} Roblox sent error=${req.query.error} description="${String(req.query.error_description || '').slice(0, 200)}"`);
+    }
 
     try {
-        if (await isUserBanned(robloxUserId)) { fail('account_banned'); return; }
-    } catch (e) {
-        fail('ban_check_failed');
-        return;
-    }
+        if (!code || !state) { fail('missing_code_or_state'); return; }
 
-    let baseCheck;
-    try {
-        baseCheck = await checkBaseAccess(robloxUserId);
-    } catch (e) {
-        fail('base_access_check_failed');
-        return;
-    }
-    let invite = null;
-    if (!baseCheck.allowed && stateRow.ref_token) {
-        try { invite = await getValidInvite(stateRow.ref_token); } catch (e) { invite = null; }
-    }
-    if (!baseCheck.allowed && !invite) {
+        const { data: stateRow } = await supabase
+            .from('oauth_states')
+            .select('*')
+            .eq('state', state)
+            .maybeSingle();
+
+        await supabase.from('oauth_states').delete().eq('state', state);
+
+        if (!stateRow) { fail('invalid_state', 'state row missing (already used by a duplicate callback, expired/cleaned up, or sign-in started on a different server/database)'); return; }
+        const stateAgeMs = Date.now() - new Date(stateRow.created_at).getTime();
+        if (stateAgeMs > STATE_LIFETIME_MS) { fail('state_expired', `age=${Math.round(stateAgeMs / 1000)}s`); return; }
+        console.log(`[roblox-auth] ${tag} state ok, age=${Math.round(stateAgeMs / 1000)}s, exchanging code`);
+
+        const exchange = await exchangeRobloxCode(code, stateRow.code_verifier, tag);
+        if (!exchange.ok) { fail('token_exchange_failed', `status=${exchange.status} ${exchange.detail}`); return; }
+        const tokenJson = exchange.tokenJson;
+
+        let userInfoRes;
         try {
-            const rt = await createRecruitSession(robloxUserId, robloxUsername);
-            res.redirect(`${APP_ORIGIN}/#/recruit?rt=${encodeURIComponent(rt)}`);
+            userInfoRes = await fetch('https://apis.roblox.com/oauth/v1/userinfo', {
+                headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+                signal: AbortSignal.timeout(15000)
+            });
         } catch (e) {
-            fail('not_eligible');
+            console.error(`[roblox-auth] ${tag} userinfo NETWORK ERROR: ${e.name}: ${e.message}`);
+            fail('userinfo_failed', `network:${e.message}`);
+            return;
         }
-        return;
-    }
 
-    let access;
-    try {
-        access = await computeAccess(robloxUserId);
+        if (!userInfoRes.ok) {
+            const body = await userInfoRes.text().catch(() => '');
+            console.error(`[roblox-auth] ${tag} userinfo FAILED status=${userInfoRes.status} body=${body.slice(0, 300).replace(/\s+/g, ' ')}`);
+            fail('userinfo_failed', `status=${userInfoRes.status}`);
+            return;
+        }
+        const userInfo = await userInfoRes.json();
+        const robloxUserId = Number(userInfo.sub);
+        const robloxUsername = userInfo.preferred_username || userInfo.nickname || String(robloxUserId);
+
+        if (!robloxUserId) { fail('userinfo_failed'); return; }
+
+        syncRobloxUsername(robloxUserId, robloxUsername);
+
+        try {
+            if (await isUserBanned(robloxUserId)) { fail('account_banned', `user=${robloxUserId}`); return; }
+        } catch (e) {
+            fail('ban_check_failed', e.message);
+            return;
+        }
+
+        let baseCheck;
+        try {
+            baseCheck = await checkBaseAccess(robloxUserId);
+        } catch (e) {
+            fail('base_access_check_failed', `user=${robloxUserId} ${e.message}`);
+            return;
+        }
+        let invite = null;
+        if (!baseCheck.allowed && stateRow.ref_token) {
+            try { invite = await getValidInvite(stateRow.ref_token); } catch (e) { invite = null; }
+        }
+        if (!baseCheck.allowed && !invite) {
+            try {
+                const rt = await createRecruitSession(robloxUserId, robloxUsername);
+                res.redirect(`${APP_ORIGIN}/#/recruit?rt=${encodeURIComponent(rt)}`);
+            } catch (e) {
+                fail('not_eligible');
+            }
+            return;
+        }
+
+        let access;
+        try {
+            access = await computeAccess(robloxUserId);
+        } catch (e) {
+            fail('hr_check_failed', `user=${robloxUserId} ${e.message}`);
+            return;
+        }
+
+        const token = randomToken(32);
+        const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS).toISOString();
+
+        const { error: sessionErr } = await supabase.from('hr_sessions').insert({
+            token,
+            roblox_user_id: robloxUserId,
+            roblox_username: robloxUsername,
+            roles: access.roleNames,
+            permissions: access.permissions,
+            max_hierarchy: access.maxHierarchy,
+            last_synced_at: new Date().toISOString(),
+            expires_at: expiresAt
+        });
+
+        if (sessionErr) { fail('session_create_failed', sessionErr.message); return; }
+
+        console.log(`[roblox-auth] ${tag} SUCCESS user=${robloxUserId} (${robloxUsername}) in ${Date.now() - startedAt}ms`);
+        res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
     } catch (e) {
-        fail('hr_check_failed');
-        return;
+        console.error(`[roblox-auth] ${tag} UNHANDLED ERROR after ${Date.now() - startedAt}ms:`, e && e.stack ? e.stack : e);
+        if (!res.headersSent) fail('token_exchange_failed', `unhandled:${e && e.message}`);
     }
-
-    const token = randomToken(32);
-    const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS).toISOString();
-
-    const { error: sessionErr } = await supabase.from('hr_sessions').insert({
-        token,
-        roblox_user_id: robloxUserId,
-        roblox_username: robloxUsername,
-        roles: access.roleNames,
-        permissions: access.permissions,
-        max_hierarchy: access.maxHierarchy,
-        last_synced_at: new Date().toISOString(),
-        expires_at: expiresAt
-    });
-
-    if (sessionErr) { fail('session_create_failed'); return; }
-
-
-    res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
 });
 
 app.get('/recruit-session', async (req, res) => {
