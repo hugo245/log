@@ -217,7 +217,7 @@ const SECURITY_LEVELS = ['normal', 'heightened', 'lockdown'];
 
 const SECURITY_MONEY_ACTIONS = new Set([
     'mark_paid', 'mark_all_paid', 'mark_run_person_paid', 'reject_request', 'reopen_request',
-    'delete_request', 'submit_request', 'submit_claim', 'decide_claim', 'pay_team_task',
+    'delete_request', 'edit_request_amount', 'submit_request', 'submit_claim', 'decide_claim', 'pay_team_task',
     'save_payment_method', 'delete_payment_method', 'convert_my_request',
     'create_payment_run', 'freeze_payment_run', 'close_payment_run',
     'save_rate_band', 'delete_rate_band', 'set_devex_rate', 'set_usd_minimum'
@@ -410,11 +410,32 @@ async function noteSensitiveAccess(session, viewedUsernames) {
     });
 }
 
+function stripMethodExtras(details) {
+    const { savedMethods, splitRobuxPercent, ...rest } = details || {};
+    return rest;
+}
+
+// Remembers every payout method a person has filled in, so switching away (or being
+// auto-switched to Robux) never throws their PayPal/Venmo/bank details away.
+function buildSavedMethods(prior, newMethod, newDetails) {
+    const saved = { ...((prior && prior.details && prior.details.savedMethods) || {}) };
+    if (prior && prior.method && PAYMENT_METHOD_TYPES[prior.method] && prior.method !== 'DEVEX_ROBUX') {
+        const clean = stripMethodExtras(prior.details);
+        if (Object.keys(clean).length) saved[prior.method] = clean;
+    }
+    if (newMethod && newMethod !== 'DEVEX_ROBUX') saved[newMethod] = stripMethodExtras(newDetails);
+    return saved;
+}
+
 function redactPayoutMethod(method, session) {
     if (!method) return method;
+    const ownIt = String(method.roblox_user_id || '') === String(session.roblox_user_id);
+    if (!ownIt && method.details && method.details.savedMethods) {
+        const { savedMethods, ...restDetails } = method.details;
+        method = { ...method, details: restDetails };
+    }
     const def = PAYMENT_METHOD_TYPES[method.method];
     if (!def || !def.sensitive) return method;
-    const ownIt = String(method.roblox_user_id || '') === String(session.roblox_user_id);
     if (ownIt || canSeeSensitivePayoutDetails(session)) return method;
     const details = method.details || {};
     const iban = String(details.iban || '');
@@ -2102,7 +2123,7 @@ async function enforceUsdMinimumThreshold(filter) {
 
             await supabase.from('payment_methods').update({
                 method: 'DEVEX_ROBUX',
-                details: { robloxUsername: m.roblox_username },
+                details: { robloxUsername: m.roblox_username, savedMethods: buildSavedMethods(m, null, null) },
                 updated_at: new Date().toISOString()
             }).eq('roblox_user_id', m.roblox_user_id);
 
@@ -2670,6 +2691,12 @@ async function applyRevert(revert) {
         case 'reopen_request': {
             const { error } = await supabase.from('payment_requests')
                 .update({ status: 'pending', status_note: null })
+                .eq('id', revert.id);
+            return error ? { ok: false, error: error.message } : { ok: true };
+        }
+        case 'restore_request_amount': {
+            const { error } = await supabase.from('payment_requests')
+                .update({ payment: revert.payment, currency: revert.currency })
                 .eq('id', revert.id);
             return error ? { ok: false, error: error.message } : { ok: true };
         }
@@ -4831,6 +4858,29 @@ async function handleHrData(req, res) {
         return;
     }
 
+    if (action === 'edit_request_amount') {
+        if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
+        const id = payload.id;
+        if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
+        const payment = Number(payload.payment);
+        const currency = payload.currency === 'USD' ? 'USD' : payload.currency === 'ROBUX' ? 'ROBUX' : null;
+        if (!Number.isFinite(payment) || payment <= 0 || !currency) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
+        if (!existing) { res.status(404).json({ ok: false, error: 'request_not_found' }); return; }
+        if (existing.paid || existing.status === 'paid') { res.status(409).json({ ok: false, error: 'already_paid' }); return; }
+        const newPayment = currency === 'USD' ? Number(payment.toFixed(2)) : Math.round(payment);
+        const { error } = await supabase.from('payment_requests').update({ payment: newPayment, currency }).eq('id', id);
+        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        logAudit(session, {
+            category: 'payments', action: 'edit_request_amount',
+            targetUserId: existing.roblox_user_id, targetUsername: existing.roblox_username,
+            details: { id, from: { payment: existing.payment, currency: existing.currency }, to: { payment: newPayment, currency } },
+            revert: { type: 'restore_request_amount', id, payment: existing.payment, currency: existing.currency }
+        });
+        res.json({ ok: true, payment: newPayment, currency });
+        return;
+    }
+
     if (action === 'reject_request') {
         if (!requirePermission(res, session, 'dashboard.mark_paid')) return;
         const id = payload.id;
@@ -5040,6 +5090,10 @@ async function handleHrData(req, res) {
             if (lookupRes.ok) username = (await lookupRes.json()).name;
         }
 
+        const { data: adminPrior } = await supabase.from('payment_methods').select('method, details').eq('roblox_user_id', robloxUserId).maybeSingle();
+        const adminSaved = buildSavedMethods(adminPrior, method, cleanDetails);
+        if (Object.keys(adminSaved).length) cleanDetails.savedMethods = adminSaved;
+
         const { error } = await supabase.from('payment_methods').upsert({
             roblox_user_id: robloxUserId,
             roblox_username: username,
@@ -5114,6 +5168,8 @@ async function handleHrData(req, res) {
             .eq('roblox_user_id', session.roblox_user_id)
             .maybeSingle();
         const keptSplit = Number(((priorMethod || {}).details || {}).splitRobuxPercent) || 0;
+        const mySaved = buildSavedMethods(priorMethod, method, cleanDetails);
+        if (Object.keys(mySaved).length) cleanDetails.savedMethods = mySaved;
         if (keptSplit > 0 && method !== 'DEVEX_ROBUX') cleanDetails.splitRobuxPercent = keptSplit;
 
         const { error } = await supabase.from('payment_methods').upsert({

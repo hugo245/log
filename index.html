@@ -138,6 +138,13 @@
       background: var(--accent);
     }
 
+    .brand .pv-logo {
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
+      display: block;
+    }
+
     .brand small {
       color: var(--muted);
       font-weight: 500;
@@ -7133,7 +7140,7 @@
       return `
     <div class="invoice">
       <div class="invoice-top">
-        <div class="brand"><span class="dot"></span>PlayVerse</div>
+        <div class="brand"><svg class="pv-logo" viewBox="0 0 32 32" role="img" aria-label="PlayVerse"><rect width="32" height="32" rx="8" fill="var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="800" letter-spacing="-.5" fill="#fff">PV</text></svg>PlayVerse</div>
         <div class="doc-type">
           <div class="doc-label">Payment Request</div>
           <div class="doc-id mono">${esc(data.id)}</div>
@@ -7959,6 +7966,10 @@
     async function markAllPaid(robloxUserId, robloxUsername) {
       const json = await callHrData('mark_all_paid', { robloxUserId, robloxUsername });
       return json.count || 0;
+    }
+
+    async function editRequestAmount(id, payment, currency) {
+      return await callHrData('edit_request_amount', { id, payment, currency });
     }
 
     async function deleteRequest(id) {
@@ -9919,7 +9930,7 @@
       };
       return `
     <div class="topbar">
-      <a class="brand" href="#"><span class="dot"></span>PlayVerse<small>Payment Log</small></a>
+      <a class="brand" href="#"><svg class="pv-logo" viewBox="0 0 32 32" role="img" aria-label="PlayVerse"><rect width="32" height="32" rx="8" fill="var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="800" letter-spacing="-.5" fill="#fff">PV</text></svg>PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
         <button type="button" class="theme-toggle" id="themeToggleBtn" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${!isHrAuthed
@@ -12501,6 +12512,13 @@
       let filter = 'pending';
       let search = '';
       let missingOnly = false;
+      let archiveResult = 'all';
+      let ageFilter = 'any';
+      let minAmount = '';
+      let maxAmount = '';
+      let methodFilter = 'all';
+      let sortBy = 'newest';
+      let amountSaving = new Set();
       let claims = [];
       let claimsLoading = false;
       const claimsBusy = new Set();
@@ -12536,7 +12554,18 @@
       }
 
       function getRows() {
-        let rows = allRequests.filter(r => filter === 'all' ? true : r.status === filter);
+        let rows = allRequests.filter(r => filter === 'archive'
+          ? (r.status === 'paid' || r.status === 'rejected') && (archiveResult === 'all' || r.status === archiveResult)
+          : filter === 'all' ? true : r.status === filter);
+        if (filter !== 'archive' && ageFilter !== 'any') {
+          const minAge = Number(ageFilter) * 86400000;
+          rows = rows.filter(r => r.status === 'pending' && r.createdAt && (Date.now() - new Date(r.createdAt).getTime()) >= minAge);
+        }
+        const usdValue = r => r.currency === 'USD' ? (Number(r.payment) || 0) : (Number(r.payment) || 0) * DEVEX_RATE;
+        if (String(minAmount).trim() !== '' && Number.isFinite(Number(minAmount))) rows = rows.filter(r => usdValue(r) >= Number(minAmount));
+        if (String(maxAmount).trim() !== '' && Number.isFinite(Number(maxAmount))) rows = rows.filter(r => usdValue(r) <= Number(maxAmount));
+        if (methodFilter === 'none') rows = rows.filter(r => !r.paymentMethod);
+        else if (methodFilter !== 'all') rows = rows.filter(r => r.paymentMethod && r.paymentMethod.method === methodFilter);
         if (missingOnly) rows = rows.filter(r => r.status === 'pending' && !r.paymentMethod);
         if (roleFilter !== 'all') {
           rows = rows.filter(r => (r.requesterRoles || []).includes(roleFilter));
@@ -12551,6 +12580,11 @@
           const q = search.trim().toLowerCase();
           rows = rows.filter(r => (r.robloxUsername || '').toLowerCase().includes(q) || (r.taskName || '').toLowerCase().includes(q) || (r.game || '').toLowerCase().includes(q) || (r.requestedBy || '').toLowerCase().includes(q));
         }
+        const when = r => new Date((filter === 'archive' && r.paidAt) ? r.paidAt : (r.createdAt || 0)).getTime();
+        rows = rows.slice().sort((a, b) => sortBy === 'oldest' ? when(a) - when(b)
+          : sortBy === 'high' ? usdValue(b) - usdValue(a)
+          : sortBy === 'low' ? usdValue(a) - usdValue(b)
+          : when(b) - when(a));
         return rows;
       }
 
@@ -12569,7 +12603,7 @@
               </td>
               <td class="pay-cell">${fmtAmount(r)}${r.currency === 'ROBUX' ? `<div style="font-weight:500;color:var(--muted);font-size:11px;margin-top:2px;">${devexEquivalent(r)}</div>` : ''}</td>
               <td><span class="status-chip ${r.status}">${statusLabel}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
-              <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
+              <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}${r.status === 'pending' && r.createdAt ? `<div style="font-size:10.5px;margin-top:2px;">${Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000))}d pending</div>` : ''}</td>
               <td class="actions-cell">
                 <div class="actions-group">
                   ${r.status === 'pending' && canMarkPaid ? `<button type="button" class="btn btn-ok btn-xs" data-paid="${esc(r.id)}"${frozenAttrs()}>Paid</button>` : ''}
@@ -12585,6 +12619,15 @@
             <tr class="detail-row">
               <td colspan="7">
                 <div class="role-meta" style="margin-bottom:10px;">ID: <span class="mono">${esc(r.id)}</span></div>
+                ${r.status !== 'paid' && canMarkPaid ? `<div class="claim-edit" style="margin-bottom:12px;">
+                  <label class="hint" for="editAmt_${esc(r.id)}">Change amount</label>
+                  <input type="number" id="editAmt_${esc(r.id)}" value="${esc(r.payment)}" min="0.01" step="any">
+                  <select id="editCur_${esc(r.id)}">
+                    <option value="ROBUX" ${r.currency === 'ROBUX' ? 'selected' : ''}>Robux</option>
+                    <option value="USD" ${r.currency === 'USD' ? 'selected' : ''}>USD</option>
+                  </select>
+                  <button type="button" class="btn btn-ok btn-sm" data-save-amount="${esc(r.id)}" ${amountSaving.has(r.id) ? 'disabled' : ''}>${amountSaving.has(r.id) ? 'Saving...' : 'Save amount'}</button>
+                </div>` : ''}
                 ${items.length ? `<ol class="detail-list">${items.map(i => `<li>${esc(i.lead)}${i.rest ? ' ' + esc(i.rest) : ''}</li>`).join('')}</ol>` : `<div class="detail-empty">No work items listed.</div>`}
                 <div style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px;">
                   <div style="font-size:10.5px;text-transform:uppercase;color:var(--muted);font-weight:700;letter-spacing:.6px;margin-bottom:8px;">Payout eligibility</div>
@@ -12649,8 +12692,27 @@
 
         document.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => {
           const id = b.dataset.toggle;
-          if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+          if (expanded.has(id)) expanded.clear(); else { expanded.clear(); expanded.add(id); }
           paintTable();
+        }));
+
+        document.querySelectorAll('[data-save-amount]').forEach(b => b.addEventListener('click', async () => {
+          const id = b.dataset.saveAmount;
+          const r = allRequests.find(x => String(x.id) === String(id));
+          if (!r) return;
+          const amt = Number((document.getElementById('editAmt_' + id) || {}).value);
+          const cur = (document.getElementById('editCur_' + id) || {}).value;
+          if (!(amt > 0) || !cur) { toast('Enter an amount above zero.', 'err'); return; }
+          amountSaving.add(id); paintTable();
+          try {
+            const res = await editRequestAmount(id, amt, cur);
+            r.payment = res.payment; r.currency = res.currency;
+            toast('Amount updated.');
+            updateStatsAndTabs();
+          } catch (err) {
+            toast(err.message || 'Could not change that amount.', 'err');
+          }
+          amountSaving.delete(id); paintTable();
         }));
 
         document.querySelectorAll('[data-check-elig]').forEach(b => b.addEventListener('click', async (e) => {
@@ -12798,7 +12860,8 @@
           all: allRequests.length,
           pending: allRequests.filter(r => r.status === 'pending').length,
           paid: allRequests.filter(r => r.status === 'paid').length,
-          rejected: allRequests.filter(r => r.status === 'rejected').length
+          rejected: allRequests.filter(r => r.status === 'rejected').length,
+          archive: allRequests.filter(r => r.status === 'paid' || r.status === 'rejected').length
         };
         const pendingRows = allRequests.filter(r => r.status === 'pending');
         const missingMethodCount = pendingRows.filter(r => !r.paymentMethod).length;
@@ -12829,7 +12892,8 @@
           all: allRequests.length,
           pending: allRequests.filter(r => r.status === 'pending').length,
           paid: allRequests.filter(r => r.status === 'paid').length,
-          rejected: allRequests.filter(r => r.status === 'rejected').length
+          rejected: allRequests.filter(r => r.status === 'rejected').length,
+          archive: allRequests.filter(r => r.status === 'paid' || r.status === 'rejected').length
         };
         const pendingRows = allRequests.filter(r => r.status === 'pending');
         const missingMethodCount = pendingRows.filter(r => !r.paymentMethod).length;
@@ -12882,10 +12946,8 @@
 
       <div class="filter-bar">
         <div class="tabs" id="dashFilterTabs">
-          <button type="button" class="tab-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">All (<span class="tab-count" data-count-for="all">${counts.all}</span>)</button>
           <button type="button" class="tab-btn ${filter === 'pending' ? 'active' : ''}" data-filter="pending">Pending (<span class="tab-count" data-count-for="pending">${counts.pending}</span>)</button>
-          <button type="button" class="tab-btn ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Paid (<span class="tab-count" data-count-for="paid">${counts.paid}</span>)</button>
-          <button type="button" class="tab-btn ${filter === 'rejected' ? 'active' : ''}" data-filter="rejected">Rejected (<span class="tab-count" data-count-for="rejected">${counts.rejected}</span>)</button>
+          <button type="button" class="tab-btn ${filter === 'archive' ? 'active' : ''}" data-filter="archive">Archive (<span class="tab-count" data-count-for="archive">${counts.archive}</span>)</button>
           <button type="button" class="tab-btn ${filter === 'claims' ? 'active' : ''}" data-filter="claims">Staff requests (${claims.length})</button>
         </div>
         <div class="search-input-wrap">
@@ -12909,6 +12971,34 @@
           </select>` : ''}
         </div>
       </div>
+
+      ${filter !== 'claims' ? `
+      <div class="filter-bar" id="payFilterRow" style="margin-top:-6px;">
+        <div class="filter-select-group">
+          ${filter === 'archive' ? `
+          <select id="archiveResultSelect" class="filter-select" aria-label="Result">
+            <option value="all" ${archiveResult === 'all' ? 'selected' : ''}>Paid and rejected</option>
+            <option value="paid" ${archiveResult === 'paid' ? 'selected' : ''}>Paid only</option>
+            <option value="rejected" ${archiveResult === 'rejected' ? 'selected' : ''}>Rejected only</option>
+          </select>` : `
+          <select id="ageFilterSelect" class="filter-select" aria-label="Time pending">
+            ${[['any', 'Any time pending'], ['1', 'Pending 1+ days'], ['3', 'Pending 3+ days'], ['7', 'Pending 7+ days'], ['14', 'Pending 14+ days'], ['30', 'Pending 30+ days']].map(([v, l]) => `<option value="${v}" ${ageFilter === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>`}
+          <select id="methodFilterSelect" class="filter-select" aria-label="Payment method">
+            <option value="all" ${methodFilter === 'all' ? 'selected' : ''}>Any method</option>
+            ${Object.keys(PAYMENT_METHODS).map(k => `<option value="${k}" ${methodFilter === k ? 'selected' : ''}>${esc(PAYMENT_METHODS[k].label)}</option>`).join('')}
+            <option value="none" ${methodFilter === 'none' ? 'selected' : ''}>No method set</option>
+          </select>
+          <input type="number" id="minAmountInput" class="filter-select" placeholder="Min $" min="0" step="any" value="${esc(minAmount)}" style="width:92px;" title="Minimum amount in USD (Robux converted at DevEx rate)">
+          <input type="number" id="maxAmountInput" class="filter-select" placeholder="Max $" min="0" step="any" value="${esc(maxAmount)}" style="width:92px;" title="Maximum amount in USD (Robux converted at DevEx rate)">
+          <select id="sortSelect" class="filter-select" aria-label="Sort">
+            <option value="newest" ${sortBy === 'newest' ? 'selected' : ''}>Newest first</option>
+            <option value="oldest" ${sortBy === 'oldest' ? 'selected' : ''}>Oldest first</option>
+            <option value="high" ${sortBy === 'high' ? 'selected' : ''}>Amount: high to low</option>
+            <option value="low" ${sortBy === 'low' ? 'selected' : ''}>Amount: low to high</option>
+          </select>
+        </div>
+      </div>` : ''}
 
       ${filter === 'claims' ? `
       <div class="table-wrap" style="padding:0;">
@@ -13020,6 +13110,16 @@
         if (skillsetFilterSelect) {
           skillsetFilterSelect.addEventListener('change', () => { skillsetFilter = skillsetFilterSelect.value; paintTable(); });
         }
+
+        [['archiveResultSelect', v => { archiveResult = v; }], ['ageFilterSelect', v => { ageFilter = v; }],
+         ['methodFilterSelect', v => { methodFilter = v; }], ['sortSelect', v => { sortBy = v; }]].forEach(([id, set]) => {
+          const el = document.getElementById(id);
+          if (el) el.addEventListener('change', () => { set(el.value); paintTable(); });
+        });
+        [['minAmountInput', v => { minAmount = v; }], ['maxAmountInput', v => { maxAmount = v; }]].forEach(([id, set]) => {
+          const el = document.getElementById(id);
+          if (el) el.addEventListener('input', () => { set(el.value); paintTable(); });
+        });
 
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) refreshBtn.addEventListener('click', () => { load(true); });
@@ -14258,7 +14358,8 @@
 
         document.querySelectorAll('input[name="methodChoice"]').forEach(el => el.addEventListener('change', () => {
           selectedMethod = el.value;
-          methodDetails = {};
+          const remembered = method && method.details && method.details.savedMethods && method.details.savedMethods[selectedMethod];
+          methodDetails = remembered ? { ...remembered } : {};
           paint();
         }));
 
