@@ -147,6 +147,8 @@
       object-fit: contain;
     }
 
+    .an-table tr.owed-selected td { background: var(--accent-soft, rgba(55,48,217,.07)); }
+
     .brand small {
       color: var(--muted);
       font-weight: 500;
@@ -13198,8 +13200,19 @@
       let loading = true;
       let loadError = null;
       let lastOwedRows = [];
+      const selectedOwed = new Set();
+      let owedOpen = null;
+      let owedBusy = false;
+      const owedSaving = new Set();
 
       const canMarkPaid = hasPermission('dashboard.mark_paid');
+
+      function fmtOwedTotal(usd, robux) {
+        const parts = [];
+        if (usd > 0) parts.push(fmtUsd(usd));
+        if (robux > 0) parts.push('R$ ' + fmtRobux(robux));
+        return parts.join(' + ') || '-';
+      }
 
       let statusFilter = 'all';
       let gameFilter = 'all';
@@ -13350,7 +13363,8 @@
         const map = new Map();
         rows.filter(r => r.status === 'pending').forEach(r => {
           const key = ownerKey(r);
-          const cur = map.get(key) || { robloxUserId: r.robloxUserId, robloxUsername: null, robux: 0, usd: 0, count: 0, paymentMethod: null, sampleRequestId: null };
+          const cur = map.get(key) || { key, reqs: [], robloxUserId: r.robloxUserId, robloxUsername: null, robux: 0, usd: 0, count: 0, paymentMethod: null, sampleRequestId: null };
+          cur.reqs.push(r);
           if (r.currency === 'ROBUX') cur.robux += Number(r.payment) || 0; else cur.usd += Number(r.payment) || 0;
           cur.count += 1;
           if (!cur.robloxUsername && r.robloxUsername) cur.robloxUsername = r.robloxUsername;
@@ -13689,13 +13703,34 @@
       ${renderExplorePanelHtml(chartData)}
 
       <div class="an-section-title">Who's owed what (pending requests)</div>
+      ${canMarkPaid && owedRows.length ? (() => {
+        const sel = owedRows.filter(o => selectedOwed.has(o.key));
+        const selUsd = sel.reduce((s, o) => s + o.usd, 0);
+        const selRobux = sel.reduce((s, o) => s + o.robux, 0);
+        return `<div class="filter-notice" id="owedBar" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+          <span>${sel.length ? `<strong>${sel.length}</strong> selected, owed <strong>${esc(fmtOwedTotal(selUsd, selRobux))}</strong> in total` : 'Tick the people you are paying, then press Pay selected.'}</span>
+          ${sel.length ? `<button type="button" class="btn btn-ghost btn-sm" id="owedClear">Clear</button>` : ''}
+          <button type="button" class="btn btn-ok btn-sm" id="paySelectedBtn" ${sel.length && !owedBusy ? '' : 'disabled'}${frozenAttrs()}>${owedBusy ? 'Paying...' : 'Pay selected'}</button>
+        </div>`;
+      })() : ''}
       <div class="table-wrap an-table-wrap">
         <div class="table-scroll">
           ${owedRows.length ? `
           <table class="an-table">
-            <thead><tr><th>Person</th><th>Payment method</th><th class="num-cell">Total owed (USD equiv.)</th><th class="num-cell">Pending Robux</th><th class="num-cell">Pending USD</th><th class="num-cell">Requests</th>${canMarkPaid ? '<th></th>' : ''}</tr></thead>
+            <thead><tr>${canMarkPaid ? `<th style="width:34px;"><input type="checkbox" id="owedSelectAll" aria-label="Select everyone" ${owedRows.length && owedRows.every(o => selectedOwed.has(o.key)) ? 'checked' : ''}></th>` : ''}<th>Person</th><th>Payment method</th><th class="num-cell">Owed in total</th><th class="num-cell">Requests</th>${canMarkPaid ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${owedRows.map((o, i) => `<tr><td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(o.paymentMethod)}>${esc(methodDisplayLabel(o.paymentMethod))}${o.paymentMethod.method === 'BANK_TRANSFER' && !o.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(o.sampleRequestId)}">Payment details</button>` : ''}</div>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td><button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}"${frozenAttrs()}>Mark all paid</button></td>` : ''}</tr>`).join('')}
+              ${owedRows.map((o, i) => `<tr class="${selectedOwed.has(o.key) ? 'owed-selected' : ''}">${canMarkPaid ? `<td><input type="checkbox" data-owed-select="${i}" aria-label="Select ${esc(o.user)}" ${selectedOwed.has(o.key) ? 'checked' : ''}></td>` : ''}<td>${esc(o.user || '-')}</td><td>${o.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(o.paymentMethod)}>${esc(methodDisplayLabel(o.paymentMethod))}${o.paymentMethod.method === 'BANK_TRANSFER' && !o.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(o.sampleRequestId)}">Payment details</button>` : ''}</div>` : `<span class="method-note missing-method">Not set</span>`}</td><td class="num-cell"><strong>${esc(fmtOwedTotal(o.usd, o.robux))}</strong></td><td class="num-cell">${o.count}</td>${canMarkPaid ? `<td style="white-space:nowrap;"><button type="button" class="btn btn-ghost btn-sm" data-owed-open="${i}">${owedOpen === o.key ? 'Close' : 'Edit'}</button> <button type="button" class="btn btn-ok btn-sm" data-mark-all-paid="${i}"${frozenAttrs()}>Mark all paid</button></td>` : ''}</tr>${owedOpen === o.key ? `<tr class="detail-row"><td colspan="${canMarkPaid ? 6 : 4}">
+                ${o.reqs.map(r => `<div class="claim-edit" style="margin:6px 0;align-items:center;">
+                  <span style="flex:1;min-width:140px;"><strong>${esc(r.taskName || 'Untitled task')}</strong>${r.game ? ` <span class="hint">${esc(r.game)}</span>` : ''}</span>
+                  <input type="number" id="owedAmt_${esc(r.id)}" value="${esc(r.payment)}" min="0.01" step="any" aria-label="Amount">
+                  <select id="owedCur_${esc(r.id)}" aria-label="Currency">
+                    <option value="ROBUX" ${r.currency === 'ROBUX' ? 'selected' : ''}>Robux</option>
+                    <option value="USD" ${r.currency === 'USD' ? 'selected' : ''}>USD</option>
+                  </select>
+                  <button type="button" class="btn btn-ghost btn-sm" data-owed-save="${esc(r.id)}" ${owedSaving.has(r.id) ? 'disabled' : ''}>${owedSaving.has(r.id) ? 'Saving...' : 'Save amount'}</button>
+                  <button type="button" class="btn btn-ok btn-sm" data-owed-pay="${esc(r.id)}" ${owedSaving.has(r.id) ? 'disabled' : ''}${frozenAttrs()}>Paid</button>
+                </div>`).join('')}
+              </td></tr>` : ''}`).join('')}
             </tbody>
           </table>` : `<div class="dash-empty"><h3>Nothing owed</h3><p>No pending requests match these filters.</p></div>`}
         </div>
@@ -13770,6 +13805,77 @@
             alert('Could not save. Check your connection and try again.');
           }
         }));
+        const reloadAfter = async () => {
+          allRequests = await loadAllRequests();
+        };
+        const selAll = document.getElementById('owedSelectAll');
+        if (selAll) selAll.addEventListener('change', () => {
+          lastOwedRows.forEach(o => { if (selAll.checked) selectedOwed.add(o.key); else selectedOwed.delete(o.key); });
+          paintContent();
+        });
+        document.querySelectorAll('[data-owed-select]').forEach(c => c.addEventListener('change', () => {
+          const o = lastOwedRows[Number(c.dataset.owedSelect)];
+          if (!o) return;
+          if (c.checked) selectedOwed.add(o.key); else selectedOwed.delete(o.key);
+          paintContent();
+        }));
+        const owedClear = document.getElementById('owedClear');
+        if (owedClear) owedClear.addEventListener('click', () => { selectedOwed.clear(); paintContent(); });
+        document.querySelectorAll('[data-owed-open]').forEach(b => b.addEventListener('click', () => {
+          const o = lastOwedRows[Number(b.dataset.owedOpen)];
+          if (!o) return;
+          owedOpen = owedOpen === o.key ? null : o.key;
+          paintContent();
+        }));
+        document.querySelectorAll('[data-owed-save]').forEach(b => b.addEventListener('click', async () => {
+          const id = b.dataset.owedSave;
+          const amt = Number((document.getElementById('owedAmt_' + id) || {}).value);
+          const cur = (document.getElementById('owedCur_' + id) || {}).value;
+          if (!(amt > 0) || !cur) { toast('Enter an amount above zero.', 'err'); return; }
+          owedSaving.add(id); paintContent();
+          try {
+            const res = await editRequestAmount(id, amt, cur);
+            const r = allRequests.find(x => String(x.id) === String(id));
+            if (r) { r.payment = res.payment; r.currency = res.currency; }
+            toast('Amount updated.');
+          } catch (err) {
+            toast(err.message || 'Could not change that amount.', 'err');
+          }
+          owedSaving.delete(id);
+          if (myGen === renderGen) paintContent();
+        }));
+        document.querySelectorAll('[data-owed-pay]').forEach(b => b.addEventListener('click', async () => {
+          const id = b.dataset.owedPay;
+          owedSaving.add(id); paintContent();
+          try {
+            await updateRequest({ id });
+            await reloadAfter();
+            toast('Marked paid.');
+          } catch (err) {
+            toast(err.message || 'Could not save. Check your connection and try again.', 'err');
+          }
+          owedSaving.delete(id);
+          if (myGen === renderGen) paintContent();
+        }));
+        const paySel = document.getElementById('paySelectedBtn');
+        if (paySel) paySel.addEventListener('click', async () => {
+          const sel = lastOwedRows.filter(o => selectedOwed.has(o.key));
+          if (!sel.length || owedBusy) return;
+          const totalUsd = sel.reduce((s, o) => s + o.usd, 0);
+          const totalRobux = sel.reduce((s, o) => s + o.robux, 0);
+          if (!confirm(`Mark ${sel.length} ${sel.length === 1 ? 'person' : 'people'} as paid (${fmtOwedTotal(totalUsd, totalRobux)} in total)?`)) return;
+          owedBusy = true; paintContent();
+          let done = 0; const failed = [];
+          for (const o of sel) {
+            try { await markAllPaid(o.robloxUserId, o.robloxUsername); done++; selectedOwed.delete(o.key); }
+            catch (err) { failed.push(o.user); }
+          }
+          try { await reloadAfter(); } catch (e) { }
+          owedBusy = false;
+          if (myGen !== renderGen) return;
+          toast(failed.length ? `Paid ${done}. Could not pay: ${failed.join(', ')}.` : `Marked ${done} ${done === 1 ? 'person' : 'people'} as paid.`, failed.length ? 'err' : undefined);
+          paintContent();
+        });
         wireBankDetails((id) => allRequests.find(r => String(r.id) === String(id)));
         wireExploreEvents();
 
