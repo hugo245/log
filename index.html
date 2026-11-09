@@ -143,6 +143,8 @@
       height: 26px;
       flex-shrink: 0;
       display: block;
+      border-radius: 6px;
+      object-fit: contain;
     }
 
     .brand small {
@@ -7140,7 +7142,7 @@
       return `
     <div class="invoice">
       <div class="invoice-top">
-        <div class="brand"><svg class="pv-logo" viewBox="0 0 32 32" role="img" aria-label="PlayVerse"><rect width="32" height="32" rx="8" fill="var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="800" letter-spacing="-.5" fill="#fff">PV</text></svg>PlayVerse</div>
+        <div class="brand"><img class="pv-logo" src="favicon.ico" alt="PlayVerse">PlayVerse</div>
         <div class="doc-type">
           <div class="doc-label">Payment Request</div>
           <div class="doc-id mono">${esc(data.id)}</div>
@@ -9930,7 +9932,7 @@
       };
       return `
     <div class="topbar">
-      <a class="brand" href="#"><svg class="pv-logo" viewBox="0 0 32 32" role="img" aria-label="PlayVerse"><rect width="32" height="32" rx="8" fill="var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="800" letter-spacing="-.5" fill="#fff">PV</text></svg>PlayVerse<small>Payment Log</small></a>
+      <a class="brand" href="#"><img class="pv-logo" src="favicon.ico" alt="PlayVerse">PlayVerse<small>Payment Log</small></a>
       <div class="topbar-right">
         <button type="button" class="theme-toggle" id="themeToggleBtn" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${!isHrAuthed
