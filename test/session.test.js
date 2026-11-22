@@ -21,6 +21,8 @@ test.before(async () => {
             { token: hashToken('b'.repeat(64)), roblox_user_id: 2, roblox_username: 'Other', roles: [], permissions: [], max_hierarchy: 1, expires_at: future, last_synced_at: now, last_seen_at: now }
         ],
         app_settings: [{ id: 1, security_level: 'normal', devex_rate: 0.0035, closed: false }],
+        roles: [{ id: 1, name: 'Owner', hierarchy: 100, link_only: true, permissions: ['dashboard.view', 'roles.manage', 'security.manage'] }],
+        accounts: [],
         games: [{ id: 1, name: 'Game A', producer_user_id: null }]
     });
     await new Promise(r => db.server.listen(0, r));
@@ -31,7 +33,8 @@ test.before(async () => {
             ...process.env, PORT: String(port), APP_ORIGIN: 'http://localhost:5500',
             SUPABASE_URL: `http://127.0.0.1:${db.server.address().port}`, SUPABASE_SERVICE_ROLE_KEY: 'test',
             ROBLOX_CLIENT_ID: '1', ROBLOX_CLIENT_SECRET: 'x', ROBLOX_REDIRECT_URI: 'http://localhost/cb', SESSION_SECRET: 'x'.repeat(40),
-            DISCORD_CLIENT_ID: '1', DISCORD_CLIENT_SECRET: 'x', DISCORD_REDIRECT_URI: 'http://localhost/dcb'
+            DISCORD_CLIENT_ID: '1', DISCORD_CLIENT_SECRET: 'x', DISCORD_REDIRECT_URI: 'http://localhost/dcb',
+            AUTH_PROVIDERS: 'roblox,google,test'
         },
         stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -84,7 +87,10 @@ test('signing out revokes the session immediately despite caching', async () => 
 test('bootstrap serves branding, site state and games without auth', async () => {
     const r = await fetch(`${base}/public/bootstrap`);
     const body = await r.json();
-    assert.strictEqual(body.config.studio.name, 'PlayVerse');
+    assert.strictEqual(body.config.studio.name, 'Studio Panel');
+    // google is dropped because its client id/secret are not configured
+    assert.deepStrictEqual(body.auth.providers, ['roblox', 'test']);
+    assert.deepStrictEqual(body.auth.testRoles, ['Owner', 'Manager', 'Staff']);
     assert.strictEqual(body.devexRate, 0.0035);
     assert.deepStrictEqual(body.games, [{ id: 1, name: 'Game A' }]);
     assert.strictEqual(body.site.closed, false);
@@ -146,4 +152,23 @@ test('role managers cannot grant permissions they do not hold', async () => {
     assert.strictEqual(r.status, 403);
     assert.strictEqual(r.body.error, 'cannot_grant_permission');
     assert.ok(!(db.tables.roles || []).some(x => x.name === 'Sneaky'));
+});
+
+test('test mode signs in as a seeded role with that role\'s permissions', async () => {
+    const r = await fetch(`${base}/auth/test-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'Owner' }) });
+    const body = await r.json();
+    assert.strictEqual(r.status, 200, JSON.stringify(body));
+    const me = await fetch(`${base}/hr-session`, { headers: { Authorization: `Bearer ${body.session}` } }).then(x => x.json());
+    assert.strictEqual(me.robloxUsername, 'Test Owner');
+    assert.ok(me.robloxUserId >= 1000000000000000);
+    assert.ok(me.permissions.includes('roles.manage'));
+    assert.strictEqual(db.tables.hr_sessions.at(-1).provider, 'test');
+    const bad = await fetch(`${base}/auth/test-login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role: 'God' }) });
+    assert.strictEqual(bad.status, 400);
+});
+
+test('disabled providers refuse to start', async () => {
+    const g = await fetch(`${base}/google-auth-start`, { redirect: 'manual' });
+    assert.strictEqual(g.status, 302);
+    assert.ok(String(g.headers.get('location')).includes('error=provider_disabled'));
 });

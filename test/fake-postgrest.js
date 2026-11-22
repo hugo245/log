@@ -45,8 +45,15 @@ function createFakePostgrest(seed) {
             if (req.method === 'POST') {
                 const input = JSON.parse(body || '[]');
                 const list = Array.isArray(input) ? input : [input];
-                list.forEach(r => rows.push({ created_at: new Date().toISOString(), ...r }));
-                return reply(list);
+                const created = list.map(r => {
+                    const row = { created_at: new Date().toISOString(), ...r };
+                    if (row.id == null && !['payment_requests', 'hr_sessions'].includes(table)) {
+                        row.id = (table === 'accounts' ? 1000000000000000 : 1) + rows.length;
+                    }
+                    rows.push(row);
+                    return row;
+                });
+                return reply(created);
             }
             if (req.method === 'PATCH') {
                 const patch = JSON.parse(body || '{}');

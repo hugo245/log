@@ -12,7 +12,7 @@ window.STUDIO_CONFIG = {
   // Shown for the first paint on a visitor's very first load, before the API answers.
   // After that the live branding is cached in the browser, so keep this roughly in sync.
   branding: {
-    studio: { name: 'PlayVerse', shortName: 'PV', productName: 'Hub', logoUrl: 'assets/logo.png', websiteLabel: 'playverse.cc', website: 'https://www.playverse.cc' },
-    theme: { accent: '#6366F1', accentDark: '#8B87FF', radius: 18, defaultMode: 'light' }
+    studio: { name: 'Studio Panel', shortName: 'SP', productName: '', logoUrl: 'assets/logo.svg', websiteLabel: '', website: '' },
+    theme: { accent: '#5B5FEF', accentDark: '#8C8FFF', radius: 14, defaultMode: 'light' }
   }
 };

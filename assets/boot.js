@@ -4,7 +4,7 @@
   var root = document.documentElement;
   var cfg = window.STUDIO_CONFIG || {};
   var cached = null;
-  try { cached = JSON.parse(localStorage.getItem('studio_bootstrap_v1') || 'null'); } catch (e) { }
+  try { cached = JSON.parse(localStorage.getItem('studio_bootstrap_v2') || 'null'); } catch (e) { }
   var branding = (cached && cached.config) || cfg.branding || {};
   var theme = branding.theme || {};
 
@@ -19,7 +19,7 @@
   if (theme.radius) root.style.setProperty('--radius-lg', Math.max(4, Math.min(28, Number(theme.radius) || 18)) + 'px');
 
   if (branding.studio && branding.studio.name) {
-    document.title = branding.studio.name + ' ' + (branding.studio.productName || 'Hub');
+    document.title = [branding.studio.name, branding.studio.productName].filter(Boolean).join(' ');
   }
 
   if (cfg.apiBase && /^https:\/\//.test(cfg.apiBase)) {

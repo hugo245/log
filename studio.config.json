@@ -1,23 +1,24 @@
 {
   "studio": {
-    "name": "PlayVerse",
-    "shortName": "PV",
-    "productName": "Hub",
-    "website": "https://www.playverse.cc",
-    "websiteLabel": "playverse.cc",
-    "logoUrl": "assets/logo.png",
-    "requestIdPrefix": "PV",
-    "contactEmail": "admin@playverse.cc"
+    "name": "Studio Panel",
+    "shortName": "SP",
+    "productName": "",
+    "website": "",
+    "websiteLabel": "",
+    "logoUrl": "assets/logo.svg",
+    "requestIdPrefix": "REQ",
+    "contactEmail": "",
+    "discordInviteUrl": ""
   },
   "theme": {
-    "accent": "#6366F1",
-    "accentDark": "#8B87FF",
-    "radius": 18,
+    "accent": "#5B5FEF",
+    "accentDark": "#8C8FFF",
+    "radius": 14,
     "defaultMode": "light"
   },
   "signIn": {
     "title": "Sign in",
-    "subtitle": "Use your Roblox account. You'll get in if you have a role in the {studio} group.",
+    "subtitle": "Sign in to see your work, approvals and payouts.",
     "buttonLabel": "Sign in with Roblox",
     "headline": "Paid for what you build.",
     "tagline": "Log your work, get it approved and see every payout from {studio} in one place.",
@@ -52,8 +53,15 @@
       "BANK_TRANSFER"
     ]
   },
-  "discord": {
-    "leadRoleId": "1539922527013572668",
-    "ticketCategoryId": "1540256971096072295"
+  "legal": {
+    "tos": "",
+    "aup": ""
+  },
+  "moneyRules": {
+    "allowSelfApproval": false,
+    "maxAmount": {
+      "ROBUX": 10000000,
+      "USD": 100000
+    }
   }
 }

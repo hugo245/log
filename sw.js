@@ -5,8 +5,8 @@ self.addEventListener('push', event => {
     event.waitUntil(
         self.registration.showNotification(payload.title || 'New update', {
             body: payload.body || '',
-            icon: '/favicon.ico',
-            badge: '/favicon.ico',
+            icon: '/assets/icon-192.png',
+            badge: '/assets/icon-192.png',
             data: { url: payload.url || '/' }
         })
     );

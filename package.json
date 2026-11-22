@@ -1,8 +1,8 @@
 {
-    "name": "studio-hub",
+    "name": "studio-panel",
     "version": "1.0.0",
     "private": true,
-    "description": "White-label staff, work-log and payout hub for Roblox studios: Roblox OAuth sign-in, roles, payments, teams and recruitment.",
+    "description": "White-label staff panel for Roblox studios: sign-in with Roblox or Google, roles, work logging, approvals, payouts, teams and recruitment.",
     "main": "server.js",
     "engines": {
         "node": ">=18"

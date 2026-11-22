@@ -5,9 +5,9 @@
     // ---------------------------------------------------------------------------------
     const DEPLOY = window.STUDIO_CONFIG || {};
     const EDGE_BASE = String(DEPLOY.apiBase || '').replace(/\/+$/, '');
-    const BOOTSTRAP_CACHE_KEY = 'studio_bootstrap_v1';
+    const BOOTSTRAP_CACHE_KEY = 'studio_bootstrap_v2';
     const DEFAULT_BRANDING = {
-      studio: { name: 'Studio', shortName: 'S', productName: 'Hub', logoUrl: 'favicon.ico', website: '', websiteLabel: '' },
+      studio: { name: 'Studio Panel', shortName: 'SP', productName: '', logoUrl: 'assets/logo.svg', website: '', websiteLabel: '' },
       theme: { accent: '#6366F1', accentDark: '#8B87FF', radius: 18, defaultMode: 'light' },
       signIn: {
         title: 'Sign in', subtitle: '', buttonLabel: 'Sign in with Roblox', headline: 'Paid for what you build.',
@@ -35,9 +35,11 @@
     let BOOTSTRAP = readCachedBootstrap();
     let STUDIO = mergeBranding(mergeBranding(DEFAULT_BRANDING, DEPLOY.branding), BOOTSTRAP && BOOTSTRAP.config);
 
-    function studioName() { return STUDIO.studio.name || 'Studio'; }
+    function studioName() { return STUDIO.studio.name || 'Studio Panel'; }
+    // Full product name, e.g. "Acme" + "Panel". The suffix is optional in studio.config.json.
+    function brandName() { return [studioName(), STUDIO.studio.productName].filter(Boolean).join(' '); }
     function studioShort() { return STUDIO.studio.shortName || studioName().slice(0, 2).toUpperCase(); }
-    function studioLogo() { return STUDIO.studio.logoUrl || 'favicon.ico'; }
+    function studioLogo() { return STUDIO.studio.logoUrl || 'assets/logo.svg'; }
     function featureOn(name) { return !name || !STUDIO.features || STUDIO.features[name] !== false; }
     // Colours set by admins (team/skillset colours) are only ever used if they are a plain
     // hex/rgb value, so they can't be used to smuggle extra CSS into a style attribute.
@@ -61,7 +63,7 @@
       if (hex.test(t.accent || '')) root.style.setProperty('--brand', t.accent);
       if (hex.test(t.accentDark || '')) root.style.setProperty('--brand-dark', t.accentDark);
       if (t.radius) root.style.setProperty('--radius-lg', Math.max(4, Math.min(28, Number(t.radius) || 18)) + 'px');
-      document.title = `${studioName()} ${STUDIO.studio.productName || 'Hub'}`;
+      document.title = brandName();
       const icon = document.querySelector('link[rel="icon"]');
       if (icon && STUDIO.studio.logoUrl && icon.getAttribute('href') !== STUDIO.studio.logoUrl) icon.setAttribute('href', STUDIO.studio.logoUrl);
     }
@@ -121,11 +123,11 @@
     }
     function toggleTheme() {
       setTheme(getTheme() === 'dark' ? 'light' : 'dark');
-      const app = document.getElementById('app');
-      if (app) {
-        const btn = document.getElementById('themeToggleBtn');
-        if (btn) { btn.innerHTML = themeToggleIcon(); btn.setAttribute('aria-label', getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'); }
-      }
+      document.querySelectorAll('#themeToggleBtn').forEach(btn => {
+        const svg = btn.querySelector('svg');
+        if (svg) svg.outerHTML = themeToggleIcon(); else btn.innerHTML = themeToggleIcon();
+        btn.setAttribute('aria-label', getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+      });
     }
     function themeToggleIcon() {
       return getTheme() === 'dark'
@@ -175,8 +177,7 @@
       'payouts.view_bank_details': 'View full bank transfer details (name, address, SWIFT and IBAN)',
       'security.manage': 'Manage security (raise the protocol, hold accounts, sign people out)',
       'teams.view': 'View teams, their games and deadlines',
-      'teams.manage': 'Assign games to teams and manage team deadlines',
-      'settings.manage_branding': 'Manage branding (name, logo, colours, sign-in page, features)'
+      'teams.manage': 'Assign games to teams and manage team deadlines'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
 
@@ -1105,10 +1106,11 @@
       try { localStorage.removeItem(REF_STORAGE_KEY); } catch (e) { }
     }
 
-    function beginLogin(returnHash, refToken) {
+    function beginLogin(returnHash, refToken, provider) {
       try { sessionStorage.setItem(RETURN_HASH_KEY, returnHash || window.location.hash || '#/'); } catch (e) { }
       const ref = refToken || getPendingRef() || getPendingInvite();
-      window.location.href = EDGE_BASE + '/roblox-auth-start' + (ref ? ('?ref=' + encodeURIComponent(ref)) : '');
+      const start = provider === 'google' ? '/google-auth-start' : '/roblox-auth-start';
+      window.location.href = EDGE_BASE + start + (ref ? ('?ref=' + encodeURIComponent(ref)) : '');
     }
 
     function takeReturnHash() {
@@ -2980,7 +2982,7 @@
     async function exportRequestsToXlsx(rows, sheetLabel) {
       await ensureExcelJs();
       const workbook = new ExcelJS.Workbook();
-      workbook.creator = `${studioName()} ${STUDIO.studio.productName || 'Hub'}`;
+      workbook.creator = brandName();
       workbook.created = new Date();
 
       const sheetName = (sheetLabel || 'Payments').slice(0, 31);
@@ -3192,6 +3194,9 @@
       if (cmdkOpen) closeCmdk();
       if (umTarget) closeUserMenu();
       const path = window.location.hash.split('?')[0];
+      // The welcome tour only makes sense on Home: leaving the page ends it instead of
+      // leaving an overlay that blocks every click on the next screen.
+      if (tourRunning && !['#/home', '#/', ''].includes(path)) finishTour();
       if (path === '#/auth-callback') { handleAuthCallback(); return; }
       if (path === '#link-discord') { window.location.hash = '#/home'; return; }
 
@@ -3337,7 +3342,7 @@
     }
 
     function canSeeManage() {
-      return isHrAuthed && ['settings.manage_games', 'settings.manage_rate', 'settings.manage_groups', 'settings.manage_base_access', 'roles.manage', 'settings.manage_onboarding', 'broadcasts.manage', 'settings.manage_branding'].some(hasPermission);
+      return isHrAuthed && ['settings.manage_games', 'settings.manage_rate', 'settings.manage_groups', 'settings.manage_base_access', 'roles.manage', 'settings.manage_onboarding', 'broadcasts.manage'].some(hasPermission);
     }
 
     function navItems() {
@@ -3363,7 +3368,6 @@
         { group: 'admin', label: 'Manage: Onboarding', href: '#/manage?tab=onboarding', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'onboarding invite links roblox group' },
         { group: 'admin', label: 'Manage: Recruitment', href: '#/manage?tab=recruitment', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'positions auto-hire sign-off finalise' },
         { group: 'admin', label: 'Manage: Broadcasts', href: '#/manage?tab=broadcasts', navHidden: true, show: hasPermission('broadcasts.manage'), keywords: 'announcements message' },
-        { group: 'admin', label: 'Manage: Branding', href: '#/manage?tab=branding', navHidden: true, show: hasPermission('settings.manage_branding'), keywords: 'brand logo colour color name theme sign in features white label' },
         { group: 'you', label: 'My teams & skillsets', href: '#/my', navHidden: true },
         { group: 'you', label: 'Terms of Service', href: '#/tos', navHidden: true },
         { group: 'you', label: 'Acceptable Use Policy', href: '#/aup', navHidden: true }
@@ -3384,94 +3388,124 @@
       return (window.location.hash.split('?')[0] || '');
     }
 
-    function topbar() {
-      const locked = isHrAuthed && teamRemoved;
-      const canSeeDashboard = isHrAuthed && hasPermission('dashboard.view');
-      const canSeeRecruitment = isHrAuthed && hasPermission('recruitment.view');
-      const canSeeStaff = isHrAuthed && hasPermission('staff.view_database');
-      const path = currentPath();
-      const pill = (href, label, paths, extra) => {
-        const active = (paths || [href]).includes(path);
-        return `<a class="hr-pill${active ? ' active' : ''}" href="${href}"${active ? ' aria-current="page"' : ''}>${extra || ''}${label}</a>`;
-      };
-      return `
-    <div class="topbar">
-      <a class="brand" href="#"><img class="pv-logo" src="${esc(studioLogo())}" alt="">${esc(studioName())}<small>${esc(STUDIO.studio.productName || 'Hub')}</small></a>
-      <div class="topbar-right">
-        <button type="button" class="theme-toggle" id="themeToggleBtn" title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
-        ${!isHrAuthed
-          ? `${studioWebsiteLink('link')}<a class="hr-pill" href="#/hr">Sign in</a>`
-          : locked
-            ? `<details class="acct-menu">
-               <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
-               <div class="acct-menu-list">
-                 ${studioWebsiteLink('')}
-                 <div class="acct-menu-divider"></div>
-                 <button type="button" id="signOutBtn">Sign out</button>
-               </div>
-             </details>`
-            : `${pill('#/home', 'Home', ['#/home', '#/', ''])}${(() => {
-              const groups = [
-                {
-                  id: 'money', label: 'Money',
-                  items: [
-                    { href: '#/my', label: 'My payments', paths: ['#/my'] },
-                    featureOn('claims') ? { href: '#/request', label: 'Request payment', paths: ['#/request'] } : null,
-                    canSubmitRequests() ? { href: '#/new', label: 'Log work for someone', paths: ['#/new'] } : null,
-                    canSeeDashboard ? { href: '#/dashboard', label: 'Payments dashboard', paths: ['#/dashboard', '#/hr'] } : null,
-                    canSeeDashboard && featureOn('paymentRuns') ? { href: '#/runs', label: 'Payment runs', paths: ['#/runs'] } : null
-                  ].filter(Boolean)
-                },
-                {
-                  id: 'work', label: 'Work',
-                  items: [
-                    canSeeTeams() && featureOn('teams') ? { href: '#/teams', label: 'Teams and games', paths: ['#/teams'] } : null,
-                    canSeeAnalytics() && featureOn('analytics') ? { href: '#/analytics', label: 'Analytics', paths: ['#/analytics'] } : null
-                  ].filter(Boolean)
-                },
-                {
-                  id: 'people', label: 'People',
-                  items: [
-                    canSeeStaff && featureOn('staffDatabase') ? { href: '#/staff', label: 'Staff', paths: ['#/staff'] } : null,
-                    canSeeRecruitment && featureOn('recruitment') ? { href: '#/recruitment', label: 'Recruitment', paths: ['#/recruitment', '#/recruitment-analytics'] } : null
-                  ].filter(Boolean)
-                },
-                {
-                  id: 'admin', label: 'Admin',
-                  items: [
-                    canSeeManage() ? { href: '#/manage', label: 'Settings', paths: ['#/manage'] } : null,
-                    canSeeSecurity() && featureOn('security') ? { href: '#/security', label: 'Security', paths: ['#/security'] } : null,
-                    hasPermission('audit.view') && featureOn('audit') ? { href: '#/audit', label: 'Audit log', paths: ['#/audit'] } : null
-                  ].filter(Boolean)
-                }
-              ].filter(g => g.items.length);
+    // ---------------------------------------------------------------------------------
+    // App shell: sidebar navigation for signed-in people, a slim header for everyone else.
+    // Every page starts its markup with ${topbar()}, so this one function frames the app.
+    // ---------------------------------------------------------------------------------
+    const NAV_ICONS = {
+      home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/>',
+      wallet: '<rect x="3" y="6" width="18" height="14" rx="2.5"/><path d="M3 10h18"/><path d="M16 15h2"/>',
+      send: '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
+      pen: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/>',
+      inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5 5h14l2 8v6H3v-6z"/>',
+      calendar: '<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+      grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+      chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+      users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c1.8.7 3 2.4 3.5 5.2"/>',
+      userPlus: '<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M19 8v6M16 11h6"/>',
+      settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+      shield: '<path d="M12 3l7.5 3v5.2c0 4.9-3.2 8.9-7.5 10.3-4.3-1.4-7.5-5.4-7.5-10.3V6z"/>',
+      list: '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>',
+      search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+      menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+      chevron: '<path d="m7 10 5 5 5-5"/>'
+    };
+    function navIcon(name, size) {
+      return `<svg width="${size || 18}" height="${size || 18}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[name] || ''}</svg>`;
+    }
 
-              return groups.map(g => {
-                if (g.items.length === 1) return pill(g.items[0].href, g.items[0].label, g.items[0].paths);
-                const activeOne = g.items.find(m => m.paths.includes(path));
-                return `<details class="acct-menu">
-                  <summary class="hr-pill${activeOne ? ' active' : ''}">${activeOne ? esc(activeOne.label) : esc(g.label)} <span style="opacity:.6;">&#9662;</span></summary>
-                  <div class="acct-menu-list">
-                    ${g.items.map(m => `<a href="${m.href}"${m.paths.includes(path) ? ' aria-current="page"' : ''}>${esc(m.label)}</a>`).join('')}
-                  </div>
-                </details>`;
-              }).join('');
-            })()}<details class="acct-menu">
-               <summary class="hr-pill">${esc(hrUsername)} <span style="opacity:.6;">&#9662;</span></summary>
-               <div class="acct-menu-list">
-                 <a href="#/my">My payments</a>
-                 ${featureOn('claims') ? '<a href="#/request">Request payment</a>' : ''}
-                 <div class="acct-menu-divider"></div>
-                 ${studioWebsiteLink('')}
-                 <a href="#/tos">Terms</a>
-                 <a href="#/aup">Acceptable use</a>
-                 <div class="acct-menu-divider"></div>
-                 <button type="button" id="replayTourBtn">What's new</button>
-                 <button type="button" id="signOutBtn">Sign out</button>
-               </div>
-             </details>`}
+    function shellNavGroups() {
+      const canSeeDashboard = hasPermission('dashboard.view');
+      return [
+        { label: null, items: [{ href: '#/home', label: 'Home', icon: 'home', paths: ['#/home', '#/', ''] }] },
+        {
+          label: 'Payments', items: [
+            { href: '#/my', label: 'My payments', icon: 'wallet', paths: ['#/my'] },
+            featureOn('claims') ? { href: '#/request', label: 'Request payment', icon: 'send', paths: ['#/request'] } : null,
+            canSubmitRequests() ? { href: '#/new', label: 'Log work', icon: 'pen', paths: ['#/new'] } : null,
+            canSeeDashboard ? { href: '#/dashboard', label: 'Review & pay', icon: 'inbox', paths: ['#/dashboard', '#/hr'] } : null,
+            canSeeDashboard && featureOn('paymentRuns') ? { href: '#/runs', label: 'Payment runs', icon: 'calendar', paths: ['#/runs'] } : null
+          ]
+        },
+        {
+          label: 'Studio', items: [
+            canSeeTeams() && featureOn('teams') ? { href: '#/teams', label: 'Teams & games', icon: 'grid', paths: ['#/teams'] } : null,
+            canSeeAnalytics() && featureOn('analytics') ? { href: '#/analytics', label: 'Analytics', icon: 'chart', paths: ['#/analytics'] } : null,
+            hasPermission('staff.view_database') && featureOn('staffDatabase') ? { href: '#/staff', label: 'Staff', icon: 'users', paths: ['#/staff'] } : null,
+            hasPermission('recruitment.view') && featureOn('recruitment') ? { href: '#/recruitment', label: 'Recruitment', icon: 'userPlus', paths: ['#/recruitment', '#/recruitment-analytics'] } : null
+          ]
+        },
+        {
+          label: 'Admin', items: [
+            canSeeManage() ? { href: '#/manage', label: 'Settings', icon: 'settings', paths: ['#/manage'] } : null,
+            canSeeSecurity() && featureOn('security') ? { href: '#/security', label: 'Security', icon: 'shield', paths: ['#/security'] } : null,
+            hasPermission('audit.view') && featureOn('audit') ? { href: '#/audit', label: 'Audit log', icon: 'list', paths: ['#/audit'] } : null
+          ]
+        }
+      ].map(g => ({ ...g, items: g.items.filter(Boolean) })).filter(g => g.items.length);
+    }
+
+    function shellBrand() {
+      const logo = STUDIO.studio.logoUrl ? `<img src="${esc(STUDIO.studio.logoUrl)}" alt="">` : `<span class="shell-mark">${esc(studioShort())}</span>`;
+      return `<a class="shell-brand" href="#/home">${logo}<span>${esc(brandName())}</span></a>`;
+    }
+
+    function topbar() {
+      if (!isHrAuthed) {
+        return `
+    <header class="pub-header">
+      ${shellBrand()}
+      <div class="pub-header-right">
+        ${studioWebsiteLink('pub-link')}
+        <button type="button" class="icon-btn" id="themeToggleBtn" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
+        <a class="btn btn-primary btn-sm" href="#/hr" style="width:auto;">Sign in</a>
       </div>
-    </div>${securityStrip()}`;
+    </header>`;
+      }
+      const path = currentPath();
+      const locked = teamRemoved;
+      const role = (hrRoles && hrRoles[0]) || 'Member';
+      const initials = String(hrUsername || '?').replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+      const nav = locked ? '' : shellNavGroups().map(g => `
+        <div class="shell-group">
+          ${g.label ? `<div class="shell-group-label">${esc(g.label)}</div>` : ''}
+          ${g.items.map(i => {
+            const active = i.paths.includes(path);
+            return `<a class="shell-link${active ? ' active' : ''}" href="${i.href}"${active ? ' aria-current="page"' : ''}>${navIcon(i.icon)}<span>${esc(i.label)}</span></a>`;
+          }).join('')}
+        </div>`).join('');
+      return `
+    <aside class="app-sidebar" id="appSidebar" aria-label="Main">
+      <div class="shell-top">
+        ${shellBrand()}
+        <button type="button" class="shell-search" id="shellSearchBtn">${navIcon('search', 16)}<span>Search</span><kbd>${/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'} K</kbd></button>
+      </div>
+      <nav class="shell-nav">${nav}</nav>
+      <div class="shell-foot">
+        <details class="shell-account">
+          <summary>
+            <span class="shell-avatar" data-avatar-user="${esc(hrUserId || '')}">${esc(initials)}</span>
+            <span class="shell-who"><strong>${esc(hrUsername)}</strong><small>${esc(role)}</small></span>
+            ${navIcon('chevron', 16)}
+          </summary>
+          <div class="shell-menu">
+            <button type="button" id="themeToggleBtn">${themeToggleIcon()}<span>${getTheme() === 'dark' ? 'Light mode' : 'Dark mode'}</span></button>
+            ${locked ? '' : `<button type="button" id="replayTourBtn"><span class="shell-menu-pad"></span><span>What's new</span></button>`}
+            <a href="#/tos"><span class="shell-menu-pad"></span><span>Terms</span></a>
+            <a href="#/aup"><span class="shell-menu-pad"></span><span>Acceptable use</span></a>
+            ${STUDIO.studio.website ? `<a href="${esc(STUDIO.studio.website)}" target="_blank" rel="noopener noreferrer"><span class="shell-menu-pad"></span><span>${esc(STUDIO.studio.websiteLabel || 'Website')}</span></a>` : ''}
+            <div class="shell-menu-sep"></div>
+            <button type="button" id="signOutBtn" class="danger"><span class="shell-menu-pad"></span><span>Sign out</span></button>
+          </div>
+        </details>
+      </div>
+    </aside>
+    <header class="mobile-header">
+      <button type="button" class="icon-btn" id="shellMenuBtn" aria-label="Open menu" aria-controls="appSidebar" aria-expanded="false">${navIcon('menu', 20)}</button>
+      ${shellBrand()}
+      <button type="button" class="icon-btn" id="shellSearchBtnMobile" aria-label="Search">${navIcon('search', 18)}</button>
+    </header>
+    <div class="shell-scrim" id="shellScrim"></div>${securityStrip()}`;
     }
 
     function wireTopbarSignOut() {
@@ -3480,32 +3514,44 @@
       const tourBtn = document.getElementById('replayTourBtn');
       if (tourBtn) tourBtn.addEventListener('click', () => {
         const onHome = currentPath() === '#/home' || currentPath() === '#/' || currentPath() === '';
-        if (onHome) {
-          startTour();
-          return;
-        }
+        if (onHome) { startTour(); return; }
         tourRequested = true;
         window.location.hash = '#/home';
       });
-      const themeBtn = document.getElementById('themeToggleBtn');
-      if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
-      document.querySelectorAll('.topbar .acct-menu').forEach(d => {
-        if (d.dataset.clamp) return;
-        d.dataset.clamp = '1';
-        d.addEventListener('toggle', () => {
-          const list = d.querySelector('.acct-menu-list');
-          if (!list) return;
-          list.style.transform = '';
-          if (!d.open) return;
-          const pad = 8, vw = document.documentElement.clientWidth;
-          const r = list.getBoundingClientRect();
-          let dx = 0;
-          if (r.left < pad) dx = pad - r.left;
-          else if (r.right > vw - pad) dx = vw - pad - r.right;
-          if (dx) list.style.transform = 'translateX(' + dx + 'px)';
-        });
+      document.querySelectorAll('#themeToggleBtn').forEach(themeBtn => themeBtn.addEventListener('click', () => {
+        toggleTheme();
+        const label = themeBtn.querySelector('span');
+        if (label) label.textContent = getTheme() === 'dark' ? 'Light mode' : 'Dark mode';
+      }));
+      ['shellSearchBtn', 'shellSearchBtnMobile'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', () => openCmdk());
       });
+      const sidebar = document.getElementById('appSidebar');
+      const scrim = document.getElementById('shellScrim');
+      const menuBtn = document.getElementById('shellMenuBtn');
+      const setOpen = (open) => {
+        if (!sidebar) return;
+        sidebar.classList.toggle('open', open);
+        if (scrim) scrim.classList.toggle('open', open);
+        if (menuBtn) menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+      if (menuBtn) menuBtn.addEventListener('click', () => setOpen(!sidebar.classList.contains('open')));
+      if (scrim) scrim.addEventListener('click', () => setOpen(false));
+      if (sidebar) sidebar.querySelectorAll('.shell-link').forEach(a => a.addEventListener('click', () => setOpen(false)));
+      // Fill the account avatar with the real picture when we have one.
+      const av = document.querySelector('.shell-avatar[data-avatar-user]');
+      if (av && av.dataset.avatarUser && !av.dataset.loaded) {
+        av.dataset.loaded = '1';
+        const cached = shellAvatarCache[av.dataset.avatarUser];
+        const paint = (url) => { if (url) av.innerHTML = `<img src="${esc(url)}" alt="">`; };
+        if (cached) paint(cached);
+        else fetchWithTimeout(EDGE_BASE + '/api/roblox/avatars?ids=' + encodeURIComponent(av.dataset.avatarUser), {}, 8000)
+          .then(r => r.json()).then(j => { const url = j && j.data && j.data[av.dataset.avatarUser]; if (url) { shellAvatarCache[av.dataset.avatarUser] = url; paint(url); } })
+          .catch(() => { });
+      }
     }
+    const shellAvatarCache = {};
 
     const ROBLOX_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5.16 1.5 1.5 18.84 18.84 22.5 22.5 5.16Zm8.83 13.64-5.13-1.1 1.1-5.13 5.13 1.1Z"/></svg>';
 
@@ -3524,7 +3570,7 @@
     <div class="auth${safeBg ? ' has-image' : ''}"${safeBg ? ` style="--hero-image:url('${esc(safeBg)}')"` : ''}>
       <section class="auth-card" aria-label="Sign in">
         <header class="auth-card-head">
-          <a class="auth-brand" href="#/">${logo}<span>${esc(studioName())} ${esc(st.productName || 'Hub')}</span></a>
+          <a class="auth-brand" href="#/">${logo}<span>${esc(brandName())}</span></a>
           <div class="auth-head-right">
             ${studioWebsiteLink('')}
             <button type="button" class="auth-icon-btn" id="themeToggleBtn" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
@@ -3601,29 +3647,87 @@
         session_create_failed: 'Could not start your session, please try again.',
         session_invalid: 'Your sign-in could not be confirmed, please try again.',
         base_access_check_failed: 'Could not verify your Roblox group membership, please try again.',
-        not_eligible: 'You need to be in the required Roblox group, at the right rank, to use this tool.',
-        account_banned: 'This account has been banned from the tool and cannot sign in again.'
+        not_eligible: "This account doesn't have access yet. Ask an admin for an invite link or a role.",
+        account_banned: 'This account has been banned and cannot sign in.',
+        provider_disabled: 'That sign-in method is turned off. Use one of the options below.',
+        email_not_verified: 'Your Google account email is not verified, so it cannot be used to sign in.',
+        rate_limited: 'Too many sign-in attempts. Wait a minute and try again.'
       };
       const message = err ? (errorMessages[err] || 'Could not sign you in, please try again.') : null;
       const si = STUDIO.signIn || {};
 
       app.innerHTML = authShell(`
         <h1>${esc(si.title || 'Sign in')}</h1>
-        <p class="auth-sub">${esc(si.subtitle || `Use your Roblox account. You'll get in if you have a role in the ${studioName()} group.`)}</p>
+        <p class="auth-sub">${esc(si.subtitle || 'Sign in to see your work, approvals and payouts.')}</p>
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
         ${message ? `<div class="error-box" role="alert"><span>${esc(message)}</span></div>` : ''}
-        <button type="button" class="btn btn-primary btn-roblox" id="robloxSignInBtn" ${configError ? 'disabled' : ''}>
-          ${ROBLOX_ICON}<span>${esc(si.buttonLabel || 'Sign in with Roblox')}</span>
-        </button>
+        ${authProviderButtons('#/home')}
         ${authLegalHtml()}`);
 
       wireAuthShell();
-      const btn = document.getElementById('robloxSignInBtn');
-      if (btn) btn.addEventListener('click', () => {
+      wireAuthProviderButtons('#/home');
+    }
+
+    // Which sign-in methods the API has switched on (AUTH_PROVIDERS on the server).
+    function authProviders() {
+      const list = BOOTSTRAP && BOOTSTRAP.auth && Array.isArray(BOOTSTRAP.auth.providers) ? BOOTSTRAP.auth.providers : ['roblox'];
+      return list.length ? list : ['roblox'];
+    }
+
+    const GOOGLE_ICON = '<svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
+
+    function authProviderButtons(returnHash, refToken) {
+      const providers = authProviders();
+      const si = STUDIO.signIn || {};
+      const dis = configError ? 'disabled' : '';
+      const parts = [];
+      if (providers.includes('roblox')) {
+        parts.push(`<button type="button" class="btn btn-primary btn-roblox" data-auth="roblox" ${dis}>${ROBLOX_ICON}<span>${esc(si.buttonLabel || 'Sign in with Roblox')}</span></button>`);
+      }
+      if (providers.includes('google')) {
+        parts.push(`<button type="button" class="btn btn-provider" data-auth="google" ${dis}>${GOOGLE_ICON}<span>Continue with Google</span></button>`);
+      }
+      const testRoles = (BOOTSTRAP && BOOTSTRAP.auth && BOOTSTRAP.auth.testRoles) || [];
+      if (providers.includes('test') && testRoles.length) {
+        parts.push(`
+          <div class="auth-test">
+            <div class="auth-test-head"><span class="auth-test-badge">Test mode</span><span>Sign in as a test account. Turn this off before going live.</span></div>
+            <div class="auth-test-roles">${testRoles.map(r => `<button type="button" class="btn btn-provider" data-auth="test" data-role="${esc(r)}" ${dis}><span class="auth-test-dot" data-role="${esc(r)}"></span><span>${esc(r)}</span></button>`).join('')}</div>
+          </div>`);
+      }
+      const html = parts.join('');
+      return `<div class="auth-providers">${html.includes('btn-roblox') && parts.length > 1 ? html.replace('</button>', '</button><div class="auth-or"><span>or</span></div>') : html}</div>`;
+    }
+
+    function wireAuthProviderButtons(returnHash, refToken) {
+      document.querySelectorAll('[data-auth]').forEach(btn => btn.addEventListener('click', async () => {
+        const kind = btn.dataset.auth;
+        document.querySelectorAll('[data-auth]').forEach(b => { b.disabled = true; });
         btn.setAttribute('aria-busy', 'true');
-        btn.querySelector('span').textContent = 'Redirecting to Roblox...';
-        beginLogin('#/dashboard');
-      });
+        const label = btn.querySelector('span:last-child');
+        if (kind === 'roblox') { if (label) label.textContent = 'Redirecting to Roblox...'; beginLogin(returnHash, refToken); return; }
+        if (kind === 'google') { if (label) label.textContent = 'Redirecting to Google...'; beginLogin(returnHash, refToken, 'google'); return; }
+        if (kind === 'test') {
+          try {
+            const res = await fetchWithTimeout(EDGE_BASE + '/auth/test-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+              body: JSON.stringify({ role: btn.dataset.role })
+            }, 15000);
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok || !json.session) throw new Error(json.error || 'failed');
+            storeToken(json.session);
+            await verifySession();
+            if (isHrAuthed && !securityKnown) await checkSecurityProtocol();
+            try { history.replaceState(null, '', window.location.pathname + returnHash); } catch (e) { }
+            route();
+          } catch (e) {
+            document.querySelectorAll('[data-auth]').forEach(b => { b.disabled = false; });
+            btn.removeAttribute('aria-busy');
+            toast(e.message === 'test_role_missing' ? 'That test role is missing. Run sql/setup.sql to create the starter roles.' : 'Test sign-in failed. Is the API running with AUTH_PROVIDERS including test?', 'err');
+          }
+        }
+      }));
     }
 
     async function handleJoinLink(token) {
@@ -3661,13 +3765,12 @@
               ${info.skillset ? `<div><small>Skillset</small><strong style="color:${safeColor(info.skillset.color)};">${esc(info.skillset.name)}</strong></div>` : ''}
             </div>` : ''}`}
         ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
-        <button type="button" class="btn btn-primary btn-roblox" id="joinSignInBtn" ${configError ? 'disabled' : ''}>${ROBLOX_ICON}<span>Sign in with Roblox</span></button>
+        ${authProviderButtons('#/join/' + encodeURIComponent(token), token)}
         ${authLegalHtml()}`, { noPreview: true });
 
       wireAuthShell();
       if (!loadFailed) setPendingInvite(token);
-      const btn = document.getElementById('joinSignInBtn');
-      if (btn) btn.addEventListener('click', () => beginLogin('#/join/' + encodeURIComponent(token), token));
+      wireAuthProviderButtons('#/join/' + encodeURIComponent(token), token);
     }
 
     const JOIN_LINK_ERROR_MESSAGES = {
@@ -5794,16 +5897,16 @@
     function tourSteps() {
       const steps = [
         {
-          find: () => document.querySelector('.topbar .hr-pill[href="#/home"]'),
-          title: 'Home is the new starting point',
+          find: () => document.querySelector('.shell-link[href="#/home"]'),
+          title: 'Home is your starting point',
           body: 'It shows what needs you today, and it changes depending on whether you build, run a team, or run the studio.',
-          place: 'below'
+          place: 'right'
         },
         {
-          find: () => document.querySelector('.topbar .acct-menu summary'),
-          title: 'Four menus instead of eight buttons',
-          body: 'Money, Work, People and Admin. Everything that was here before is still here, just one level in.',
-          place: 'below'
+          find: () => document.querySelector('.shell-search'),
+          title: 'Search jumps anywhere',
+          body: 'Press Ctrl K (or Cmd K) to find any page, person or setting without hunting through the menu.',
+          place: 'right'
         }
       ];
 
@@ -5818,28 +5921,28 @@
 
       if (hasPermission('dashboard.view')) {
         steps.push({
-          find: () => document.querySelector('.topbar .acct-menu summary'),
+          find: () => document.querySelector('.shell-link[href="#/runs"]') || document.querySelector('.shell-link[href="#/dashboard"]'),
           title: 'Payments go out in runs',
-          body: 'Approved work collects in one open run. Freeze it on the cut-off, pay the sheet, close it. Under Money, Payment runs.',
-          place: 'below'
+          body: 'Approved work collects in one open run. Freeze it on the cut-off, pay the sheet, close it.',
+          place: 'right'
         });
       }
 
       if (hasPermission('settings.manage_rate')) {
         steps.push({
-          find: () => document.querySelector('.topbar .acct-menu summary'),
+          find: () => document.querySelector('.shell-link[href="#/manage"]'),
           title: 'Pay rates are written down',
-          body: 'Set a standard amount per kind of job once, under Admin, Settings. Same work, same pay, whoever assigns it.',
-          place: 'below'
+          body: 'Set a standard amount per kind of job once in Settings. Same work, same pay, whoever assigns it.',
+          place: 'right'
         });
       }
 
       if (hasPermission('security.manage') || hasPermission('roles.manage')) {
         steps.push({
-          find: () => document.querySelector('.topbar .acct-menu summary'),
+          find: () => document.querySelector('.shell-link[href="#/security"]'),
           title: 'Security has a switch',
-          body: 'Under Admin. Raising the protocol stops every payment on the site, including your own. Lockdown also shuts everyone else out.',
-          place: 'below'
+          body: 'Raising the protocol stops every payment, including your own. Lockdown also shuts everyone else out.',
+          place: 'right'
         });
       }
 
@@ -8295,207 +8398,6 @@
       syncAccess(false);
     }
 
-    // ---------------------------------------------------------------------------------
-    // Settings > Branding: everything that makes this hub look like the studio's own.
-    // Saved to the API (app_settings.branding) and applied for everyone immediately.
-    // ---------------------------------------------------------------------------------
-    const BRANDING_FEATURES = [
-      ['payments', 'Payments'], ['claims', 'Payment requests'], ['paymentRuns', 'Payment runs'],
-      ['analytics', 'Analytics'], ['teams', 'Teams & games'], ['recruitment', 'Recruitment'],
-      ['staffDatabase', 'Staff database'], ['security', 'Security centre'], ['audit', 'Audit log'],
-      ['backups', 'Backups'], ['broadcasts', 'Broadcasts'], ['discord', 'Discord'], ['pushNotifications', 'Push notifications']
-    ];
-    const BRANDING_METHODS = [['PAYPAL', 'PayPal'], ['DEVEX_ROBUX', 'Robux'], ['VENMO', 'Venmo'], ['BANK_TRANSFER', 'Bank transfer']];
-    const BRANDING_CURRENCIES = [['ROBUX', 'Robux'], ['USD', 'USD']];
-    let brandingState = null;
-
-    async function mountBrandingSettings(root) {
-      if (!root) return;
-      if (!brandingState) {
-        brandingState = { loading: true, saving: false, error: null, saved: false, draft: null, overrides: {} };
-        root.innerHTML = '<div class="panel"><p class="hint" style="margin:0;">Loading branding...</p></div>';
-        try {
-          const json = await callHrData('get_branding');
-          const eff = json.data.effective;
-          brandingState.overrides = json.data.overrides || {};
-          brandingState.draft = JSON.parse(JSON.stringify({
-            studio: eff.studio, theme: eff.theme, signIn: eff.signIn, features: eff.features,
-            payments: eff.payments, legal: eff.legal || { tos: '', aup: '' }
-          }));
-        } catch (e) {
-          brandingState.error = e.message;
-        }
-        brandingState.loading = false;
-        root = document.getElementById('brandingMount');
-        if (!root) return;
-      }
-      paintBranding(root);
-    }
-
-    function paintBranding(root) {
-      const st = brandingState;
-      if (!st.draft) {
-        root.innerHTML = `<div class="panel"><div class="error-box"><span>${esc(st.error || 'Could not load branding.')}</span></div></div>`;
-        return;
-      }
-      const d = st.draft;
-      const v = (x) => esc(x == null ? '' : String(x));
-      const text = (group, key, label, opts) => `
-        <div class="field"><label for="br_${group}_${key}">${esc(label)}${opts && opts.hint ? ` <span class="hint">${esc(opts.hint)}</span>` : ''}</label>
-          <input type="text" id="br_${group}_${key}" data-br="${group}.${key}" value="${v(d[group][key])}" ${opts && opts.max ? `maxlength="${opts.max}"` : ''} placeholder="${v(opts && opts.placeholder)}"></div>`;
-      const area = (group, key, label, rows, hint) => `
-        <div class="field"><label for="br_${group}_${key}">${esc(label)}${hint ? ` <span class="hint">${esc(hint)}</span>` : ''}</label>
-          <textarea id="br_${group}_${key}" data-br="${group}.${key}" rows="${rows || 3}">${v(d[group][key])}</textarea></div>`;
-      const color = (key, label) => `
-        <div class="field"><label>${esc(label)}</label>
-          <div class="brand-color"><input type="color" data-br-color="${key}" value="${v(d.theme[key])}"><input type="text" data-br="theme.${key}" value="${v(d.theme[key])}" maxlength="7"></div></div>`;
-      const check = (path, value, label, on) => `<label><input type="checkbox" data-br-check="${path}" value="${esc(value)}" ${on ? 'checked' : ''}> ${esc(label)}</label>`;
-
-      root.innerHTML = `
-      <div class="heading-block" id="sec-branding">
-        <h2 class="sec-title">Branding</h2>
-        <p class="sub">Your studio's name, logo, colours, sign-in page and which parts of the hub are switched on. Saved changes apply to everyone right away.</p>
-      </div>
-      ${st.error ? `<div class="error-box" style="margin-bottom:14px;"><span>${esc(st.error)}</span></div>` : ''}
-      ${st.saved ? `<div class="confirm-box" style="margin-bottom:14px;"><div class="icon">&#10003;</div><div class="txt"><strong>Branding saved</strong><span>Everyone sees the new look on their next page load.</span></div></div>` : ''}
-      <div class="brand-grid">
-        <div class="panel">
-          <div class="brand-section" style="border-top:none;padding-top:0;margin-top:0;">
-            <h3>Studio</h3><p class="hint">How your studio is named across the hub, emails and Discord messages.</p>
-            <div class="field-row">${text('studio', 'name', 'Studio name', { max: 60 })}${text('studio', 'productName', 'Product name', { max: 40, placeholder: 'Hub' })}</div>
-            <div class="field-row">${text('studio', 'shortName', 'Initials', { max: 4, hint: '(shown when there is no logo)' })}${text('studio', 'logoUrl', 'Logo URL', { placeholder: 'https://... or favicon.ico' })}</div>
-            <div class="field-row">${text('studio', 'website', 'Website', { placeholder: 'https://yourstudio.com' })}${text('studio', 'websiteLabel', 'Website label', { placeholder: 'yourstudio.com' })}</div>
-            ${text('studio', 'discordInviteUrl', 'Discord invite link', { placeholder: 'https://discord.gg/...' })}
-          </div>
-          <div class="brand-section">
-            <h3>Look</h3><p class="hint">Your brand colour drives buttons, highlights and charts. Pick a lighter variant for dark mode.</p>
-            <div class="field-row">${color('accent', 'Brand colour')}${color('accentDark', 'Brand colour (dark mode)')}</div>
-            <div class="field-row">
-              <div class="field"><label for="br_theme_radius">Corner roundness <span class="hint">(${v(d.theme.radius)}px)</span></label><input type="range" id="br_theme_radius" data-br-num="theme.radius" min="4" max="28" value="${v(d.theme.radius)}"></div>
-              <div class="field"><label for="br_theme_mode">Default mode</label><select id="br_theme_mode" data-br="theme.defaultMode"><option value="light" ${d.theme.defaultMode !== 'dark' ? 'selected' : ''}>Light</option><option value="dark" ${d.theme.defaultMode === 'dark' ? 'selected' : ''}>Dark</option></select></div>
-            </div>
-          </div>
-          <div class="brand-section">
-            <h3>Sign-in page</h3><p class="hint">Use {studio} anywhere to insert your studio's name.</p>
-            <div class="field-row">${text('signIn', 'title', 'Card title', { max: 40 })}${text('signIn', 'buttonLabel', 'Button label', { max: 40 })}</div>
-            ${area('signIn', 'subtitle', 'Card text', 2)}
-            ${text('signIn', 'headline', 'Headline', { max: 80 })}
-            ${area('signIn', 'tagline', 'Tagline', 2)}
-            ${text('signIn', 'backgroundImage', 'Background image URL', { hint: '(leave empty for the built-in gradient)', placeholder: 'https://.../background.jpg' })}
-            ${area('signIn', 'footerNote', 'Footer note', 2)}
-            <div class="field-row">${text('signIn', 'termsUrl', 'Terms link', { placeholder: '#/tos' })}${text('signIn', 'privacyUrl', 'Privacy link', { placeholder: '#/aup' })}</div>
-            <div class="brand-toggles">${check('signIn.showPreview', 'on', 'Show the product preview', d.signIn.showPreview !== false)}</div>
-          </div>
-          <div class="brand-section">
-            <h3>Features</h3><p class="hint">Switched-off features disappear from the menu and their actions are refused by the server.</p>
-            <div class="brand-toggles">${BRANDING_FEATURES.map(([k, label]) => check('features', k, label, d.features[k] !== false)).join('')}</div>
-          </div>
-          <div class="brand-section">
-            <h3>Payouts</h3><p class="hint">Which currencies requests can be logged in, and which payout methods staff can choose.</p>
-            <div class="brand-toggles" style="margin-bottom:10px;">${BRANDING_CURRENCIES.map(([k, label]) => check('payments.currencies', k, label, (d.payments.currencies || []).includes(k))).join('')}</div>
-            <div class="brand-toggles">${BRANDING_METHODS.map(([k, label]) => check('payments.methods', k, label, (d.payments.methods || []).includes(k))).join('')}</div>
-          </div>
-          <div class="brand-section">
-            <h3>Legal</h3><p class="hint">Leave empty to use the built-in Terms and Acceptable Use Policy with your studio's name filled in.</p>
-            ${area('legal', 'tos', 'Terms of Service', 5)}
-            ${area('legal', 'aup', 'Acceptable Use Policy', 5)}
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;border-top:1px solid var(--line);padding-top:16px;margin-top:10px;">
-            <button type="button" class="btn btn-ghost" id="brandResetBtn" ${st.saving ? 'disabled' : ''}>Reset to file defaults</button>
-            <button type="button" class="btn btn-primary" id="brandSaveBtn" style="width:auto;" ${st.saving ? 'disabled' : ''}>${st.saving ? 'Saving...' : 'Save branding'}</button>
-          </div>
-        </div>
-        <div class="brand-preview" id="brandPreview"></div>
-      </div>`;
-
-      paintBrandingPreview();
-
-      root.querySelectorAll('[data-br]').forEach(el => el.addEventListener('input', () => {
-        const [g, k] = el.dataset.br.split('.');
-        d[g][k] = el.value;
-        if (g === 'theme' && /^#[0-9a-fA-F]{6}$/.test(el.value)) {
-          const picker = root.querySelector(`[data-br-color="${k}"]`);
-          if (picker) picker.value = el.value;
-        }
-        st.saved = false;
-        paintBrandingPreview();
-      }));
-      root.querySelectorAll('[data-br-color]').forEach(el => el.addEventListener('input', () => {
-        const k = el.dataset.brColor;
-        d.theme[k] = el.value.toUpperCase();
-        const txt = root.querySelector(`[data-br="theme.${k}"]`);
-        if (txt) txt.value = d.theme[k];
-        paintBrandingPreview();
-      }));
-      root.querySelectorAll('[data-br-num]').forEach(el => el.addEventListener('input', () => {
-        const [g, k] = el.dataset.brNum.split('.');
-        d[g][k] = Number(el.value);
-        const lab = root.querySelector(`label[for="${el.id}"] .hint`);
-        if (lab) lab.textContent = `(${el.value}px)`;
-      }));
-      root.querySelectorAll('[data-br-check]').forEach(el => el.addEventListener('change', () => {
-        const path = el.dataset.brCheck;
-        if (path === 'signIn.showPreview') d.signIn.showPreview = el.checked;
-        else if (path === 'features') d.features[el.value] = el.checked;
-        else {
-          const [g, k] = path.split('.');
-          const set = new Set(d[g][k] || []);
-          if (el.checked) set.add(el.value); else set.delete(el.value);
-          d[g][k] = Array.from(set);
-        }
-      }));
-
-      const save = async (payload) => {
-        st.saving = true; st.error = null; st.saved = false;
-        paintBranding(root);
-        try {
-          const json = await callHrData('save_branding', { branding: payload });
-          const eff = json.data.effective;
-          st.draft = JSON.parse(JSON.stringify({ studio: eff.studio, theme: eff.theme, signIn: eff.signIn, features: eff.features, payments: eff.payments, legal: eff.legal || { tos: '', aup: '' } }));
-          st.saved = true;
-          try { localStorage.removeItem(BOOTSTRAP_CACHE_KEY); } catch (e) { }
-          await ensureBootstrap(true).catch(() => { });
-        } catch (e) {
-          st.error = e.message;
-        }
-        st.saving = false;
-        const live = document.getElementById('brandingMount');
-        if (live) paintBranding(live);
-      };
-      const saveBtn = document.getElementById('brandSaveBtn');
-      if (saveBtn) saveBtn.addEventListener('click', () => {
-        if (!(d.payments.currencies || []).length) { st.error = 'Keep at least one currency switched on.'; paintBranding(root); return; }
-        if (!(d.payments.methods || []).length) { st.error = 'Keep at least one payout method switched on.'; paintBranding(root); return; }
-        save(d);
-      });
-      const resetBtn = document.getElementById('brandResetBtn');
-      if (resetBtn) resetBtn.addEventListener('click', async () => {
-        if (!confirm('Reset branding? This clears everything saved here and goes back to the values in studio.config.json.')) return;
-        save({});
-      });
-    }
-
-    function paintBrandingPreview() {
-      const box = document.getElementById('brandPreview');
-      if (!box || !brandingState || !brandingState.draft) return;
-      const d = brandingState.draft;
-      const hex = /^#[0-9a-fA-F]{6}$/;
-      const accent = hex.test(d.theme.accent || '') ? d.theme.accent : '#6366F1';
-      const interp = (t) => String(t || '').replace(/\{studio\}/g, d.studio.name || 'Studio');
-      const bg = d.signIn.backgroundImage && /^https:\/\/[^"'()\s<>]+$/.test(d.signIn.backgroundImage) ? d.signIn.backgroundImage : '';
-      box.innerHTML = `
-        <div class="brand-preview-hero"${bg ? ` style="background-image:linear-gradient(rgba(0,0,0,.25),rgba(0,0,0,.25)),url('${esc(bg)}')"` : ''}>
-          <strong>${esc(d.signIn.headline || 'Paid for what you build.')}</strong>
-          <span>${esc(interp(d.signIn.tagline))}</span>
-        </div>
-        <div class="brand-preview-card">
-          <div class="who">${d.studio.logoUrl ? `<img src="${esc(d.studio.logoUrl)}" alt="">` : ''}${esc(d.studio.name || 'Studio')} ${esc(d.studio.productName || 'Hub')}</div>
-          <h4>${esc(d.signIn.title || 'Sign in')}</h4>
-          <p>${esc(interp(d.signIn.subtitle))}</p>
-          <div class="fake-btn" style="background:${accent};">${esc(d.signIn.buttonLabel || 'Sign in with Roblox')}</div>
-        </div>`;
-    }
-
     function renderManagePanel() {
       const myGen = renderGen;
       const canManageGames = hasPermission('settings.manage_games');
@@ -8505,20 +8407,18 @@
       const canManageRoles = hasPermission('roles.manage');
       const canManageOnboarding = hasPermission('settings.manage_onboarding');
       const canManageBroadcasts = hasPermission('broadcasts.manage');
-      const canManageBranding = hasPermission('settings.manage_branding');
 
-      if (!canManageGames && !canManageRate && !canManageGroups && !canManageBaseAccess && !canManageRoles && !canManageOnboarding && !canManageBroadcasts && !canManageBranding) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+      if (!canManageGames && !canManageRate && !canManageGroups && !canManageBaseAccess && !canManageRoles && !canManageOnboarding && !canManageBroadcasts) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
 
       const manageTabDefs = [
-        { id: 'access', label: 'Access', enabled: canManageBaseAccess || canManageGroups },
-        { id: 'games', label: 'Games & rate', enabled: canManageGames || canManageRate },
-        { id: 'rates', label: 'Rate card', enabled: canManageRate },
-        { id: 'roles', label: 'Roles', enabled: canManageRoles },
-        { id: 'teams', label: 'Teams & skills', enabled: canManageOnboarding },
-        { id: 'onboarding', label: 'Onboarding', enabled: canManageOnboarding },
-        { id: 'recruitment', label: 'Recruitment', enabled: canManageOnboarding },
-        { id: 'broadcasts', label: 'Broadcasts', enabled: canManageBroadcasts && featureOn('broadcasts') },
-        { id: 'branding', label: 'Branding', enabled: canManageBranding }
+        { id: 'access', group: 'Access', label: 'Sign-in', desc: 'Who can get in', enabled: canManageBaseAccess || canManageGroups },
+        { id: 'roles', group: 'Access', label: 'Roles', desc: 'Permissions and rank', enabled: canManageRoles },
+        { id: 'games', group: 'Payments', label: 'Games & DevEx', desc: 'Games, DevEx rate, minimums', enabled: canManageGames || canManageRate },
+        { id: 'rates', group: 'Payments', label: 'Rate card', desc: 'Standard pay per job', enabled: canManageRate },
+        { id: 'teams', group: 'Team', label: 'Teams & skills', desc: 'Structure of the studio', enabled: canManageOnboarding },
+        { id: 'onboarding', group: 'Team', label: 'Invites', desc: 'Links that bring people in', enabled: canManageOnboarding },
+        { id: 'recruitment', group: 'Team', label: 'Recruitment', desc: 'Positions and hiring', enabled: canManageOnboarding && featureOn('recruitment') },
+        { id: 'broadcasts', group: 'Team', label: 'Announcements', desc: 'Messages to everyone', enabled: canManageBroadcasts && featureOn('broadcasts') }
       ].filter(t => t.enabled);
       const requestedManageTab = parseHashQuery().get('tab');
       let manageTab = manageTabDefs.some(t => t.id === requestedManageTab) ? requestedManageTab : (manageTabDefs.length ? manageTabDefs[0].id : null);
@@ -8655,21 +8555,16 @@
     ${topbar()}
     <div class="shell">
       <div class="heading-block">
-        <h1>Manage</h1>
-        <p class="sub">Changes apply to everyone as soon as they're saved.</p>
+        <h1>Settings</h1>
+        <p class="sub">How your studio runs. Changes apply to everyone as soon as they're saved.</p>
       </div>
 
       <div class="manage-layout">
         ${manageTabDefs.length > 1 ? `
-        <div class="manage-side">
-          ${manageTabDefs.map(t => `
-            <button type="button" data-manage-tab="${t.id}" style="text-align:left;padding:9px 12px;border-radius:8px;border:none;background:${manageTab === t.id ? 'var(--accent-soft)' : 'transparent'};color:${manageTab === t.id ? 'var(--accent)' : 'var(--ink)'};font-weight:${manageTab === t.id ? '600' : '500'};font-size:13.5px;cursor:pointer;">${esc(t.label)}</button>
-            ${manageTab === t.id && (subsectionsByTab[t.id] || []).length > 1 ? `
-            <div style="display:flex;flex-direction:column;gap:1px;margin:2px 0 10px 12px;border-left:2px solid var(--line);padding-left:10px;">
-              ${subsectionsByTab[t.id].map(s => `<button type="button" data-manage-jump="${s.id}" style="text-align:left;background:none;border:none;padding:6px 8px;border-radius:6px;color:var(--ink-soft);font-size:12.5px;cursor:pointer;">${esc(s.label)}</button>`).join('')}
-            </div>` : ''}
-          `).join('')}
-        </div>` : ''}
+        <nav class="manage-side" aria-label="Settings sections">
+          ${manageTabDefs.map((t, i) => `${i === 0 || manageTabDefs[i - 1].group !== t.group ? `<div class="ms-group">${esc(t.group)}</div>` : ''}
+            <button type="button" data-manage-tab="${t.id}" class="${manageTab === t.id ? 'on' : ''}"${manageTab === t.id ? ' aria-current="page"' : ''}><span>${esc(t.label)}</span><small>${esc(t.desc)}</small></button>`).join('')}
+        </nav>` : ''}
 
         <div style="flex:1;min-width:0;">
 
@@ -8677,11 +8572,11 @@
       ${canManageBaseAccess ? `
       <div class="heading-block" id="sec-signin">
         <h2 class="sec-title">Who can sign in</h2>
-        <p class="sub">Someone can sign in if they're in at least one of the Roblox groups below (at that group's minimum rank, if set), or if their linked Discord account is in at least one of the servers below - handy for keeping a separate tester group/server alongside the main one. Anyone who matches neither gets sent to the application flow instead. Leave both lists empty to let any Roblox account sign in.</p>
+        <p class="sub">People get in if they're in one of these Roblox groups (at the minimum rank, if set) or one of these Discord servers. Anyone given a role, a team or an invite link also gets in. Everyone else is sent to the application form, or turned away if recruitment is off.</p>
       </div>
       <div class="panel" style="max-width:640px;margin-bottom:20px;">
         ${baseAccessGroupsError ? `<div class="error-box"><span>${esc(baseAccessGroupsError)}</span></div>` : ''}
-        ${baseAccessGroupsLoading ? `<div class="dash-loading">Loading groups...</div>` : baseAccessGroups.length === 0 ? `<div class="empty-note">No sign-in groups configured yet - any Roblox account can currently sign in (unless a Discord server is configured below).</div>` : baseAccessGroups.map(g => `
+        ${baseAccessGroupsLoading ? `<div class="dash-loading">Loading groups...</div>` : baseAccessGroups.length === 0 ? `<div class="empty-note">No sign-in groups yet. Until you add one, only people with a role, a team or an invite link can sign in.</div>` : baseAccessGroups.map(g => `
           <div class="role-row">
             <div class="role-row-top">
               <div>
@@ -8777,7 +8672,7 @@
 
       ${manageTab === 'games' ? `
       <div class="heading-block" id="sec-payroll">
-        <h2 class="sec-title">Games &amp; rate</h2>
+        <h2 class="sec-title">Games &amp; DevEx</h2>
         <p class="sub">Set the DevEx conversion rate and keep the list of games people can log work against.</p>
       </div>
       <div class="manage-grid">
@@ -8831,7 +8726,8 @@
 
       ${manageTab === 'access' ? `
       ${canManageGroups ? `
-      <div class="heading-block" id="sec-eligibility" style="margin-top:${canManageBaseAccess ? '36px' : '0'};">
+      <details class="advanced"${requiredGroups.length ? ' open' : ''}><summary>Payout eligibility <small>Optional: groups people must be in to be paid</small></summary><div class="advanced-body">
+      <div class="heading-block" id="sec-eligibility">
         <h2 class="sec-title">Eligibility groups</h2>
         <p class="sub">Someone must be in every group listed here to be marked eligible for payout.</p>
       </div>
@@ -8869,7 +8765,7 @@
           </div>
           <button type="button" class="btn btn-ok" id="addGroupBtn" ${addingGroup ? 'disabled' : ''}>${addingGroup ? 'Adding...' : 'Add group'}</button>
         </div>
-      </div>` : ''}
+      </div></div></details>` : ''}
       ` : ''}
 
       ${manageTab === 'roles' && canManageRoles ? `
@@ -9084,6 +8980,7 @@
 
       ` : ''}
       ${manageTab === 'onboarding' && canManageOnboarding ? `
+      <details class="advanced"><summary>How onboarding works <small>The steps every new person goes through</small></summary><div class="advanced-body">
       <div class="heading-block" id="sec-ob-overview">
         <h2 class="sec-title">How onboarding works</h2>
         <p class="sub">Everyone new goes through the same setup page after signing in. It shows one step at a time and remembers where they got to.</p>
@@ -9098,7 +8995,8 @@
         <p class="hint" style="margin:10px 0 0;">Recruits hired through Recruitment go through the same Roblox group step after they're finalised.</p>
       </div>
 
-      <div class="heading-block" id="sec-invites" style="margin-top:36px;">
+      </div></details>
+      <div class="heading-block" id="sec-invites" style="margin-top:20px;">
         <h2 class="sec-title">Invite links</h2>
         <p class="sub">Pick a team, skill and optional role, then send the link to the person you're bringing in. They sign in through it and the setup page takes them through the rest.</p>
       </div>
@@ -9151,7 +9049,8 @@
       </div>
 
       
-      <div class="heading-block" id="sec-onboarding-flow" style="margin-top:36px;">
+      <details class="advanced" style="margin-top:28px;"><summary>Roblox group step <small>Auto-join and rank new people in a Roblox group</small></summary><div class="advanced-body">
+      <div class="heading-block" id="sec-onboarding-flow">
         <h2 class="sec-title">Roblox group step</h2>
         <p class="sub">Both invite links and finalised recruits go through this. The bot DMs them to join this Roblox group, then ranks them automatically. Ranking needs a Roblox Open Cloud API key (ROBLOX_GROUP_API_KEY) on the bot, created under your own account with read/write access to this group. Without it, they're asked to see a lead instead.</p>
       </div>
@@ -9176,9 +9075,9 @@
           <input type="number" id="onboardingGroupRoleId" placeholder="e.g. 5" value="${onboardingGroupConfig.groupRoleId != null ? esc(onboardingGroupConfig.groupRoleId) : ''}">
           <p class="sub" style="margin:6px 0 0;">Find this in the group's role management page - it's not the same as the rank number shown to members.</p>
         </div>
-        <button type="button" class="btn btn-primary" id="saveOnboardingGroupConfigBtn" ${savingOnboardingGroupConfig ? 'disabled' : ''}>${savingOnboardingGroupConfig ? 'Saving...' : 'Save settings'}</button>
+        <button type="button" class="btn btn-primary" id="saveOnboardingGroupConfigBtn" style="width:auto;" ${savingOnboardingGroupConfig ? 'disabled' : ''}>${savingOnboardingGroupConfig ? 'Saving...' : 'Save settings'}</button>
         `}
-      </div>` : ''}
+      </div></div></details>` : ''}
       ${manageTab === 'recruitment' && canManageOnboarding ? `
       <div class="heading-block" id="sec-positions">
         <h2 class="sec-title">Positions</h2>
@@ -9206,7 +9105,8 @@
         </div>
       </div>
 
-      <div class="heading-block" id="sec-autohire" style="margin-top:36px;">
+      <details class="advanced" style="margin-top:28px;"><summary>Hiring automation <small>Auto-hire roles, grace period, sign-off and finalise</small></summary><div class="advanced-body">
+      <div class="heading-block" id="sec-autohire">
         <h2 class="sec-title">Auto-hire settings</h2>
         <p class="sub">Control what happens automatically when someone is hired: which role(s) they're given, and how long HR has to respond before an application accepts itself.</p>
       </div>
@@ -9268,10 +9168,10 @@
           </select>
           <p class="sub" style="margin:6px 0 0;">Only members with this role who are also assigned to the recruit's team (via team assignments), or anyone granted the recruitment.finalise permission directly, get notified and can finalise.</p>
         </div>
-        <button type="button" class="btn btn-primary" id="saveApprovalConfigBtn" ${savingApprovalConfig ? 'disabled' : ''}>${savingApprovalConfig ? 'Saving...' : 'Save settings'}</button>
+        <button type="button" class="btn btn-primary" id="saveApprovalConfigBtn" style="width:auto;" ${savingApprovalConfig ? 'disabled' : ''}>${savingApprovalConfig ? 'Saving...' : 'Save settings'}</button>
         `}
       </div>
-
+      </div></details>
 ` : ''}
 
       ${manageTab === 'broadcasts' && canManageBroadcasts ? `
@@ -9331,14 +9231,12 @@
       </div>
       ` : ''}
 
-      ${manageTab === 'branding' && canManageBranding ? '<div id="brandingMount"></div>' : ''}
 
         </div>
       </div>
     </div>`;
 
         wireTopbarSignOut();
-        if (manageTab === 'branding' && canManageBranding) mountBrandingSettings(document.getElementById('brandingMount'));
 
         document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', () => { manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); if (manageTab === 'rates' && !rateBandsLoaded) loadRateBands(); }));
 

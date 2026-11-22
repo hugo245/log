@@ -14,7 +14,8 @@ const warn = (m) => { warnings++; console.log('  ! ' + m); };
 const ok = (m) => console.log('  ✓ ' + m);
 
 console.log('\nEnvironment');
-['APP_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'ROBLOX_CLIENT_ID', 'ROBLOX_CLIENT_SECRET', 'ROBLOX_REDIRECT_URI']
+const usesRoblox = String(process.env.AUTH_PROVIDERS || 'roblox').split(',').map(x => x.trim()).includes('roblox');
+['APP_ORIGIN', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', ...(usesRoblox ? ['ROBLOX_CLIENT_ID', 'ROBLOX_CLIENT_SECRET', 'ROBLOX_REDIRECT_URI'] : [])]
     .forEach(k => (process.env[k] ? ok(k) : bad(`${k} is missing (required)`)));
 if (!process.env.SESSION_SECRET) warn('SESSION_SECRET is not set: generate one with  node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"');
 else if (process.env.SESSION_SECRET.length < 32) bad('SESSION_SECRET should be at least 32 characters');
@@ -25,13 +26,21 @@ if (process.env.APP_ORIGIN && !/^https:\/\//.test(process.env.APP_ORIGIN) && !/l
     .forEach(k => { if (!process.env[k]) warn(`${k} not set (Discord features stay off)`); });
 if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) warn('VAPID keys not set (browser push notifications stay off)');
 
+console.log('\nSign-in');
+const providers = String(process.env.AUTH_PROVIDERS || 'roblox').split(',').map(x => x.trim()).filter(Boolean);
+ok(`providers: ${providers.join(', ')}`);
+if (providers.includes('test')) warn('TEST MODE is on: anyone can sign in as a test Owner. Remove "test" from AUTH_PROVIDERS before going live.');
+if (providers.includes('google') && !(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI)) bad('google is in AUTH_PROVIDERS but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI are not all set');
+if (!process.env.OWNER_ROBLOX_IDS && !process.env.OWNER_EMAILS && !providers.includes('test')) warn('No OWNER_ROBLOX_IDS or OWNER_EMAILS: on a fresh database nobody will be able to sign in to set things up');
+else ok('owner bootstrap configured');
+
 console.log('\nstudio.config.json');
 try {
     const raw = JSON.parse(fs.readFileSync(path.join(root, 'studio.config.json'), 'utf8'));
     const studio = require('../lib/studio');
     const cfg = studio.get();
     ok(`studio name: ${cfg.studio.name}`);
-    if (cfg.studio.name === 'Your Studio') warn('studio.name is still the default');
+    if (cfg.studio.name === 'Studio Panel') warn('studio.name is still the default "Studio Panel"');
     if (!/^#[0-9a-fA-F]{6}$/.test((raw.theme || {}).accent || cfg.theme.accent)) bad('theme.accent must be a #RRGGBB colour');
     const dropped = JSON.stringify(raw).length - JSON.stringify(studio.sanitizeBranding(raw)).length;
     if (dropped > 200 && !raw.discord && !raw.moneyRules) warn('some values in studio.config.json were ignored as invalid (check URLs and colours)');

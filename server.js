@@ -7,6 +7,16 @@ const { createClient } = require('@supabase/supabase-js');
 let webpush = null;
 try { webpush = require('web-push'); } catch (e) { }
 require('dotenv').config();
+// Every outgoing HTTP call (Roblox, Discord, Google, Supabase) gets a timeout unless the
+// caller set its own, so one slow upstream can never hang a request forever.
+const OUTBOUND_TIMEOUT_MS = Number(process.env.OUTBOUND_TIMEOUT_MS) || 25000;
+const nativeFetch = global.fetch;
+global.fetch = (url, options) => {
+    const opts = options || {};
+    if (opts.signal) return nativeFetch(url, opts);
+    return nativeFetch(url, { ...opts, signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS) });
+};
+
 const security = require('./lib/security');
 const studio = require('./lib/studio');
 const { TtlCache } = require('./lib/cache');
@@ -21,6 +31,37 @@ const ROBLOX_CLIENT_ID = process.env.ROBLOX_CLIENT_ID;
 const ROBLOX_CLIENT_SECRET = process.env.ROBLOX_CLIENT_SECRET;
 const ROBLOX_REDIRECT_URI = process.env.ROBLOX_REDIRECT_URI;
 const ROBLOX_GROUP_API_KEY = process.env.ROBLOX_GROUP_API_KEY;
+
+// ---------------------------------------------------------------------------
+// Sign-in providers: roblox, google, test. AUTH_PROVIDERS=roblox,google
+// "test" adds one-click test accounts (Owner / Manager / Staff) for demos and QA.
+// Never enable it on a live studio.
+// ---------------------------------------------------------------------------
+const AUTH_PROVIDERS = String(process.env.AUTH_PROVIDERS || 'roblox')
+    .split(',').map(s => s.trim().toLowerCase()).filter(p => ['roblox', 'google', 'test'].includes(p));
+if (!AUTH_PROVIDERS.length) AUTH_PROVIDERS.push('roblox');
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI;
+const GOOGLE_ALLOWED_DOMAINS = String(process.env.GOOGLE_ALLOWED_DOMAINS || '').split(',').map(s => s.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+const OWNER_ROBLOX_IDS = new Set(String(process.env.OWNER_ROBLOX_IDS || '').split(',').map(s => s.trim()).filter(Boolean));
+const OWNER_EMAILS = new Set(String(process.env.OWNER_EMAILS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+const TEST_ROLES = ['Owner', 'Manager', 'Staff'];
+// People who sign in without Roblox get ids from this range (see accounts table).
+const LOCAL_ID_MIN = 1000000000000000;
+const isLocalUserId = (id) => Number(id) >= LOCAL_ID_MIN;
+
+function providerEnabled(p) { return AUTH_PROVIDERS.includes(p); }
+if (providerEnabled('google') && !(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET && GOOGLE_REDIRECT_URI)) {
+    console.warn('AUTH_PROVIDERS includes google but GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI are not all set - Google sign-in is disabled.');
+    AUTH_PROVIDERS.splice(AUTH_PROVIDERS.indexOf('google'), 1);
+}
+if (providerEnabled('test')) {
+    console.warn('**************************************************************************');
+    console.warn('* TEST MODE IS ON: anyone can sign in as a test Owner / Manager / Staff. *');
+    console.warn('* Remove "test" from AUTH_PROVIDERS before real people use this panel.   *');
+    console.warn('**************************************************************************');
+}
 const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000; // sliding: renewed on activity (see getSession)
 const STATE_LIFETIME_MS = 10 * 60 * 1000;
 const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
@@ -63,7 +104,8 @@ if (webpush && PUSH_CONFIGURED) {
 
 const requiredEnv = {
     APP_ORIGIN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-    ROBLOX_CLIENT_ID, ROBLOX_CLIENT_SECRET, ROBLOX_REDIRECT_URI
+    // Roblox OAuth credentials are only needed when Roblox sign-in is switched on.
+    ...(AUTH_PROVIDERS.includes('roblox') ? { ROBLOX_CLIENT_ID, ROBLOX_CLIENT_SECRET, ROBLOX_REDIRECT_URI } : {})
 };
 for (const key of Object.keys(requiredEnv)) {
     if (!requiredEnv[key]) {
@@ -109,8 +151,7 @@ const PERMISSIONS = [
     'payouts.view_bank_details',
     'security.manage',
     'teams.view',
-    'teams.manage',
-    'settings.manage_branding'
+    'teams.manage'
 ];
 
 const TOS_CONTENT = `Last updated: August 2026
@@ -171,7 +212,7 @@ const ONBOARDING_STEPS = [
     {
         id: 'welcome',
         type: 'intro',
-        title: 'Welcome to the {studio} HR tool',
+        title: 'Welcome to {studio}',
         description: 'A quick tour before you get started.',
         content: `This tool is how {studio} staff log completed work, submit and track payment requests, and see what's been paid.
 
@@ -551,7 +592,7 @@ app.use((err, req, res, next) => {
 
 const authLimiter = security.rateLimitByIp('auth', 40, 60 * 1000);
 const publicLimiter = security.rateLimitByIp('public', 120, 60 * 1000);
-['/roblox-auth-start', '/roblox-auth-callback', '/discord-auth-start', '/discord-auth-start-staff', '/discord-auth-callback'].forEach(p => app.use(p, authLimiter));
+['/roblox-auth-start', '/roblox-auth-callback', '/google-auth-start', '/google-auth-callback', '/auth/test-login', '/discord-auth-start', '/discord-auth-start-staff', '/discord-auth-callback'].forEach(p => app.use(p, authLimiter));
 ['/recruitment', '/recruit-session', '/onboarding-link-preview', '/api/roblox', '/public'].forEach(p => app.use(p, publicLimiter));
 
 app.get('/ping', (req, res) => {
@@ -562,8 +603,15 @@ const AVATAR_TTL_MS = 60 * 60 * 1000;
 const avatarCache = new Map();
 
 async function getAvatarUrls(userIds) {
-    const ids = [...new Set((userIds || []).map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0))];
+    const all = [...new Set((userIds || []).map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0))];
     const result = {};
+    // Google / test accounts: their picture comes from the accounts table, not Roblox.
+    const localIds = all.filter(isLocalUserId);
+    if (localIds.length) {
+        const { data: accs } = await supabase.from('accounts').select('id, avatar_url').in('id', localIds);
+        (accs || []).forEach(a => { if (a.avatar_url) result[a.id] = a.avatar_url; });
+    }
+    const ids = all.filter(id => !isLocalUserId(id));
     const missing = [];
     const now = Date.now();
     ids.forEach(id => {
@@ -1306,6 +1354,7 @@ async function sendPushToApplicant(robloxUserId, { title, body, url }) {
 }
 
 async function fetchRobloxGroupRoles(robloxUserId) {
+    if (isLocalUserId(robloxUserId)) return [];
     const res = await fetch(`https://groups.roblox.com/v1/users/${robloxUserId}/groups/roles`);
     if (!res.ok) return [];
     const json = await res.json().catch(() => null);
@@ -1315,6 +1364,7 @@ async function fetchRobloxGroupRoles(robloxUserId) {
 // Same as above but throws when Roblox fails (429/5xx/network), so callers that decide
 // whether someone keeps their session don't mistake an API failure for "not in the group".
 async function fetchRobloxGroupRolesStrict(robloxUserId) {
+    if (isLocalUserId(robloxUserId)) return [];
     const res = await fetch(`https://groups.roblox.com/v1/users/${robloxUserId}/groups/roles`);
     if (!res.ok) throw new Error(`roblox_groups_${res.status}`);
     const json = await res.json().catch(() => null);
@@ -1323,6 +1373,12 @@ async function fetchRobloxGroupRolesStrict(robloxUserId) {
 }
 
 async function resolveRobloxUserId(username) {
+    // People who signed in with Google / test mode are found by name or email first.
+    const literal = String(username).replace(/[,()*"]/g, '').replace(/[\\%_]/g, ch => '\\' + ch);
+    const { data: local } = await supabase.from('accounts').select('id')
+        .or(`display_name.ilike.${literal},email.ilike.${literal}`)
+        .limit(1);
+    if (local && local[0]) return local[0].id;
     const res = await fetch('https://users.roblox.com/v1/usernames/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2066,6 +2122,7 @@ async function startOnboardingFlow(ticket) {
 }
 
 async function hasJoinedOrRequestedGroup(groupId, robloxUserId) {
+    if (isLocalUserId(robloxUserId)) return false;
     try {
         const groupRoles = await fetchRobloxGroupRoles(robloxUserId);
         if (groupRoles.some(gr => gr.group && gr.group.id === Number(groupId))) return true;
@@ -2253,7 +2310,7 @@ async function enforceUsdMinimumThreshold(filter) {
 }
 
 async function resolveCurrentRobloxUsernames(userIds) {
-    const ids = [...new Set((userIds || []).filter(id => id != null))];
+    const ids = [...new Set((userIds || []).filter(id => id != null && !isLocalUserId(id)))];
     const result = {};
     if (!ids.length) return result;
     for (let i = 0; i < ids.length; i += 200) {
@@ -2412,11 +2469,13 @@ async function canUseBoard(session, teamId) {
 }
 
 async function checkBaseAccess(robloxUserId) {
-    const [groups, discordServers] = await Promise.all([getBaseAccessGroups(), getBaseAccessDiscordServers()]);
-
-    if (!groups.length && !discordServers.length) {
-        return { allowed: true, isMember: true, viaPlacement: false };
+    if (isLocalUserId(robloxUserId)) {
+        return (await localAccountAllowed(robloxUserId))
+            ? { allowed: true, isMember: true, viaPlacement: false }
+            : { allowed: false, isMember: false, viaPlacement: false };
     }
+
+    const [groups, discordServers] = await Promise.all([getBaseAccessGroups(), getBaseAccessDiscordServers()]);
 
     const [{ data: manualRows, error: manualErr }, { data: placementRows, error: placementErr }] = await Promise.all([
         supabase.from('user_role_assignments').select('id').eq('roblox_user_id', robloxUserId).limit(1),
@@ -2446,7 +2505,80 @@ async function checkBaseAccess(robloxUserId) {
 
     if (isMember) return { allowed: true, isMember: true, viaPlacement: false };
     if (hasBypass) return { allowed: true, isMember: false, viaPlacement: true };
+    // With no sign-in groups configured, only people who were given a role, a team or an
+    // invite get in. A fresh install is closed by default, not open to every Roblox user.
     return { allowed: false, isMember: false, viaPlacement: false };
+}
+
+// Google / test accounts: no Roblox groups to check, so access comes from an owner email,
+// an allowed Google Workspace domain, or something an admin handed out (role, team, invite).
+async function localAccountAllowed(userId) {
+    const { data: account } = await supabase.from('accounts').select('provider, email').eq('id', userId).maybeSingle();
+    if (!account || !providerEnabled(account.provider)) return false;
+    if (account.provider === 'test') return true;
+    const email = String(account.email || '').toLowerCase();
+    if (email && OWNER_EMAILS.has(email)) return true;
+    if (email && GOOGLE_ALLOWED_DOMAINS.includes(email.split('@')[1])) return true;
+    const [{ data: roleRows }, { data: teamRows }] = await Promise.all([
+        supabase.from('user_role_assignments').select('id').eq('roblox_user_id', userId).limit(1),
+        supabase.from('user_assignments').select('roblox_user_id').eq('roblox_user_id', userId).limit(1)
+    ]);
+    if ((roleRows && roleRows.length) || (teamRows && teamRows.length)) return true;
+    return hasActiveInvite(userId);
+}
+
+// OWNER_ROBLOX_IDS / OWNER_EMAILS always hold the "Owner" role, so a brand-new database
+// has someone who can set everything else up.
+async function ensureOwnerRole(userId, username, email) {
+    const isOwner = OWNER_ROBLOX_IDS.has(String(userId)) || (email && OWNER_EMAILS.has(String(email).toLowerCase()));
+    if (!isOwner) return false;
+    const { data: role } = await supabase.from('roles').select('id').eq('name', 'Owner').order('hierarchy', { ascending: false }).limit(1).maybeSingle();
+    if (!role) { console.warn('ensureOwnerRole: there is no role called "Owner" - run sql/setup.sql'); return false; }
+    const { error } = await supabase.from('user_role_assignments').insert({ roblox_user_id: userId, roblox_username: username, role_id: role.id });
+    if (error && error.code !== '23505') console.error('ensureOwnerRole failed:', error.message);
+    rolesCache.clear();
+    return true;
+}
+
+async function ensureRoleByName(userId, username, roleName) {
+    const { data: role } = await supabase.from('roles').select('id').eq('name', roleName).limit(1).maybeSingle();
+    if (!role) return false;
+    const { error } = await supabase.from('user_role_assignments').insert({ roblox_user_id: userId, roblox_username: username, role_id: role.id });
+    return !error || error.code === '23505';
+}
+
+// Creates a session row and returns the raw token for the browser (only the hash is stored).
+async function createSessionFor({ userId, username, provider }) {
+    const access = await computeAccess(userId);
+    const token = randomToken(32);
+    const { error } = await supabase.from('hr_sessions').insert({
+        token: hashToken(token),
+        roblox_user_id: userId,
+        roblox_username: username,
+        provider: provider || 'roblox',
+        roles: access.roleNames,
+        permissions: access.permissions,
+        max_hierarchy: access.maxHierarchy,
+        last_synced_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + SESSION_LIFETIME_MS).toISOString()
+    });
+    if (error) throw new Error('session_create_failed: ' + error.message);
+    return token;
+}
+
+async function upsertLocalAccount({ provider, providerUserId, email, displayName, avatarUrl }) {
+    const now = new Date().toISOString();
+    const { data: existing } = await supabase.from('accounts').select('id')
+        .eq('provider', provider).eq('provider_user_id', providerUserId).maybeSingle();
+    if (existing) {
+        await supabase.from('accounts').update({ email, display_name: displayName, avatar_url: avatarUrl || null, last_login_at: now }).eq('id', existing.id);
+        return existing.id;
+    }
+    const { data, error } = await supabase.from('accounts').insert({
+        provider, provider_user_id: providerUserId, email, display_name: displayName, avatar_url: avatarUrl || null, last_login_at: now
+    }).select('id').single();
+    if (error) throw new Error('account_create_failed: ' + error.message);
+    return data.id;
 }
 
 async function computeAccess(robloxUserId) {
@@ -2853,10 +2985,16 @@ async function applyRevert(revert) {
     }
 }
 
+// Everything worth keeping. Ordered so that referenced rows (teams) come before the rows
+// that point at them (broadcasts). Sessions and OAuth states are deliberately left out.
 const BACKUP_TABLES = [
-    'payment_requests', 'payment_methods', 'staff_warnings', 'banned_users',
-    'roles', 'user_role_assignments', 'teams', 'skillsets', 'user_assignments',
-    'games', 'audit_logs', 'recruitment_tickets', 'recruitment_messages', 'discord_links'
+    'app_settings', 'accounts', 'roles', 'user_role_assignments',
+    'teams', 'skillsets', 'team_skillsets', 'user_assignments', 'user_skillsets',
+    'games', 'team_games', 'team_tasks', 'board_lists', 'board_cards', 'broadcasts',
+    'payment_runs', 'payment_requests', 'payment_methods', 'rate_bands',
+    'staff_warnings', 'banned_users', 'security_holds', 'staff_onboarding_progress', 'onboarding_links',
+    'recruitment_positions', 'recruitment_tickets', 'recruitment_messages', 'discord_links',
+    'base_access_groups', 'base_access_discord_servers', 'required_groups', 'audit_logs'
 ];
 
 async function runBackup(trigger, actorUsername) {
@@ -3070,6 +3208,7 @@ async function refreshSessionAccess(key, data) {
 }
 
 app.get('/roblox-auth-start', async (req, res) => {
+    if (!providerEnabled('roblox')) { res.redirect(`${APP_ORIGIN}/#/hr?error=provider_disabled`); return; }
     const state = randomToken(16);
     const codeVerifier = randomToken(32);
     const codeChallenge = base64url(crypto.createHash('sha256').update(codeVerifier).digest());
@@ -3259,6 +3398,7 @@ app.get('/roblox-auth-callback', async (req, res) => {
         if (!robloxUserId) { fail('userinfo_failed'); return; }
 
         syncRobloxUsername(robloxUserId, robloxUsername);
+        await ensureOwnerRole(robloxUserId, robloxUsername, null);
 
         try {
             if (await isUserBanned(robloxUserId)) { fail('account_banned', `user=${robloxUserId}`); return; }
@@ -3279,6 +3419,7 @@ app.get('/roblox-auth-callback', async (req, res) => {
             try { invite = await getValidInvite(stateRow.ref_token); } catch (e) { invite = null; }
         }
         if (!baseCheck.allowed && !invite) {
+            if (!studio.feature('recruitment')) { fail('not_eligible'); return; }
             try {
                 const rt = await createRecruitSession(robloxUserId, robloxUsername);
                 res.redirect(`${APP_ORIGIN}/#/recruit?rt=${encodeURIComponent(rt)}`);
@@ -3288,35 +3429,128 @@ app.get('/roblox-auth-callback', async (req, res) => {
             return;
         }
 
-        let access;
+        let token;
         try {
-            access = await computeAccess(robloxUserId);
+            token = await createSessionFor({ userId: robloxUserId, username: robloxUsername, provider: 'roblox' });
         } catch (e) {
-            fail('hr_check_failed', `user=${robloxUserId} ${e.message}`);
+            fail(/^session_create_failed/.test(e.message) ? 'session_create_failed' : 'hr_check_failed', `user=${robloxUserId} ${e.message}`);
             return;
         }
-
-        const token = randomToken(32);
-        const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS).toISOString();
-
-        const { error: sessionErr } = await supabase.from('hr_sessions').insert({
-            token: hashToken(token),
-            roblox_user_id: robloxUserId,
-            roblox_username: robloxUsername,
-            roles: access.roleNames,
-            permissions: access.permissions,
-            max_hierarchy: access.maxHierarchy,
-            last_synced_at: new Date().toISOString(),
-            expires_at: expiresAt
-        });
-
-        if (sessionErr) { fail('session_create_failed', sessionErr.message); return; }
 
         console.log(`[roblox-auth] ${tag} SUCCESS user=${robloxUserId} (${robloxUsername}) in ${Date.now() - startedAt}ms`);
         res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
     } catch (e) {
         console.error(`[roblox-auth] ${tag} UNHANDLED ERROR after ${Date.now() - startedAt}ms:`, e && e.stack ? e.stack : e);
         if (!res.headersSent) fail('token_exchange_failed', `unhandled:${e && e.message}`);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Google sign-in (OpenID Connect, authorization code + PKCE)
+// ---------------------------------------------------------------------------
+app.get('/google-auth-start', async (req, res) => {
+    if (!providerEnabled('google')) { res.redirect(`${APP_ORIGIN}/#/hr?error=provider_disabled`); return; }
+    const state = randomToken(16);
+    const nonce = randomToken(16);
+    const codeVerifier = randomToken(32);
+    const codeChallenge = base64url(crypto.createHash('sha256').update(codeVerifier).digest());
+    const refToken = req.query.ref ? String(req.query.ref).trim().slice(0, 64) : null;
+    const { error } = await supabase.from('oauth_states').insert({ state, code_verifier: codeVerifier, ref_token: refToken, provider: 'google', nonce });
+    if (error) { console.error('[google-auth] could not store state:', error.message); res.redirect(`${APP_ORIGIN}/#/hr?error=session_create_failed`); return; }
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', GOOGLE_CLIENT_ID);
+    url.searchParams.set('redirect_uri', GOOGLE_REDIRECT_URI);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('state', state);
+    url.searchParams.set('nonce', nonce);
+    url.searchParams.set('code_challenge', codeChallenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+    url.searchParams.set('prompt', 'select_account');
+    if (GOOGLE_ALLOWED_DOMAINS.length === 1) url.searchParams.set('hd', GOOGLE_ALLOWED_DOMAINS[0]);
+    res.redirect(url.toString());
+});
+
+app.get('/google-auth-callback', async (req, res) => {
+    const fail = (reason, detail) => {
+        console.warn(`[google-auth] FAILED reason=${reason}${detail ? ` detail=${detail}` : ''}`);
+        res.redirect(`${APP_ORIGIN}/#/auth-callback?error=${encodeURIComponent(reason)}`);
+    };
+    try {
+        if (!providerEnabled('google')) { fail('provider_disabled'); return; }
+        const { code, state } = req.query;
+        if (!code || !state) { fail('missing_code_or_state'); return; }
+        const { data: stateRow } = await supabase.from('oauth_states').select('*').eq('state', String(state)).maybeSingle();
+        await supabase.from('oauth_states').delete().eq('state', String(state));
+        if (!stateRow || stateRow.provider !== 'google') { fail('invalid_state'); return; }
+        if (Date.now() - new Date(stateRow.created_at).getTime() > STATE_LIFETIME_MS) { fail('state_expired'); return; }
+
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'authorization_code', code: String(code), client_id: GOOGLE_CLIENT_ID,
+                client_secret: GOOGLE_CLIENT_SECRET, redirect_uri: GOOGLE_REDIRECT_URI, code_verifier: stateRow.code_verifier
+            })
+        });
+        const tokenJson = await tokenRes.json().catch(() => null);
+        if (!tokenRes.ok || !tokenJson || !tokenJson.id_token) { fail('token_exchange_failed', `status=${tokenRes.status}`); return; }
+
+        // The ID token came straight from Google over TLS in exchange for our client secret,
+        // so its claims can be trusted without re-verifying the signature (per Google's docs).
+        // We still check who it was issued to and that it matches this sign-in attempt.
+        let claims;
+        try { claims = JSON.parse(Buffer.from(tokenJson.id_token.split('.')[1], 'base64url').toString('utf8')); } catch (e) { fail('userinfo_failed'); return; }
+        if (!['accounts.google.com', 'https://accounts.google.com'].includes(claims.iss)) { fail('userinfo_failed', 'bad iss'); return; }
+        if (claims.aud !== GOOGLE_CLIENT_ID) { fail('userinfo_failed', 'bad aud'); return; }
+        if (claims.nonce !== stateRow.nonce) { fail('invalid_state', 'nonce mismatch'); return; }
+        if (!claims.sub || !claims.email || claims.email_verified !== true) { fail('email_not_verified'); return; }
+
+        const email = String(claims.email).toLowerCase();
+        const displayName = String(claims.name || email.split('@')[0]).slice(0, 60);
+        const userId = await upsertLocalAccount({ provider: 'google', providerUserId: String(claims.sub), email, displayName, avatarUrl: claims.picture });
+
+        if (await isUserBanned(userId)) { fail('account_banned'); return; }
+        await ensureOwnerRole(userId, displayName, email);
+
+        let allowed = (await checkBaseAccess(userId)).allowed;
+        if (!allowed && stateRow.ref_token) allowed = !!(await getValidInvite(stateRow.ref_token).catch(() => null));
+        if (!allowed) { fail('not_eligible', email); return; }
+
+        const token = await createSessionFor({ userId, username: displayName, provider: 'google' });
+        console.log(`[google-auth] SUCCESS user=${userId}`);
+        res.redirect(`${APP_ORIGIN}/#/auth-callback?session=${encodeURIComponent(token)}`);
+    } catch (e) {
+        console.error('[google-auth] unhandled:', e && e.stack ? e.stack : e);
+        if (!res.headersSent) fail('token_exchange_failed');
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Test mode: one-click sign-in as a seeded test account. Only when AUTH_PROVIDERS has "test".
+// ---------------------------------------------------------------------------
+app.post('/auth/test-login', async (req, res) => {
+    if (!providerEnabled('test')) { res.status(404).json({ ok: false, error: 'provider_disabled' }); return; }
+    const role = TEST_ROLES.find(r => r === (req.body && req.body.role));
+    if (!role) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+    try {
+        const displayName = `Test ${role}`;
+        const userId = await upsertLocalAccount({ provider: 'test', providerUserId: role.toLowerCase(), email: null, displayName });
+        if (!(await ensureRoleByName(userId, displayName, role))) {
+            res.status(500).json({ ok: false, error: 'test_role_missing' });
+            return;
+        }
+        rolesCache.clear();
+        // Test accounts are for demos and QA: skip the onboarding checklist.
+        const now = new Date().toISOString();
+        await supabase.from('staff_onboarding_progress').upsert(
+            ONBOARDING_STEPS.map(st => ({ roblox_user_id: userId, roblox_username: displayName, step_id: st.id, completed_at: now })),
+            { onConflict: 'roblox_user_id,step_id' });
+        const token = await createSessionFor({ userId, username: displayName, provider: 'test' });
+        res.json({ ok: true, session: token });
+    } catch (e) {
+        console.error('[test-login] failed:', e.message);
+        res.status(500).json({ ok: false, error: 'server_error' });
     }
 });
 
@@ -3752,31 +3986,19 @@ app.get('/onboarding-link-preview', async (req, res) => {
 const publicBootstrapCache = new TtlCache({ ttlMs: 10 * 1000, max: 2 });
 const PUBLIC_SITE_FIELDS = ['closed', 'indev', 'services_down', 'status_message', 'status_started_at', 'status_eta', 'status_timeline', 'services', 'devex_rate'];
 
-async function loadBrandingOverrides() {
-    try {
-        const { data, error } = await supabase.from('app_settings').select('branding').eq('id', 1).maybeSingle();
-        if (error) return; // column not created yet: file/env config still applies
-        studio.applyOverrides((data && data.branding) || {});
-    } catch (e) { }
-}
-loadBrandingOverrides();
-setInterval(loadBrandingOverrides, 60 * 1000).unref();
-
 async function buildPublicBootstrap() {
-    const [settingsRes, viewRes, gamesRes] = await Promise.all([
+    const [settingsRes, gamesRes] = await Promise.all([
         supabase.from('app_settings').select('*').eq('id', 1).maybeSingle(),
-        // Older installs exposed site status through this view; merge it in when present.
-        supabase.from('public_app_settings').select('*').eq('id', 1).maybeSingle(),
         supabase.from('games').select('id, name').order('name', { ascending: true })
     ]);
-    const row = { ...(settingsRes.data || {}), ...((!viewRes.error && viewRes.data) || {}) };
+    const row = settingsRes.data || {};
     const site = {};
     PUBLIC_SITE_FIELDS.forEach(k => { if (k in row) site[k] = row[k]; });
     return {
         ok: true,
         config: studio.publicConfig(),
         site: {
-            readable: !settingsRes.error || !viewRes.error,
+            readable: !settingsRes.error,
             closed: !!site.closed,
             indev: !!site.indev,
             servicesDown: !!site.services_down,
@@ -3789,6 +4011,7 @@ async function buildPublicBootstrap() {
         devexRate: site.devex_rate != null ? Number(site.devex_rate) : null,
         games: (gamesRes.data || []).map(g => ({ id: g.id, name: g.name })),
         push: { publicKey: PUSH_CONFIGURED ? VAPID_PUBLIC_KEY : null },
+        auth: { providers: AUTH_PROVIDERS.slice(), testRoles: providerEnabled('test') ? TEST_ROLES.slice() : [] },
         serverTime: new Date().toISOString()
     };
 }
@@ -3921,6 +4144,7 @@ function featureForAction(action) {
 // Caches that depend on configuration tables are dropped after any action that can
 // change them, so admins see their edits immediately.
 function invalidateAfterAction(action) {
+    if (/game|rate|devex|usd_minimum/.test(action)) publicBootstrapCache.clear();
     if (/role|base_access|required_group|security|ban|moderate|warning|hold|team|assign/.test(action)) {
         rolesCache.clear();
         baseAccessCache.clear();
@@ -3967,28 +4191,6 @@ async function handleHrData(req, res) {
     const payload = (req.body && req.body.payload) || {};
 
     if (!(await securityGate(res, session, action))) return;
-
-    if (action === 'get_branding') {
-        if (!requirePermission(res, session, 'settings.manage_branding')) return;
-        res.json({ ok: true, data: { effective: studio.get(), overrides: studio.getOverrides(), defaults: studio.DEFAULTS } });
-        return;
-    }
-
-    if (action === 'save_branding') {
-        if (!requirePermission(res, session, 'settings.manage_branding')) return;
-        const clean = studio.sanitizeBranding(payload.branding || {});
-        const { error } = await supabase.from('app_settings').update({ branding: clean }).eq('id', 1);
-        if (error) {
-            console.error('save_branding failed (did you run sql/002_branding.sql?):', error.message);
-            res.status(500).json({ ok: false, error: 'branding_column_missing' });
-            return;
-        }
-        studio.applyOverrides(clean);
-        publicBootstrapCache.clear();
-        logAudit(session, { category: 'settings', action: 'save_branding', details: { keys: Object.keys(clean) } });
-        res.json({ ok: true, data: { effective: studio.get(), overrides: clean } });
-        return;
-    }
 
     if (action === 'submit_request') {
         if (!requirePermission(res, session, 'dashboard.submit_request')) return;
@@ -8498,12 +8700,15 @@ async function handleHrData(req, res) {
         }
 
         const summary = {};
-        for (const table of (parsed.tables || [])) {
+        // Only ever write to known tables, whatever the backup file claims to contain.
+        for (const table of (parsed.tables || []).filter(t => BACKUP_TABLES.includes(t))) {
             const rows = (parsed.dump && parsed.dump[table]) || [];
             if (!rows.length) { summary[table] = { restored: 0 }; continue; }
             const { error: upsertErr } = await supabase.from(table).upsert(rows);
             summary[table] = upsertErr ? { restored: 0, error: publicError(upsertErr) } : { restored: rows.length };
         }
+        const { error: seqErr } = await supabase.rpc('studio_sync_sequences');
+        if (seqErr) console.error('[restore_backup] could not resync id sequences (run sql/setup.sql):', seqErr.message);
 
         logAudit(session, {
             category: 'backups', action: 'restore_backup',
@@ -8948,5 +9153,5 @@ process.on('uncaughtException', (err) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`HR auth server listening on port ${PORT}`);
+    console.log(`Studio Panel API listening on port ${PORT} (sign-in: ${AUTH_PROVIDERS.join(", ")})`);
 });
