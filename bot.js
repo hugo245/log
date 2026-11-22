@@ -7,6 +7,12 @@ require('dotenv').config();
 const studio = require('./lib/studio');
 const studioName = () => studio.get().studio.name;
 
+// The bot is part of the Discord add-on. Without it there is nothing to run.
+if (!studio.addon('discord')) {
+    console.log('[bot] Discord add-on is off (ADDON_DISCORD is not true) - the Discord bot is not started.');
+    process.exit(0);
+}
+
 const {
     DISCORD_BOT_TOKEN,
     DISCORD_CLIENT_ID,

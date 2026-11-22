@@ -34,7 +34,7 @@ test.before(async () => {
             SUPABASE_URL: `http://127.0.0.1:${db.server.address().port}`, SUPABASE_SERVICE_ROLE_KEY: 'test',
             ROBLOX_CLIENT_ID: '1', ROBLOX_CLIENT_SECRET: 'x', ROBLOX_REDIRECT_URI: 'http://localhost/cb', SESSION_SECRET: 'x'.repeat(40),
             DISCORD_CLIENT_ID: '1', DISCORD_CLIENT_SECRET: 'x', DISCORD_REDIRECT_URI: 'http://localhost/dcb',
-            AUTH_PROVIDERS: 'roblox,google,test'
+            AUTH_PROVIDERS: 'roblox,google,test', ADDON_DISCORD: 'true'
         },
         stdio: ['ignore', 'pipe', 'pipe']
     });

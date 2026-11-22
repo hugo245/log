@@ -7,8 +7,7 @@
     "websiteLabel": "",
     "logoUrl": "assets/logo.svg",
     "requestIdPrefix": "REQ",
-    "contactEmail": "",
-    "discordInviteUrl": ""
+    "contactEmail": ""
   },
   "theme": {
     "accent": "#5B5FEF",
@@ -23,7 +22,7 @@
     "headline": "Paid for what you build.",
     "tagline": "Log your work, get it approved and see every payout from {studio} in one place.",
     "backgroundImage": "",
-    "footerNote": "Staff only. Not on the team yet? DM one of our recruiters on Discord.",
+    "footerNote": "Staff only. Not on the team yet? Ask a lead for an invite link.",
     "showPreview": true
   },
   "features": {
@@ -38,7 +37,6 @@
     "audit": true,
     "backups": true,
     "broadcasts": true,
-    "discord": true,
     "pushNotifications": true
   },
   "payments": {
@@ -55,6 +53,7 @@
   },
   "legal": {
     "tos": "",
+    "privacy": "",
     "aup": ""
   },
   "moneyRules": {
@@ -63,5 +62,8 @@
       "ROBUX": 10000000,
       "USD": 100000
     }
+  },
+  "addons": {
+    "discord": false
   }
 }

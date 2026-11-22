@@ -83,6 +83,9 @@ create table public.app_settings (
     status_eta                        timestamptz,
     status_timeline                   jsonb not null default '[]'::jsonb,
     services                          jsonb not null default '[]'::jsonb,
+    -- Branding edited in Settings > Branding (name, logo, colours, sign-in page, legal text).
+    -- Layered over studio.config.json. Empty = use the file.
+    branding                          jsonb not null default '{}'::jsonb,
     updated_at                        timestamptz not null default now()
 );
 
@@ -695,13 +698,13 @@ insert into public.app_settings (id) values (1);
 insert into public.roles (name, hierarchy, link_only, permissions) values
 ('Owner', 100, true, '["dashboard.view","dashboard.mark_paid","dashboard.export","dashboard.submit_request",
   "settings.manage_games","settings.manage_rate","settings.manage_groups","settings.manage_base_access",
-  "settings.manage_onboarding","roles.manage","staff.view_database","staff.moderate","broadcasts.manage",
+  "settings.manage_onboarding","settings.manage_branding","roles.manage","staff.view_database","staff.moderate","broadcasts.manage",
   "audit.view","audit.revert","backups.manage","recruitment.view","recruitment.respond","recruitment.manage",
   "recruitment.signoff","recruitment.finalise","recruitment.analytics","payouts.view_bank_details",
   "security.manage","teams.view","teams.manage"]'::jsonb),
 ('Admin', 90, true, '["dashboard.view","dashboard.mark_paid","dashboard.export","dashboard.submit_request",
   "settings.manage_games","settings.manage_rate","settings.manage_groups","settings.manage_base_access",
-  "settings.manage_onboarding","roles.manage","staff.view_database","staff.moderate","broadcasts.manage",
+  "settings.manage_onboarding","settings.manage_branding","roles.manage","staff.view_database","staff.moderate","broadcasts.manage",
   "audit.view","backups.manage","recruitment.view","recruitment.manage","recruitment.signoff",
   "recruitment.finalise","recruitment.analytics","security.manage","teams.view","teams.manage"]'::jsonb),
 ('Manager', 50, true, '["dashboard.view","dashboard.mark_paid","dashboard.export","dashboard.submit_request",

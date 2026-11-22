@@ -68,27 +68,27 @@ const ACCESS_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 const REVAMP_TOUR_VERSION = 1;
 
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID;
-const DISCORD_LEAD_CHANNEL_ID = process.env.DISCORD_LEAD_CHANNEL_ID;
+// Discord is a paid add-on (ADDON_DISCORD=true). While it is off, every Discord setting
+// is treated as unset: no OAuth, no bot calls, no Discord ids read from the database.
+const DISCORD_ADDON = studio.addon('discord');
+const discordEnv = (name) => (DISCORD_ADDON ? process.env[name] : undefined);
+const DISCORD_CLIENT_ID = discordEnv('DISCORD_CLIENT_ID');
+const DISCORD_CLIENT_SECRET = discordEnv('DISCORD_CLIENT_SECRET');
+const DISCORD_REDIRECT_URI = discordEnv('DISCORD_REDIRECT_URI');
+const DISCORD_BOT_TOKEN = discordEnv('DISCORD_BOT_TOKEN');
+const DISCORD_GUILD_ID = discordEnv('DISCORD_GUILD_ID');
+const DISCORD_LEAD_CHANNEL_ID = discordEnv('DISCORD_LEAD_CHANNEL_ID');
 const DISCORD_LEAD_ROLE_ID = studio.SERVER.discord.leadRoleId || null;
 const DISCORD_TICKET_CATEGORY_ID = studio.SERVER.discord.ticketCategoryId || null;
-const DISCORD_HR_ROLE_IDS = (process.env.DISCORD_HR_ROLE_IDS || process.env.DISCORD_HR_ROLE_ID || '')
+const DISCORD_HR_ROLE_IDS = (discordEnv('DISCORD_HR_ROLE_IDS') || discordEnv('DISCORD_HR_ROLE_ID') || '')
     .split(',').map(s => s.trim()).filter(Boolean);
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
 const RECRUIT_SESSION_PORTAL_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const DISCORD_CONFIGURED = !!(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_REDIRECT_URI);
-if (!DISCORD_CONFIGURED) {
-    console.warn('Discord recruitment OAuth is not configured (DISCORD_CLIENT_ID/SECRET/REDIRECT_URI missing) - the recruitment flow will be disabled until it is.');
-}
-if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) {
-    console.warn('DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not set - new recruitment tickets will not get a private Discord ticket channel.');
-}
-if (!DISCORD_HR_ROLE_IDS.length) {
-    console.warn('DISCORD_HR_ROLE_ID(S) not set - ticket channels will only be visible to the applicant, not to HR.');
+if (DISCORD_ADDON) {
+    if (!DISCORD_CONFIGURED) console.warn('Discord add-on is on but DISCORD_CLIENT_ID/SECRET/REDIRECT_URI are not all set - Discord linking and recruitment applications are disabled until they are.');
+    if (!DISCORD_BOT_TOKEN || !DISCORD_GUILD_ID) console.warn('Discord add-on: DISCORD_BOT_TOKEN/DISCORD_GUILD_ID not set - recruitment tickets will not get a private Discord channel.');
+    if (!DISCORD_HR_ROLE_IDS.length) console.warn('Discord add-on: DISCORD_HR_ROLE_IDS not set - ticket channels will only be visible to the applicant.');
 }
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
@@ -98,8 +98,8 @@ const VAPID_CONTACT_EMAIL = process.env.VAPID_CONTACT_EMAIL
 const PUSH_CONFIGURED = !!(webpush && VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 if (webpush && PUSH_CONFIGURED) {
     webpush.setVapidDetails(VAPID_CONTACT_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-} else {
-    console.warn('Push notifications are not configured (missing the web-push package or VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY) - applicants will not receive browser notifications.');
+} else if (DISCORD_ADDON) {
+    console.warn('Push notifications are not configured (VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY) - applicants will not receive browser notifications.');
 }
 
 const requiredEnv = {
@@ -135,6 +135,7 @@ const PERMISSIONS = [
     'settings.manage_groups',
     'settings.manage_base_access',
     'settings.manage_onboarding',
+    'settings.manage_branding',
     'roles.manage',
     'staff.view_database',
     'staff.moderate',
@@ -154,59 +155,9 @@ const PERMISSIONS = [
     'teams.manage'
 ];
 
-const TOS_CONTENT = `Last updated: August 2026
-
-1. Who this applies to
-These Terms of Service apply to anyone signing in to the {studio} HR & Payment tool ("the Tool") using their Roblox account, including staff, developers, and contributors of {studio}.
-
-2. Your account
-You sign in with your own Roblox account through Roblox OAuth. You're responsible for keeping that account secure. Access to the Tool can be granted or revoked at any time based on your role or group standing within {studio}.
-
-3. What the Tool is for
-The Tool is used to log completed work, submit and review payment requests, track DevEx/Robux and cash payouts, and manage staff access and roles. It is an internal tool, not a public product, and it is not affiliated with or endorsed by Roblox Corporation.
-
-4. Accuracy of information
-Any payment request, task log, or work summary you submit must be accurate and represent work you actually completed. Submitting false, inflated, or duplicated work entries is a violation of these Terms and may result in the request being rejected, access being revoked, and, in serious cases, referral to group leadership for further action.
-
-5. Payments
-Payment amounts, currencies, and DevEx rates shown in the Tool are set by {studio} and may change at any time. Being able to submit a request does not guarantee payment; requests are reviewed and approved at {studio}'s discretion. It's your responsibility to keep your payout details (PayPal, Venmo, or Roblox username for DevEx) accurate and up to date.
-
-6. No warranty
-The Tool is provided "as is." {studio} makes reasonable efforts to keep it available and your data accurate, but does not guarantee uninterrupted access or that the Tool will be free of errors.
-
-7. Changes
-These Terms may be updated from time to time. Continued use of the Tool after an update means you accept the revised Terms. Material changes will be reflected here with an updated date.
-
-8. Contact
-Questions about these Terms can be directed to {studio} leadership through your usual staff channels.`;
-
-const AUP_CONTENT = `Last updated: August 2026
-
-This Acceptable Use Policy explains what is and isn't okay when using the {studio} HR & Payment tool ("the Tool"). It applies to everyone with access, regardless of role.
-
-1. Use the Tool for its intended purpose
-Only submit payment requests and work logs for work you actually did. Only use the accounts, groups, and permissions you've been given for the purpose they were given to you.
-
-2. Don't misuse access
-Do not attempt to access data, requests, or settings you have not been granted permission to view or edit. Do not share your session, login link, or account access with anyone else. Do not attempt to bypass, disable, or trick the Tool's permission or eligibility checks.
-
-3. Respect other staff
-Treat other staff, developers, and contributors with respect when interacting through or about the Tool. Harassment, discrimination, or abusive behavior toward other members of the team is not tolerated and may result in removal from all {studio} groups and revocation of Tool access.
-
-4. Financial integrity
-Do not submit duplicate, inflated, or fraudulent payment requests. Do not mark your own requests as paid, approve your own submissions, or otherwise use elevated access for your own benefit. If you're granted a role with financial permissions, that access is for processing the team's requests, not your own.
-
-5. Data handling
-Information in the Tool, including payment history, personal payout details, and staff roles, is internal and confidential. Do not export, screenshot, or share this data outside of {studio} without authorization.
-
-6. Required groups and access
-Some access to the Tool is tied to membership in specific Roblox groups. Do not attempt to join required groups, achieve a rank, or gain access under false pretenses (for example, using an alternate account to bypass a restriction placed on your main account).
-
-7. Consequences
-Violating this policy may result in a rejected or reversed payment request, loss of specific permissions, removal from {studio} groups, and loss of access to the Tool, depending on the severity of the violation.
-
-8. Reporting concerns
-If you see something that looks like a violation of this policy, report it to {studio} leadership through your usual staff channels.`;
+const legalText = require('./lib/legal');
+const TOS_CONTENT = legalText.TERMS;
+const AUP_CONTENT = legalText.AUP;
 
 const ONBOARDING_STEPS = [
     {
@@ -214,15 +165,15 @@ const ONBOARDING_STEPS = [
         type: 'intro',
         title: 'Welcome to {studio}',
         description: 'A quick tour before you get started.',
-        content: `This tool is how {studio} staff log completed work, submit and track payment requests, and see what's been paid.
+        content: `This is where {studio} keeps track of the work you do and what you're paid for it.
 
-If you can submit requests: use "New request" to log a task, the game it was for, time worked, and the payout amount. Add a payout method under "My payments" first so it's ready to go.
+Home shows what needs your attention today. My payments shows what you're owed, what has been paid, and where your money goes. Save a payout method there so you're ready when your first payment is approved.
 
-If you have dashboard access: the Dashboard shows every request from the team. You can review, mark things paid, or reject a request with a note.
+Done some work that hasn't been logged? Use "Request payment" to send it for approval. Someone else always approves it, never you.
 
-Everyone can check "My payments" any time to see their own history and running totals.
+If you review or pay other people, "Review & pay" lists every open request, and "Payment runs" groups them into a pay day.
 
-That's the basics, take a look around once you're through this checklist.`,
+That's the basics. Finish these few steps and you're in.`,
         required: true
     },
     {
@@ -262,6 +213,16 @@ function onboardingSteps() {
         if (step.id === 'aup' && legal.aup) content = legal.aup;
         return { ...step, title: studio.interpolate(step.title), description: studio.interpolate(step.description), content: studio.interpolate(content) };
     });
+}
+
+// The three public policies, with the studio's own text where it has set one.
+function legalDocuments() {
+    const legal = studio.get().legal || {};
+    return {
+        terms: { title: 'Terms of Service', content: studio.interpolate(legal.tos || legalText.TERMS), custom: !!legal.tos },
+        privacy: { title: 'Privacy Policy', content: studio.interpolate(legal.privacy || legalText.PRIVACY), custom: !!legal.privacy },
+        aup: { title: 'Acceptable Use Policy', content: studio.interpolate(legal.aup || legalText.AUP), custom: !!legal.aup }
+    };
 }
 
 const PAYMENT_METHOD_TYPES = {
@@ -501,6 +462,7 @@ async function securityPosture(session) {
         holds: (holdsRes.data || []).length,
         unlinkedWithMethod: methods.filter(m => m.roblox_user_id != null && !linked.has(String(m.roblox_user_id))).length,
         bankAccounts: methods.filter(m => m.method === 'BANK_TRANSFER').length,
+        withMethod: methods.length,
         rolesThatCanPay: payRoles.map(r => r.name),
         rolesThatSeeBank: bankRoles.map(r => r.name),
         rolesThatManageSecurity: securityRoles.map(r => r.name)
@@ -591,9 +553,16 @@ app.use((err, req, res, next) => {
 });
 
 const authLimiter = security.rateLimitByIp('auth', 40, 60 * 1000);
-const publicLimiter = security.rateLimitByIp('public', 120, 60 * 1000);
+const publicLimiter = security.rateLimitByIp('public', Number(process.env.RATE_LIMIT_PUBLIC_PER_MIN) || 120, 60 * 1000);
 ['/roblox-auth-start', '/roblox-auth-callback', '/google-auth-start', '/google-auth-callback', '/auth/test-login', '/discord-auth-start', '/discord-auth-start-staff', '/discord-auth-callback'].forEach(p => app.use(p, authLimiter));
 ['/recruitment', '/recruit-session', '/onboarding-link-preview', '/api/roblox', '/public'].forEach(p => app.use(p, publicLimiter));
+
+// Discord add-on routes don't exist while the add-on is off.
+if (!DISCORD_ADDON) {
+    ['/discord-auth-start', '/discord-auth-start-staff', '/discord-auth-callback', '/auth/discord-link-ticket', '/recruit-session', '/recruitment'].forEach(p => app.use(p, (req, res) => {
+        res.status(404).json({ ok: false, error: 'addon_disabled' });
+    }));
+}
 
 app.get('/ping', (req, res) => {
     res.status(200).json({ ok: true, time: new Date().toISOString() });
@@ -1862,6 +1831,7 @@ function summariseTasks(tasks) {
 }
 
 async function getLinkedDiscordUserId(robloxUserId) {
+    if (!DISCORD_ADDON) return null;
     const { data, error } = await supabase.from('discord_links').select('discord_user_id').eq('roblox_user_id', robloxUserId).maybeSingle();
     if (error) return null;
     return data ? data.discord_user_id : null;
@@ -2050,7 +2020,8 @@ async function buildAccessStatus(robloxUserId) {
     try { teamState = await getTeamState(robloxUserId); } catch (e) { }
 
     return {
-        discordLinked: !!discordUserId,
+        discordLinked: DISCORD_ADDON ? !!discordUserId : true,
+        discordRequired: DISCORD_ADDON,
         teamState,
         open: flows.length > 0,
         mainGroupId: config.groupId,
@@ -3992,6 +3963,7 @@ async function buildPublicBootstrap() {
         supabase.from('games').select('id, name').order('name', { ascending: true })
     ]);
     const row = settingsRes.data || {};
+    if (!settingsRes.error) studio.applyOverrides(row.branding || {});
     const site = {};
     PUBLIC_SITE_FIELDS.forEach(k => { if (k in row) site[k] = row[k]; });
     return {
@@ -4015,6 +3987,24 @@ async function buildPublicBootstrap() {
         serverTime: new Date().toISOString()
     };
 }
+
+// Terms, Privacy and Acceptable Use are readable by anyone, signed in or not.
+// Pull the saved branding at start-up so server-side text (emails, DMs, legal pages) uses it
+// straight away, then keep it fresh in case another instance saved a change.
+async function refreshBrandingFromDb() {
+    try {
+        const { data, error } = await supabase.from('app_settings').select('branding').eq('id', 1).maybeSingle();
+        if (!error) studio.applyOverrides((data && data.branding) || {});
+    } catch (e) { }
+}
+refreshBrandingFromDb();
+setInterval(refreshBrandingFromDb, 60 * 1000).unref();
+
+app.get('/public/legal', async (req, res) => {
+    try { await publicBootstrapCache.wrap('bootstrap', buildPublicBootstrap); } catch (e) { }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json({ ok: true, data: legalDocuments() });
+});
 
 app.get('/public/bootstrap', async (req, res) => {
     try {
@@ -4048,7 +4038,8 @@ app.get('/hr-session', async (req, res) => {
         roles: session.roles || [],
         permissions: session.permissions || [],
         maxHierarchy: session.max_hierarchy || 0,
-        discordLinked: !!discordUserId,
+        discordLinked: DISCORD_ADDON ? !!discordUserId : true,
+        discordRequired: DISCORD_ADDON,
         teamRemoved: !!session.team_removed,
         teamState: session.team_state || 'ok'
     });
@@ -4134,7 +4125,9 @@ const ACTION_FEATURES = [
     [/^(backup_all_data|list_backups|load_backup|restore_backup)$/, 'backups'],
     [/^(list_audit_logs|revert_audit_log)$/, 'audit'],
     [/^(create_broadcast|delete_broadcast|list_broadcasts)$/, 'broadcasts'],
-    [/^list_staff_database$/, 'staffDatabase']
+    [/^list_staff_database$/, 'staffDatabase'],
+    [/discord|^start_access_relink$|^check_access_now$|onboarding_group_config$/, 'discord'],
+    [/recruitment_position/, 'recruitment']
 ];
 function featureForAction(action) {
     for (const [re, feature] of ACTION_FEATURES) if (re.test(action)) return feature;
@@ -4161,6 +4154,11 @@ app.post('/hr-data', async (req, res) => {
     if (req.body.payload != null && (typeof req.body.payload !== 'object' || !security.isSafePayload(req.body.payload))) {
         res.status(400).json({ ok: false, error: 'invalid_fields' });
         return;
+    }
+    // Discord fields sent while the Discord add-on is off are ignored, not stored.
+    if (!DISCORD_ADDON && req.body.payload && typeof req.body.payload === 'object') {
+        delete req.body.payload.discordRoleId;
+        delete req.body.payload.discordUrl;
     }
     const feature = featureForAction(action);
     if (action === 'list_my_broadcasts' && !studio.feature('broadcasts')) { res.json({ ok: true, data: [] }); return; }
@@ -5899,6 +5897,53 @@ async function handleHrData(req, res) {
         const { error } = await supabase.from('games').delete().eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
+        return;
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Branding: name, logo, colours, sign-in copy, features, payout options and legal text,
+    // stored in app_settings.branding and layered over studio.config.json.
+    // ---------------------------------------------------------------------------------
+    if (action === 'get_branding') {
+        if (!requirePermission(res, session, 'settings.manage_branding')) return;
+        const { data, error } = await supabase.from('app_settings').select('branding').eq('id', 1).maybeSingle();
+        if (error) { res.status(500).json({ ok: false, error: 'branding_unavailable' }); return; }
+        studio.applyOverrides((data && data.branding) || {});
+        res.json({
+            ok: true,
+            data: {
+                current: studio.editableConfig(),
+                saved: studio.getOverrides(),
+                lockedFeatures: studio.lockedFeatures(),
+                allCurrencies: studio.ALL_CURRENCIES,
+                allMethods: studio.ALL_METHODS,
+                legalDefaults: { tos: legalText.TERMS, privacy: legalText.PRIVACY, aup: legalText.AUP }
+            }
+        });
+        return;
+    }
+
+    if (action === 'save_branding') {
+        if (!requirePermission(res, session, 'settings.manage_branding')) return;
+        const clean = studio.sanitizeBranding(payload.branding || {});
+        // Features that belong to an add-on that isn't included can't be switched on here.
+        if (clean.features) studio.lockedFeatures().forEach(f => { delete clean.features[f]; });
+        const size = JSON.stringify(clean).length;
+        if (size > 900000) { res.status(400).json({ ok: false, error: 'branding_too_large' }); return; }
+        const { data: before } = await supabase.from('app_settings').select('branding').eq('id', 1).maybeSingle();
+        const { error } = await supabase.from('app_settings').update({ branding: clean, updated_at: new Date().toISOString() }).eq('id', 1);
+        if (error) {
+            console.error('[branding] save failed:', error.message);
+            res.status(500).json({ ok: false, error: /branding/.test(error.message || '') ? 'branding_column_missing' : 'server_error' });
+            return;
+        }
+        studio.applyOverrides(clean);
+        publicBootstrapCache.clear();
+        const changed = Object.keys(clean).concat(Object.keys((before && before.branding) || {}))
+            .filter((k, i, a) => a.indexOf(k) === i)
+            .filter(k => JSON.stringify(clean[k] || null) !== JSON.stringify(((before && before.branding) || {})[k] || null));
+        logAudit(session, { category: 'settings', action: 'save_branding', details: { sections: changed } });
+        res.json({ ok: true, data: { current: studio.editableConfig(), saved: studio.getOverrides(), config: studio.publicConfig() } });
         return;
     }
 

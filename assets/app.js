@@ -11,9 +11,10 @@
       theme: { accent: '#6366F1', accentDark: '#8B87FF', radius: 18, defaultMode: 'light' },
       signIn: {
         title: 'Sign in', subtitle: '', buttonLabel: 'Sign in with Roblox', headline: 'Paid for what you build.',
-        tagline: '', backgroundImage: '', footerNote: '', showPreview: true, termsUrl: '#/tos', privacyUrl: '#/aup'
+        tagline: '', backgroundImage: '', footerNote: '', showPreview: true, termsUrl: '#/terms', privacyUrl: '#/privacy'
       },
-      features: {},
+      // Add-on features stay hidden until the API says they're on.
+      features: { discord: false, recruitment: false },
       payments: { currencies: ['ROBUX', 'USD'], methods: ['PAYPAL', 'DEVEX_ROBUX', 'VENMO', 'BANK_TRANSFER'] }
     };
 
@@ -41,6 +42,8 @@
     function studioShort() { return STUDIO.studio.shortName || studioName().slice(0, 2).toUpperCase(); }
     function studioLogo() { return STUDIO.studio.logoUrl || 'assets/logo.svg'; }
     function featureOn(name) { return !name || !STUDIO.features || STUDIO.features[name] !== false; }
+    // Discord (linking, roles, servers, the bot) is a paid add-on and off unless the API says otherwise.
+    function discordOn() { return !!(STUDIO.features && STUDIO.features.discord === true); }
     // Colours set by admins (team/skillset colours) are only ever used if they are a plain
     // hex/rgb value, so they can't be used to smuggle extra CSS into a style attribute.
     function safeColor(c, fallback) {
@@ -161,6 +164,7 @@
       'settings.manage_groups': 'Manage payout eligibility groups',
       'settings.manage_base_access': 'Manage sign-in access requirement',
       'settings.manage_onboarding': 'Manage teams, skillsets & invite links',
+      'settings.manage_branding': 'Edit branding (name, logo, colours, sign-in page, legal text)',
       'roles.manage': 'Manage roles and access',
       'staff.view_database': 'View staff database',
       'staff.moderate': 'Warn and ban staff',
@@ -195,8 +199,13 @@
 
     function permissionPickerHtml(cls, chosen, roleId) {
       const has = (p) => (chosen || []).includes(p);
-      const known = ALL_PERMISSIONS.concat((chosen || []).filter(p => p && !ALL_PERMISSIONS.includes(p)));
+      // Permissions for features this studio doesn't have are hidden, but kept on the role.
+      const hiddenPerm = (p) => /^recruitment\./.test(p) && !featureOn('recruitment');
+      const all = ALL_PERMISSIONS.concat((chosen || []).filter(p => p && !ALL_PERMISSIONS.includes(p)));
+      const known = all.filter(p => !hiddenPerm(p));
+      const kept = all.filter(p => hiddenPerm(p) && has(p));
       return `
+        ${kept.map(p => `<input type="checkbox" hidden class="${esc(cls)}" ${roleId ? `data-role-id="${esc(roleId)}"` : ''} value="${esc(p)}" checked>`).join('')}
         <div class="perm-presets">
           <span class="hint">Quick set:</span>
           ${Object.keys(PERMISSION_PRESETS).map(name => `<button type="button" class="chip-filter" data-perm-preset="${esc(name)}" data-perm-target="${esc(cls)}" data-role-id="${esc(roleId || '')}">${esc(name)}</button>`).join('')}
@@ -238,9 +247,9 @@
           { key: 'country', label: 'Country', type: 'text', placeholder: 'United States of America' },
           { key: 'city', label: 'City', type: 'text', placeholder: 'Los Angeles' },
           { key: 'address', label: 'Address', type: 'text', placeholder: 'Street and house number' },
-          { key: 'postalCode', label: 'Postal code', type: 'text', placeholder: '1267 whatever your postcode is' },
+          { key: 'postalCode', label: 'Postal code', type: 'text', placeholder: 'e.g. 90012' },
           { key: 'swift', label: 'SWIFT / BIC', type: 'text', placeholder: 'Your SWIFT / BIC' },
-          { key: 'iban', label: 'IBAN or account number', type: 'text', placeholder: 'XXXX BANK XXXX XXXX XX' }
+          { key: 'iban', label: 'IBAN or account number', type: 'text', placeholder: 'e.g. GB33 BUKB 2020 1555 5555 55' }
         ]
       }
     };
@@ -809,8 +818,7 @@
         { name: 'Roblox', status: 'ok', note: '' },
         { name: 'Hosting', status: 'ok', note: '' },
         { name: 'Payments & requests', status: 'ok', note: '' },
-        { name: 'Teams & tasks', status: 'ok', note: '' },
-        { name: 'Discord bot', status: 'ok', note: '' }
+        { name: 'Teams & tasks', status: 'ok', note: '' }
       ];
     }
 
@@ -835,7 +843,7 @@
         { time: stStamp(new Date(state._start)), title: 'Planning', text: `Scope and structure of the new ${studioName()} are locked in.`, state: 'done' },
         { time: '', title: 'Rebuilding', text: 'Payments, teams, tasks and the rest are being rebuilt.', state: 'active' },
         { time: '', title: 'Testing', text: 'Everything is checked end to end before launch.', state: 'pending' },
-        { time: '', title: 'Launch', text: 'Your lead posts in Discord and this page redirects you.', state: 'pending' }
+        { time: '', title: 'Launch', text: 'This page refreshes on its own and takes you straight in.', state: 'pending' }
       ];
     }
 
@@ -1022,7 +1030,7 @@
             <button type="button" class="st-btn st-btn-main" id="stNow">${ST_REFRESH}Check now</button>
             <button type="button" class="st-btn st-bypass" id="stBypass">${ST_KEY}Staff bypass</button>
           </div>
-          <div class="st-note">Nothing you submitted has been lost.<br><strong>Your lead will post in Discord the moment it's back.</strong></div>
+          <div class="st-note">Nothing you submitted has been lost.<br><strong>This page reloads by itself as soon as it's back.</strong></div>
         </div>
       </div>
     </div>`;
@@ -1159,7 +1167,7 @@
           hrMaxHierarchy = json.maxHierarchy || 0;
           teamRemoved = json.teamRemoved === true;
           hrTeamState = json.teamState || (json.teamRemoved ? 'removed' : 'ok');
-          needsDiscordLink = json.discordLinked === false;
+          needsDiscordLink = discordOn() && json.discordLinked === false;
           if (json.security) {
             securityLevel = json.security.level || 'normal';
             lockdownNote = json.security.note || '';
@@ -1262,9 +1270,12 @@
       invalid_amount: 'That amount is not allowed. Check it is above zero and below the per-request limit.',
       cannot_grant_permission: "You can only give a role permissions that you have yourself.",
       rate_limited: "You're going a bit fast. Wait a few seconds and try again.",
-      feature_disabled: 'That part of the hub is turned off for this studio.',
+      feature_disabled: 'That part of the panel is turned off for this studio.',
+      branding_column_missing: 'Your database needs a quick update first. Run sql/upgrade.sql in the Supabase SQL editor, then save again.',
+      branding_unavailable: "Couldn't read the branding settings. If you just updated, run sql/upgrade.sql in Supabase.",
+      branding_too_large: 'That is too much to save at once. Use a smaller logo or background image.',
+      addon_disabled: 'That add-on is not included in this panel.',
       method_disabled: 'This studio does not pay out with that method.',
-      branding_column_missing: 'Branding could not be saved: run sql/002_branding.sql on the database first.',
       request_not_found: 'That request no longer exists. The list has been refreshed.',
       already_exists: 'That already exists.',
       network_error: 'Could not reach the server. Check your connection and try again.',
@@ -1916,6 +1927,58 @@
       a.setAttribute('aria-busy', 'true');
       startStaffDiscordLink(/^#\/[a-zA-Z0-9/_\-?=&]*$/.test(ret) ? ret : '#/home');
     }, true);
+
+    // In-app replacement for window.confirm(). The first line of the message is the question;
+    // anything after a blank line is shown underneath as detail. Resolves true / false.
+    function askConfirm(message, opts) {
+      const o = opts || {};
+      const parts = String(message || '').split(/\n\s*\n/);
+      let title = parts.shift();
+      let detail = parts.join('\n\n');
+      // "Remove this team? Anyone on it..." -> short question as the title, the rest underneath.
+      const q = title.indexOf('? ');
+      if (q > 0 && q < title.length - 2) { detail = (title.slice(q + 2) + (detail ? '\n\n' + detail : '')).trim(); title = title.slice(0, q + 1); }
+      const danger = o.danger != null ? o.danger : /^(remove|delete|ban|revert|reset|restore|sign out|sign every|take this|withdraw|unlink|replace)/i.test(title);
+      const okLabel = o.okLabel || (danger ? (/^(remove|delete)/i.test(title) ? title.split(/\s/)[0] : 'Continue') : 'Confirm');
+      return new Promise(resolve => {
+        const prevFocus = document.activeElement;
+        const wrap = document.createElement('div');
+        wrap.className = 'ask-scrim';
+        wrap.innerHTML = `
+          <div class="ask-box" role="alertdialog" aria-modal="true" aria-labelledby="askTitle"${detail ? ' aria-describedby="askDetail"' : ''}>
+            <h2 id="askTitle">${esc(title)}</h2>
+            ${detail ? `<p id="askDetail">${esc(detail)}</p>` : ''}
+            <div class="ask-actions">
+              <button type="button" class="btn btn-ghost" data-ask="no">${esc(o.cancelLabel || 'Cancel')}</button>
+              <button type="button" class="btn ${danger ? 'btn-danger-solid' : 'btn-primary'}" data-ask="yes">${esc(okLabel)}</button>
+            </div>
+          </div>`;
+        const done = (val) => {
+          document.removeEventListener('keydown', onKey, true);
+          wrap.classList.add('closing');
+          setTimeout(() => wrap.remove(), 120);
+          if (prevFocus && prevFocus.focus) try { prevFocus.focus({ preventScroll: true }); } catch (e) { }
+          resolve(val);
+        };
+        const onKey = (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
+          else if (e.key === 'Tab') {
+            const btns = wrap.querySelectorAll('button');
+            const first = btns[0], last = btns[btns.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+          }
+        };
+        wrap.addEventListener('click', (e) => {
+          if (e.target === wrap) return done(false);
+          const b = e.target.closest('[data-ask]');
+          if (b) done(b.dataset.ask === 'yes');
+        });
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(wrap);
+        wrap.querySelector(danger ? '[data-ask="no"]' : '[data-ask="yes"]').focus();
+      });
+    }
 
     function toast(text, kind) {
       let root = document.getElementById('toastRoot');
@@ -2634,7 +2697,7 @@
               </label>`;
       }).join('')}
           </div>
-          ${def.confidential ? `<div class="privacy-note"><span class="privacy-icon" aria-hidden="true">&#128274;</span><span>${esc(PAYOUT_PRIVACY_NOTE)}</span></div>` : ''}
+          ${def.confidential ? `<div class="privacy-note"><span class="privacy-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span>${esc(PAYOUT_PRIVACY_NOTE)}</span></div>` : ''}
           ${st.saved && st.saved.detailsHidden && st.method === st.saved.method ? `<div class="pp-banner neutral">These bank details are hidden from you. Only the Executive Team can see them, and saving here would replace what they entered.</div>` : ''}
           ${def.fields.map(f => `
           <div class="field" style="margin-top:12px;">
@@ -2682,7 +2745,7 @@
             <label for="umDurationSel">Length</label>
             <select id="umDurationSel">${BAN_DURATIONS.map(([v, l]) => `<option value="${v}" ${umDuration === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
           </div>` : ''}
-          ${mode !== 'note' ? `
+          ${mode !== 'note' && discordOn() ? `
           <label class="pp-check"><input type="checkbox" id="umNotifyChk" ${umNotify && d.discordLinked ? 'checked' : ''} ${d.discordLinked ? '' : 'disabled'}> ${d.discordLinked ? 'Tell them on Discord (includes the reason)' : 'No Discord linked, so they won\'t be messaged'}</label>` : ''}
           <button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'} btn-sm" id="umSubmitBtn" ${umBusy ? 'disabled' : ''} style="${danger ? 'background:var(--err-text);color:#fff;border-color:var(--err-text);' : ''}">${umBusy ? 'Saving...' : esc(submitLabel)}</button>
         </div>` : '';
@@ -2692,7 +2755,7 @@
           <strong>${ban.expires_at ? `Banned until ${esc(fmtDateTime(ban.expires_at))} (${esc(relTime(ban.expires_at))})` : 'Banned permanently'}</strong>
           <span>${esc(ban.reason || 'No reason given')}${ban.banned_by ? ` &middot; by ${esc(ban.banned_by)}` : ''}${ban.banned_at ? `, ${esc(relTime(ban.banned_at))}` : ''}</span>
           ${canAct ? `<div class="pp-row"><button type="button" class="btn btn-ghost btn-sm" id="umUnbanBtn" ${umBusy ? 'disabled' : ''}>${umBusy ? 'Saving...' : 'Lift ban'}</button>
-            ${d.discordLinked ? `<label class="pp-check" style="margin:0;"><input type="checkbox" id="umNotifyChk" ${umNotify ? 'checked' : ''}> Tell them on Discord</label>` : ''}</div>` : ''}
+            ${discordOn() && d.discordLinked ? `<label class="pp-check" style="margin:0;"><input type="checkbox" id="umNotifyChk" ${umNotify ? 'checked' : ''}> Tell them on Discord</label>` : ''}</div>` : ''}
         </div>` : '';
 
       const cantActNote = canModerate && t.id && !canAct
@@ -2809,17 +2872,17 @@
           await reloadTeamsTab();
         }, 'Skill on team updated');
       }));
-      q('[data-clear-removed-teams]').forEach(b => b.addEventListener('click', () => {
-        if (!confirm('Clear the leftover entries for teams that no longer exist?')) return;
+      q('[data-clear-removed-teams]').forEach(b => b.addEventListener('click', async () => {
+        if (!(await askConfirm('Clear the leftover entries for teams that no longer exist?'))) return;
         panelAction('team:removed', async () => {
           await callHrData('remove_user_team_assignment', { robloxUserId: umTarget.id, teamId: null, clearRemoved: true });
           await reloadTeamsTab();
         }, 'Cleared');
       }));
-      q('[data-remove-team]').forEach(b => b.addEventListener('click', () => {
+      q('[data-remove-team]').forEach(b => b.addEventListener('click', async () => {
         const teamId = b.dataset.removeTeam;
         const a = umTeamsState.assignments.find(x => String(x.teamId) === String(teamId));
-        if (!confirm(`Remove ${umTarget.username || 'them'} from ${a && a.team ? a.team.name : 'this team'}?`)) return;
+        if (!(await askConfirm(`Remove ${umTarget.username || 'them'} from ${a && a.team ? a.team.name : 'this team'}?`))) return;
         panelAction('team:' + teamId, async () => {
           await removeUserTeamAssignment(umTarget.id, teamId);
           await reloadTeamsTab();
@@ -2912,7 +2975,7 @@
       const unban = document.getElementById('umUnbanBtn');
       if (unban) unban.addEventListener('click', () => runQuickModeration('unban'));
       q('[data-remove-warning]').forEach(b => b.addEventListener('click', async () => {
-        if (!confirm('Remove this warning? It stays in the history as removed.')) return;
+        if (!(await askConfirm('Remove this warning? It stays in the history as removed.'))) return;
         umBusy = true; paintUserMenu();
         try {
           await removeUserWarning(b.dataset.removeWarning);
@@ -2938,9 +3001,9 @@
       const reason = umReason.trim();
       if ((type === 'note' || type === 'warn') && !reason) { toast(type === 'note' ? 'Write the note first.' : 'Add a reason for the warning.', 'err'); const r = document.getElementById('umReasonInput'); if (r) r.focus(); return; }
       const name = umTarget.username || 'this person';
-      if (type === 'ban' && !confirm(umDuration === '0' ? `Ban ${name} permanently?` : `Ban ${name} for ${BAN_DURATIONS.find(b => b[0] === umDuration)[1]}?`)) return;
-      if (type === 'warn' && umData && umData.warnings.length >= 2 && !confirm(`This is ${name}'s third warning, so they will be banned. Continue?`)) return;
-      if (type === 'unban' && !confirm(`Lift the ban on ${name}? Their warnings stay on record.`)) return;
+      if (type === 'ban' && !(await askConfirm(umDuration === '0' ? `Ban ${name} permanently?` : `Ban ${name} for ${BAN_DURATIONS.find(b => b[0] === umDuration)[1]}?`))) return;
+      if (type === 'warn' && umData && umData.warnings.length >= 2 && !(await askConfirm(`This is ${name}'s third warning, so they will be banned. Continue?`))) return;
+      if (type === 'unban' && !(await askConfirm(`Lift the ban on ${name}? Their warnings stay on record.`))) return;
       umBusy = true; paintUserMenu();
       try {
         const res = await callHrData('quick_moderate', {
@@ -3243,7 +3306,8 @@
         return;
       }
 
-      if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && path !== '#/tos' && path !== '#/aup') {
+      const LEGAL_PATHS = ['#/terms', '#/privacy', '#/aup', '#/tos'];
+      if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && !LEGAL_PATHS.includes(path)) {
         window.location.hash = '#/onboarding';
         return;
       }
@@ -3254,10 +3318,8 @@
         return;
       }
 
-      if (path === '#/tos') {
-        if (isHrAuthed) renderPolicyPage('tos'); else renderHrGate();
-      } else if (path === '#/aup') {
-        if (isHrAuthed) renderPolicyPage('aup'); else renderHrGate();
+      if (LEGAL_PATHS.includes(path)) {
+        renderPolicyPage(path.slice(2));
       } else if (path === '#/team-removed') {
         if (isHrAuthed) renderTeamRemovedPage(); else renderHrGate();
       } else if (path === '#/locked') {
@@ -3292,6 +3354,8 @@
         if (isHrAuthed) renderStaffDatabase(); else renderHrGate();
       } else if (path === '#/audit') {
         if (isHrAuthed) renderAuditLogs(); else renderHrGate();
+      } else if (['#/recruit', '#/recruit/apply', '#/recruit/status', '#/recruitment', '#/recruitment-analytics'].includes(path) && !featureOn('recruitment')) {
+        window.location.hash = '#/';
       } else if (path === '#/recruit') {
         renderRecruitGate();
       } else if (path === '#/recruit/apply') {
@@ -3369,7 +3433,8 @@
         { group: 'admin', label: 'Manage: Recruitment', href: '#/manage?tab=recruitment', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'positions auto-hire sign-off finalise' },
         { group: 'admin', label: 'Manage: Broadcasts', href: '#/manage?tab=broadcasts', navHidden: true, show: hasPermission('broadcasts.manage'), keywords: 'announcements message' },
         { group: 'you', label: 'My teams & skillsets', href: '#/my', navHidden: true },
-        { group: 'you', label: 'Terms of Service', href: '#/tos', navHidden: true },
+        { group: 'you', label: 'Terms of Service', href: '#/terms', navHidden: true },
+        { group: 'you', label: 'Privacy Policy', href: '#/privacy', navHidden: true },
         { group: 'you', label: 'Acceptable Use Policy', href: '#/aup', navHidden: true }
       ].filter(i => i.show !== false && featureOn(featureForHref(i.href)));
     }
@@ -3465,7 +3530,8 @@
       const path = currentPath();
       const locked = teamRemoved;
       const role = (hrRoles && hrRoles[0]) || 'Member';
-      const initials = String(hrUsername || '?').replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || '?';
+      const words = String(hrUsername || '').split(/[\s_\-.]+/).filter(w => /[a-zA-Z0-9]/.test(w));
+      const initials = (words.length > 1 ? words[0][0] + words[1][0] : String(hrUsername || '?').replace(/[^a-zA-Z0-9]/g, '').slice(0, 2)).toUpperCase() || '?';
       const nav = locked ? '' : shellNavGroups().map(g => `
         <div class="shell-group">
           ${g.label ? `<div class="shell-group-label">${esc(g.label)}</div>` : ''}
@@ -3490,8 +3556,9 @@
           </summary>
           <div class="shell-menu">
             <button type="button" id="themeToggleBtn">${themeToggleIcon()}<span>${getTheme() === 'dark' ? 'Light mode' : 'Dark mode'}</span></button>
-            ${locked ? '' : `<button type="button" id="replayTourBtn"><span class="shell-menu-pad"></span><span>What's new</span></button>`}
-            <a href="#/tos"><span class="shell-menu-pad"></span><span>Terms</span></a>
+            ${locked ? '' : `<button type="button" id="replayTourBtn"><span class="shell-menu-pad"></span><span>Take the tour</span></button>`}
+            <a href="#/terms"><span class="shell-menu-pad"></span><span>Terms</span></a>
+            <a href="#/privacy"><span class="shell-menu-pad"></span><span>Privacy</span></a>
             <a href="#/aup"><span class="shell-menu-pad"></span><span>Acceptable use</span></a>
             ${STUDIO.studio.website ? `<a href="${esc(STUDIO.studio.website)}" target="_blank" rel="noopener noreferrer"><span class="shell-menu-pad"></span><span>${esc(STUDIO.studio.websiteLabel || 'Website')}</span></a>` : ''}
             <div class="shell-menu-sep"></div>
@@ -3555,68 +3622,61 @@
 
     const ROBLOX_ICON = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5.16 1.5 1.5 18.84 18.84 22.5 22.5 5.16Zm8.83 13.64-5.13-1.1 1.1-5.13 5.13 1.1Z"/></svg>';
 
-    // Shared shell for every signed-out screen: the studio card on the left, the headline and
-    // product preview on the right. All copy and imagery comes from the studio config.
+    // Shared shell for every signed-out screen. Desktop: the form on the left, a studio panel on
+    // the right, sized to exactly one screen (no page scroll). Phones: just the form.
     function authShell(innerHtml, opts) {
       const si = STUDIO.signIn || {};
       const st = STUDIO.studio || {};
       const bg = si.backgroundImage ? String(si.backgroundImage) : '';
-      const safeBg = /^(https:\/\/|\.?\/|[a-zA-Z0-9_\-]+\/)[^"'()\s<>]*$/.test(bg) ? bg : '';
+      const safeBg = /^(https:\/\/|\.?\/|[a-zA-Z0-9_\-]+\/|data:image\/(png|jpeg|webp|gif);base64,)[^"'()\s<>]*$/.test(bg) ? bg : '';
       const logo = st.logoUrl
         ? `<img src="${esc(st.logoUrl)}" alt="">`
         : `<span class="auth-brand-mark">${esc(studioShort())}</span>`;
       const showPreview = si.showPreview !== false && !(opts && opts.noPreview);
+      const year = new Date().getFullYear();
       return `
-    <div class="auth${safeBg ? ' has-image' : ''}"${safeBg ? ` style="--hero-image:url('${esc(safeBg)}')"` : ''}>
-      <section class="auth-card" aria-label="Sign in">
-        <header class="auth-card-head">
+    <div class="auth">
+      <section class="auth-side" aria-label="Sign in">
+        <header class="auth-top">
           <a class="auth-brand" href="#/">${logo}<span>${esc(brandName())}</span></a>
-          <div class="auth-head-right">
-            ${studioWebsiteLink('')}
-            <button type="button" class="auth-icon-btn" id="themeToggleBtn" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
-          </div>
+          <button type="button" class="auth-icon-btn" id="themeToggleBtn" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         </header>
         <div class="auth-main">${innerHtml}</div>
-        ${si.footerNote ? `<footer class="auth-foot">${esc(si.footerNote)}</footer>` : ''}
+        <footer class="auth-bottom">
+          ${si.footerNote ? `<p class="auth-note">${esc(si.footerNote)}</p>` : ''}
+          <nav class="auth-links" aria-label="Legal">
+            <a href="#/terms">Terms</a><a href="#/privacy">Privacy</a><a href="#/aup">Acceptable use</a>${st.website ? studioWebsiteLink('') : ''}
+          </nav>
+          <span class="auth-copy">&copy; ${year} ${esc(studioName())}</span>
+        </footer>
       </section>
-      <section class="auth-hero" aria-hidden="true">
-        <h2>${esc(si.headline || 'Paid for what you build.')}</h2>
-        ${si.tagline ? `<p>${esc(si.tagline)}</p>` : ''}
+      <aside class="auth-art${safeBg ? ' has-image' : ''}"${safeBg ? ` style="--hero-image:url('${esc(safeBg)}')"` : ''} aria-hidden="true">
+        <div class="auth-art-copy">
+          <span class="auth-eyebrow">${esc(studioName())}</span>
+          <h2>${esc(si.headline || 'Paid for what you build.')}</h2>
+          ${si.tagline ? `<p>${esc(si.tagline)}</p>` : ''}
+        </div>
         ${showPreview ? authPreviewHtml() : ''}
-      </section>
+      </aside>
     </div>`;
     }
 
+    // A still of the product, so people know what they're signing in to. Example data only.
     function authPreviewHtml() {
-      const st = STUDIO.studio || {};
-      const mark = st.logoUrl ? `<img src="${esc(st.logoUrl)}" alt="">` : `<span class="mark">${esc(studioShort())}</span>`;
-      const icon = (d) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+      const rows = [
+        ['MB', 'Map blockout', 'Building', 'R$ 12,500', 'approved', 'Approved'],
+        ['CS', 'Combat system v2', 'Scripting', '$340.00', 'review', 'In review'],
+        ['LU', 'Lobby UI pass', 'UI', 'R$ 8,000', 'paid', 'Paid'],
+        ['VF', 'Victory VFX', 'Effects', '$120.00', 'paid', 'Paid']
+      ];
       return `
         <div class="auth-preview">
-          <div class="auth-preview-bar"><span class="dots"><i></i><i></i><i></i></span>${esc(studioName())} workspace<span class="tag">Preview</span></div>
-          <div class="auth-preview-body">
-            <div class="auth-preview-rail">
-              ${mark}
-              ${icon('<rect x="4" y="4" width="6" height="6" rx="1.5"></rect><rect x="14" y="4" width="6" height="6" rx="1.5"></rect><rect x="4" y="14" width="6" height="6" rx="1.5"></rect><rect x="14" y="14" width="6" height="6" rx="1.5"></rect>')}
-              ${icon('<rect x="3" y="5" width="18" height="14" rx="2.5"></rect><path d="M3 10h18"></path>')}
-              ${icon('<path d="M4 13l4 4L19 6"></path><path d="M14 17l1 1"></path>')}
-              ${icon('<path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v4h4"></path><path d="M12 8v4l3 2"></path>')}
-            </div>
-            <div class="auth-preview-main">
-              <div class="auth-preview-title">
-                <div><h3>Payments overview</h3><p>Your studio, at a glance.</p></div>
-                ${icon('<path d="M12 3l7 3v5c0 4.4-3 8.4-7 9.8-4-1.4-7-5.4-7-9.8V6z"></path><path d="M9 12l2 2 4-4"></path>')}
-              </div>
-              <div class="auth-preview-tiles">
-                <div class="auth-preview-tile"><span>Assignments</span><strong>All in one place</strong></div>
-                <div class="auth-preview-tile"><span>Approvals</span><strong>Clear next steps</strong></div>
-                <div class="auth-preview-tile"><span>Payment history</span><strong>Every milestone</strong></div>
-              </div>
-              <div class="auth-preview-list-head"><span>Recent activity</span><span>Example</span></div>
-              <div class="auth-preview-row">Environment artwork<em class="approved">Approved</em></div>
-              <div class="auth-preview-row">Project milestone<em class="review">In review</em></div>
-              <div class="auth-preview-row">Release quality assurance<em class="paid">Paid</em></div>
-            </div>
+          <div class="ap-head">
+            <div><span class="ap-k">Owed to you</span><strong class="ap-v">R$ 20,500 <em>+ $340.00</em></strong></div>
+            <span class="ap-pill">Next run Friday</span>
+          </div>
+          <div class="ap-table">
+            ${rows.map(r => `<div class="ap-row"><span class="ap-av">${r[0]}</span><span class="ap-task"><b>${r[1]}</b><small>${r[2]}</small></span><span class="ap-amt">${r[3]}</span><span class="ap-st ${r[4]}">${r[5]}</span></div>`).join('')}
           </div>
         </div>`;
     }
@@ -3628,10 +3688,11 @@
 
     function authLegalHtml() {
       const si = STUDIO.signIn || {};
-      const terms = si.termsUrl || '#/tos';
-      const privacy = si.privacyUrl || '#/aup';
+      // Older configs pointed "Privacy Policy" at the acceptable use page; send those to the real one.
+      const terms = !si.termsUrl || si.termsUrl === '#/tos' ? '#/terms' : si.termsUrl;
+      const privacy = !si.privacyUrl || si.privacyUrl === '#/aup' ? '#/privacy' : si.privacyUrl;
       const ext = (u) => /^https:/.test(u) ? ' target="_blank" rel="noopener noreferrer"' : '';
-      return `<p class="auth-legal">By signing in you agree to our <a href="${esc(terms)}"${ext(terms)}>Terms of Service</a> and <a href="${esc(privacy)}"${ext(privacy)}>Privacy Policy</a>.</p>`;
+      return `<p class="auth-legal">By continuing you agree to the <a href="${esc(terms)}"${ext(terms)}>Terms of Service</a> and acknowledge the <a href="${esc(privacy)}"${ext(privacy)}>Privacy Policy</a>.</p>`;
     }
 
     function renderHrGate() {
@@ -3759,7 +3820,7 @@
         <h1>You've been invited</h1>
         ${loadFailed
           ? `<div class="error-box"><span>This invite link is invalid or has expired. You can still sign in normally.</span></div>`
-          : `<p class="auth-sub">Sign in with Roblox to accept. No application needed: we'll walk you straight through linking Discord and joining the team.</p>
+          : `<p class="auth-sub">Sign in to accept. There's no application: we'll take you straight through ${discordOn() ? 'linking Discord and ' : ''}joining the team.</p>
             ${info && (info.team || info.skillset) ? `<div class="auth-invite">
               ${info.team ? `<div><small>Team</small><strong style="color:${safeColor(info.team.color)};">${esc(info.team.name)}</strong></div>` : ''}
               ${info.skillset ? `<div><small>Skillset</small><strong style="color:${safeColor(info.skillset.color)};">${esc(info.skillset.name)}</strong></div>` : ''}
@@ -4992,7 +5053,7 @@
         const inReview = data.myTasks.filter(t => t.status === 'review');
         const sentBack = open.filter(t => t.reviewNote);
         return `
-      ${data.owed.hasMethod ? '' : `<div class="home-stat flag" style="margin-bottom:12px;"><div class="k">Before you can be paid</div><div class="v" style="font-size:15px;">Add a payout method</div><div class="s"><a href="#/my">Open My payments</a> and save how you want to be paid.</div></div>`}
+      ${data.owed.hasMethod ? '' : `<div class="home-stat flag" style="margin-bottom:12px;"><div class="k">Before you can be paid</div><div class="v" style="font-size:15px;">Add a payout method</div><div class="s"><a href="#/my?focus=payout">Open My payments</a> and save how you want to be paid.</div></div>`}
       <div class="home-stats">
         ${statCard('Owed to you', data.owed.usd > 0 || data.owed.robux <= 0 ? moneyUsd(data.owed.usd) : moneyRobux(data.owed.robux), data.owed.usd > 0 && data.owed.robux > 0 ? 'plus ' + moneyRobux(data.owed.robux) : (data.openRun ? 'Next run: ' + esc(data.openRun.label) : 'No run open yet'))}
         ${statCard('Open tasks', open.length, open.length ? 'Oldest first below' : 'Nothing assigned')}
@@ -5109,7 +5170,9 @@
       }
 
       function paint() {
-        const greeting = hrUsername ? 'Hi ' + esc(hrUsername) : 'Hi';
+        const hour = new Date().getHours();
+        const part = hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+        const greeting = hrUsername ? `${part}, ${esc(String(hrUsername).split(' ')[0])}` : part;
         const roleLabel = data ? (data.view === 'executive' ? 'Studio' : data.view === 'producer' ? 'Producer' : 'Developer') : '';
         app.innerHTML = `
     ${topbar()}
@@ -5640,7 +5703,7 @@
             ${statCard('Signed in', posture.sessions, posture.staleSessions ? posture.staleSessions + ' not used in a week' : 'All recent', posture.staleSessions > 0)}
             ${statCard('Accounts on hold', posture.holds, posture.holds ? 'Payouts paused' : 'None', posture.holds > 0)}
             ${statCard('Bank payouts', posture.bankAccounts, 'People you hold details for')}
-            ${statCard('No Discord linked', posture.unlinkedWithMethod, posture.unlinkedWithMethod ? 'But has a payout method' : 'All linked', posture.unlinkedWithMethod > 0)}
+            ${discordOn() ? statCard('No Discord linked', posture.unlinkedWithMethod, posture.unlinkedWithMethod ? 'But has a payout method' : 'All linked', posture.unlinkedWithMethod > 0) : statCard('Payout methods', posture.withMethod != null ? posture.withMethod : posture.bankAccounts, 'People who can be paid')}
           </div>
           <div class="home-row"><div class="home-row-main"><div class="home-row-title">Roles that can pay people</div><div class="home-row-meta"><span>${esc(posture.rolesThatCanPay.join(', ') || 'None')}</span></div></div></div>
           <div class="home-row"><div class="home-row-main"><div class="home-row-title">Roles that see bank details</div><div class="home-row-meta"><span>${esc(posture.rolesThatSeeBank.join(', ') || 'None')}</span></div></div></div>
@@ -5731,7 +5794,7 @@
           }
           let signEveryoneOut = false;
           if (next === 'lockdown') {
-            signEveryoneOut = confirm('Sign every other device out as well?\n\nOK signs everyone out. Cancel leaves sessions alone.');
+            signEveryoneOut = (await askConfirm('Sign every other device out as well?\n\nEveryone else will have to sign in again. Your own session stays.', { okLabel: 'Sign everyone out', cancelLabel: 'Leave them signed in', danger: true }));
           }
           working = true; paint();
           try {
@@ -5796,7 +5859,7 @@
 
         const signOutAll = document.getElementById('secSignOutAll');
         if (signOutAll) signOutAll.addEventListener('click', async () => {
-          if (!confirm('Sign out everyone whose role is below yours?\n\nThey will need to sign in again. Your own session stays.')) return;
+          if (!(await askConfirm('Sign out everyone whose role is below yours?\n\nThey will need to sign in again. Your own session stays.'))) return;
           working = true; paint();
           try {
             const json = await callHrData('revoke_all_sessions');
@@ -5948,8 +6011,8 @@
 
       steps.push({
         find: () => null,
-        title: "That's everything",
-        body: 'Nothing that was here before has gone. If something looks wrong, tell a lead. You can reopen this from the menu under your name.',
+        title: "That's the tour",
+        body: 'You can take this tour again any time from the menu under your name.',
         place: 'centre'
       });
 
@@ -6474,7 +6537,7 @@
           const id = b.dataset.deleteRequest;
           const r = allRequests.find(x => x.id === id);
           if (!r) return;
-          if (!confirm('Permanently delete this payment request? This cannot be undone.')) return;
+          if (!(await askConfirm('Permanently delete this payment request? This cannot be undone.'))) return;
           const btn = b;
           btn.disabled = true;
           btn.textContent = 'Deleting...';
@@ -6795,7 +6858,7 @@
           try {
             await exportRequestsToXlsx(getRows(), filter);
           } catch (err) {
-            alert('Could not build the spreadsheet. Please try again.');
+            toast("Couldn't build the spreadsheet. Check your connection (the export library loads on demand) and try again.", 'err');
           } finally {
             btn.disabled = false;
             btn.textContent = original;
@@ -7445,7 +7508,7 @@
           } catch (err) {
             btn.disabled = false;
             btn.textContent = 'Mark all paid';
-            alert('Could not save. Check your connection and try again.');
+            toast((err && err.message) || 'Could not save.', 'err');
           }
         }));
         const reloadAfter = async () => {
@@ -7506,7 +7569,7 @@
           if (!sel.length || owedBusy) return;
           const totalUsd = sel.reduce((s, o) => s + o.usd, 0);
           const totalRobux = sel.reduce((s, o) => s + o.robux, 0);
-          if (!confirm(`Mark ${sel.length} ${sel.length === 1 ? 'person' : 'people'} as paid (${fmtOwedTotal(totalUsd, totalRobux)} in total)?`)) return;
+          if (!(await askConfirm(`Mark ${sel.length} ${sel.length === 1 ? 'person' : 'people'} as paid (${fmtOwedTotal(totalUsd, totalRobux)} in total)?`))) return;
           owedBusy = true; paintContent();
           let done = 0; const failed = [];
           for (const o of sel) {
@@ -7725,6 +7788,20 @@
 
       const landingQuery = parseHashQuery();
       const discordLinkError = landingQuery.get('discordLinkError');
+      // Links like "Add payout method" land here with ?focus=payout: scroll to the form once it's loaded.
+      let pendingPayoutFocus = landingQuery.get('focus') === 'payout';
+      if (pendingPayoutFocus) history.replaceState(null, '', '#/my');
+
+      function focusPayout() {
+        const panel = document.getElementById('payoutPanel');
+        if (!panel) return;
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        panel.classList.remove('flash-focus');
+        void panel.offsetWidth;
+        panel.classList.add('flash-focus');
+        const first = panel.querySelector('input[name="methodChoice"]:checked') || panel.querySelector('input');
+        if (first) setTimeout(() => first.focus({ preventScroll: true }), 350);
+      }
       if ((discordLinkError || landingQuery.get('discordLinked')) && window.location.hash.split('?')[0] === '#/my') {
         history.replaceState(null, '', '#/my');
       }
@@ -7867,7 +7944,7 @@
     <div class="shell">
       <div class="heading-block">
         <h1>My payments</h1>
-        <p class="sub">What you're owed, how you get paid, and whether you meet the payout requirements. A producer logs requests for you, so there's nothing to submit yourself.</p>
+        <p class="sub">What you're owed, how you get paid, and whether you're ready to be paid.</p>
       </div>
 
       ${!myTasksLoading && myTasks.length ? `
@@ -7904,7 +7981,7 @@
       <div style="margin-bottom:24px;display:flex;flex-direction:column;gap:10px;">
         ${myBroadcasts.map(b => `
           <div class="confirm-box">
-            <div class="icon">&#128226;</div>
+            <div class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M16 9a3 3 0 0 1 0 6"/><path d="M18.5 6.5a7 7 0 0 1 0 11"/></svg></div>
             <div class="txt">
               <strong>${b.type === 'global' ? 'Announcement' : `Team announcement${(b.teams && b.teams.name) ? ' &middot; ' + esc(b.teams.name) : ''}`}</strong>
               <span>${esc(b.message)}</span>
@@ -7944,12 +8021,12 @@
                     <div class="elig-meta">${g.metaLabel ? esc(g.metaLabel) : (g.isMember ? 'You are a member' : 'Not a member yet')}</div>
                   </div>
                 </div>
-                ${!g.isMember && g.robloxGroupId != null ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(g.robloxGroupId)}" target="_blank" rel="noopener">Join group</a>` : (!g.isMember && g.id === 'payment_method' ? `<a class="btn btn-ghost btn-sm" href="#/my">Add payment method</a>` : '')}
+                ${!g.isMember && g.robloxGroupId != null ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/groups/${esc(g.robloxGroupId)}" target="_blank" rel="noopener">Join group</a>` : (!g.isMember && g.id === 'payment_method' ? `<button type="button" class="btn btn-ghost btn-sm" data-focus-payout>Add payout method</button>` : '')}
               </div>`).join('')}
           `}
         </div>
 
-        <div class="panel">
+        ${discordOn() ? `<div class="panel">
           <div class="preview-label">Discord account</div>
           ${discordLinkMsg ? `<div class="error-box" style="${discordLinkMsg.ok ? 'background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok-text);' : ''}"><span>${esc(discordLinkMsg.text)}</span></div>` : ''}
           ${discordLinkLoading ? `<div class="dash-loading">Loading...</div>` : discordLink ? `
@@ -7961,12 +8038,12 @@
             <p style="color:var(--ink-soft);font-size:13px;margin-bottom:14px;">No Discord account linked. Link it so we can message you about your team and payments.</p>
             <a class="btn btn-primary btn-sm" id="myLinkDiscordBtn" href="${staffDiscordLinkHref('#/my')}">${discordLinkError ? 'Try again' : 'Link Discord account'}</a>
           `}
-        </div>
+        </div>` : ''}
 
-        <div class="panel">
-          <div class="preview-label">Payment method</div>
+        <div class="panel" id="payoutPanel">
+          <div class="preview-label">Payout method</div>
           ${methodError ? `<div class="error-box"><span>${esc(methodError)}</span></div>` : ''}
-          ${methodSaved ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Payment method saved</strong><span>HR will use these details for your next payout.</span></div></div>` : ''}
+          ${methodSaved ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Payout method saved</strong><span>Your next payout goes here.</span></div></div>` : ''}
           ${methodLoading ? `<div class="dash-loading">Loading your saved details...</div>` : `
             <div class="field">
               <label>How would you like to be paid?</label>
@@ -8014,13 +8091,13 @@
               ${splitSaving ? '<p class="hint">Saving...</p>' : ''}
             </div>`;
             })()}
-            <button type="button" class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payment method'}</button>
+            <button type="button" class="btn btn-primary" id="saveMethodBtn" ${savingMethod ? 'disabled' : ''}>${savingMethod ? 'Saving...' : 'Save payout method'}</button>
           `}
         </div>
       </div>
 
-      <div class="heading-block" style="margin-top:36px;">
-        <h1>My teams &amp; skillsets</h1>
+      <div class="heading-block section-head">
+        <h2 class="sec-title">My teams &amp; skillsets</h2>
       </div>
       <div class="panel">
         ${myTeamsLoading ? `<div class="dash-loading">Loading your teams...</div>` : myTeams.length === 0 ? `<div class="empty-note">${hrTeamState === 'removed' ? "Your team was removed, so you're not on one at the moment. A lead will place you on another team or let you know what's happening." : hrTeamState === 'none' ? "You're not on a team yet. A lead will add you, or send you an invite link." : "You haven't joined any teams yet. Ask whoever invited you for an invite link."}</div>` : `
@@ -8034,8 +8111,8 @@
         `}
       </div>
 
-      <div class="heading-block" style="margin-top:36px;">
-        <h1>Warnings received</h1>
+      <div class="heading-block section-head">
+        <h2 class="sec-title">Warnings received</h2>
       </div>
       <div class="panel">
         ${warningsError ? `<div class="error-box"><span>${esc(warningsError)}</span></div>` : ''}
@@ -8051,8 +8128,8 @@
       </div>
 
       ${!loading && !loadError ? `
-      <div class="heading-block" style="margin-top:36px;">
-        <h1>Your requests</h1>
+      <div class="heading-block section-head">
+        <h2 class="sec-title">Your requests</h2>
       </div>
       <div class="table-wrap">
         ${summary.requests.length === 0 ? `<div class="dash-empty"><h3>Nothing here yet</h3><p>Once a producer logs a request for you, it'll show up here.</p></div>` : `
@@ -8078,6 +8155,8 @@
 
         wireTopbarSignOut();
         paintMethodFields();
+        document.querySelectorAll('[data-focus-payout]').forEach(b => b.addEventListener('click', focusPayout));
+        if (pendingPayoutFocus && !methodLoading) { pendingPayoutFocus = false; setTimeout(focusPayout, 60); }
         document.querySelectorAll('[data-convert]').forEach(el => el.addEventListener('click', async () => {
           const id = el.dataset.convert;
           const r = (summary ? summary.requests : []).find(x => String(x.id) === String(id));
@@ -8086,7 +8165,7 @@
           const estimate = r.currency === 'USD'
             ? `about R$ ${Math.round(Number(r.payment) / (DEVEX_RATE || 0.0038)).toLocaleString()}`
             : `about $${(Number(r.payment) * (DEVEX_RATE || 0.0038)).toFixed(2)}`;
-          if (!confirm(`Switch this request to ${to}? It becomes ${estimate} at today's DevEx rate, and it stays in ${to} from then on.`)) return;
+          if (!(await askConfirm(`Switch this request to ${to}? It becomes ${estimate} at today's DevEx rate, and it stays in ${to} from then on.`))) return;
           el.disabled = true;
           try {
             const res = await callHrData('convert_my_request', { id });
@@ -8130,7 +8209,7 @@
 
         const unlinkDiscordBtn = document.getElementById('unlinkDiscordBtn');
         if (unlinkDiscordBtn) unlinkDiscordBtn.addEventListener('click', async () => {
-          if (!confirm('Unlink Discord? My payments will lock until you link it again and rejoin your team\'s Roblox groups.')) return;
+          if (!(await askConfirm('Unlink Discord? My payments will lock until you link it again and rejoin your team\'s Roblox groups.'))) return;
           unlinkingDiscord = true; discordLinkMsg = null; paint();
           try {
             await unlinkMyDiscord();
@@ -8154,7 +8233,7 @@
         const slot = document.getElementById('methodFieldsSlot');
         if (!slot) return;
         const def = PAYMENT_METHODS[selectedMethod] || PAYMENT_METHODS.PAYPAL;
-        slot.innerHTML = (def.confidential ? `<div class="privacy-note"><span class="privacy-icon" aria-hidden="true">&#128274;</span><span>${esc(PAYOUT_PRIVACY_NOTE)}</span></div>` : '') + def.fields.map(f => `
+        slot.innerHTML = (def.confidential ? `<div class="privacy-note"><span class="privacy-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span><span>${esc(PAYOUT_PRIVACY_NOTE)}</span></div>` : '') + def.fields.map(f => `
           <div class="field">
             <label>${esc(f.label)}</label>
             <input type="${f.type}" data-method-field="${f.key}" placeholder="${esc(f.placeholder || '')}" value="${esc(methodDetails[f.key] || '')}">
@@ -8172,6 +8251,8 @@
         try {
           await savePaymentMethod(selectedMethod, methodDetails);
           savingMethod = false; methodSaved = true; paint();
+          loadEligibility();
+          getMyPaymentMethod().then(m => { if (myGen !== renderGen) return; method = m; paint(); }).catch(() => { });
         } catch (err) {
           savingMethod = false;
           methodError = (err && err.message) ? err.message : 'Could not save your payment method. Check your connection and try again.';
@@ -8213,6 +8294,7 @@
       }
 
       async function loadDiscordLink() {
+        if (!discordOn()) { discordLinkLoading = false; return; }
         discordLinkLoading = true; paint();
         try {
           discordLink = await getMyDiscordLink();
@@ -8317,7 +8399,7 @@
           const s = await startAccessRelink(getPendingInvite(), restart);
           if (myGen !== renderGen) return;
           access = s;
-          needsDiscordLink = !s.discordLinked;
+          needsDiscordLink = discordOn() && !s.discordLinked;
           if (s.inviteInvalid || s.inviteStarted) clearPendingInvite();
           if (s.open) setRejoinState('started');
           if (s.startFailed) {
@@ -8365,7 +8447,7 @@
           const before = JSON.stringify(access);
           const wasOpen = !!(access && access.open);
           access = s;
-          needsDiscordLink = !s.discordLinked;
+          needsDiscordLink = discordOn() && !s.discordLinked;
           checkingAccess = false;
           accessLoading = false;
 
@@ -8407,10 +8489,12 @@
       const canManageRoles = hasPermission('roles.manage');
       const canManageOnboarding = hasPermission('settings.manage_onboarding');
       const canManageBroadcasts = hasPermission('broadcasts.manage');
+      const canManageBranding = hasPermission('settings.manage_branding');
 
-      if (!canManageGames && !canManageRate && !canManageGroups && !canManageBaseAccess && !canManageRoles && !canManageOnboarding && !canManageBroadcasts) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
+      if (!canManageGames && !canManageRate && !canManageGroups && !canManageBaseAccess && !canManageRoles && !canManageOnboarding && !canManageBroadcasts && !canManageBranding) { window.location.hash = hasPermission('dashboard.view') ? '#/dashboard' : '#/'; return; }
 
       const manageTabDefs = [
+        { id: 'branding', group: 'Studio', label: 'Branding', desc: 'Name, logo, colours, sign-in', enabled: canManageBranding },
         { id: 'access', group: 'Access', label: 'Sign-in', desc: 'Who can get in', enabled: canManageBaseAccess || canManageGroups },
         { id: 'roles', group: 'Access', label: 'Roles', desc: 'Permissions and rank', enabled: canManageRoles },
         { id: 'games', group: 'Payments', label: 'Games & DevEx', desc: 'Games, DevEx rate, minimums', enabled: canManageGames || canManageRate },
@@ -8458,7 +8542,7 @@
       let addBaseAccessGroupError = null;
 
       let baseAccessDiscordServers = [];
-      let baseAccessDiscordServersLoading = canManageBaseAccess;
+      let baseAccessDiscordServersLoading = canManageBaseAccess && discordOn();
       let baseAccessDiscordServersError = null;
       let addingBaseAccessDiscordServer = false;
       let addBaseAccessDiscordServerError = null;
@@ -8492,25 +8576,25 @@
       let lastCreatedLink = null;
 
       let positions = [];
-      let positionsLoading = canManageOnboarding;
+      let positionsLoading = canManageOnboarding && featureOn('recruitment');
       let positionsError = null;
       let addingPosition = false;
       let addPositionError = null;
 
       let recruitmentConfig = { autoRoleId: null, discordRoleId: null, gracePeriodHours: null, notifyRoleId: null };
-      let recruitmentConfigLoading = canManageOnboarding;
+      let recruitmentConfigLoading = canManageOnboarding && featureOn('recruitment');
       let recruitmentConfigError = null;
       let savingRecruitmentConfig = false;
       let recruitmentConfigSuccess = false;
 
       let approvalConfig = { signoffRoleId: null, producerRoleId: null };
-      let approvalConfigLoading = canManageOnboarding;
+      let approvalConfigLoading = canManageOnboarding && featureOn('recruitment');
       let approvalConfigError = null;
       let savingApprovalConfig = false;
       let approvalConfigSuccess = false;
 
       let onboardingGroupConfig = { groupId: null, groupRoleId: null };
-      let onboardingGroupConfigLoading = canManageOnboarding;
+      let onboardingGroupConfigLoading = canManageOnboarding && discordOn();
       let onboardingGroupConfigError = null;
       let savingOnboardingGroupConfig = false;
       let onboardingGroupConfigSuccess = false;
@@ -8568,11 +8652,13 @@
 
         <div style="flex:1;min-width:0;">
 
+      ${manageTab === 'branding' && canManageBranding ? '<div id="brandingMount"></div>' : ''}
+
       ${manageTab === 'access' ? `
       ${canManageBaseAccess ? `
       <div class="heading-block" id="sec-signin">
         <h2 class="sec-title">Who can sign in</h2>
-        <p class="sub">People get in if they're in one of these Roblox groups (at the minimum rank, if set) or one of these Discord servers. Anyone given a role, a team or an invite link also gets in. Everyone else is sent to the application form, or turned away if recruitment is off.</p>
+        <p class="sub">People get in if they're in one of these Roblox groups (at the minimum rank, if set)${discordOn() ? ' or one of these Discord servers' : ''}. Anyone given a role, a team or an invite link also gets in. ${featureOn('recruitment') ? 'Everyone else is sent to the application form.' : 'Everyone else is turned away.'}</p>
       </div>
       <div class="panel" style="max-width:640px;margin-bottom:20px;">
         ${baseAccessGroupsError ? `<div class="error-box"><span>${esc(baseAccessGroupsError)}</span></div>` : ''}
@@ -8599,7 +8685,7 @@
         </div>
       </div>
 
-      <div class="panel" style="max-width:640px;margin-bottom:36px;">
+      ${discordOn() ? `<div class="panel" style="max-width:640px;margin-bottom:36px;">
         ${baseAccessDiscordServersError ? `<div class="error-box"><span>${esc(baseAccessDiscordServersError)}</span></div>` : ''}
         ${baseAccessDiscordServersLoading ? `<div class="dash-loading">Loading Discord servers...</div>` : baseAccessDiscordServers.length === 0 ? `<div class="empty-note">No sign-in Discord servers configured yet.</div>` : baseAccessDiscordServers.map(s => `
           <div class="role-row">
@@ -8622,7 +8708,7 @@
           <p class="sub" style="margin:0 0 12px;">This only works for someone who has already linked a Discord account (e.g. by going through the application flow once) - checked via their linked account, not a live Discord login.</p>
           <button type="button" class="btn btn-ok" id="addBaseDiscordBtn" ${addingBaseAccessDiscordServer ? 'disabled' : ''}>${addingBaseAccessDiscordServer ? 'Adding...' : 'Add server'}</button>
         </div>
-      </div>` : ''}
+      </div>` : ''}` : ''}
       ` : ''}
 
       ${manageTab === 'rates' ? `
@@ -8771,7 +8857,7 @@
       ${manageTab === 'roles' && canManageRoles ? `
       <div class="heading-block" id="sec-roles">
         <h2 class="sec-title">Roles and permissions</h2>
-        <p class="sub">Roles can tie to a Roblox group and rank, or get assigned to a specific account. A user gets every permission from every role they qualify for. Give developers roles for their own payments view, and give "Submit payment requests" to producers or HR logging on behalf of others. This is separate from sign-in access above, someone can sign in but have no roles and see an empty tool until one is granted.</p>
+        <p class="sub">Roles can tie to a Roblox group and rank, or get assigned to a specific account. A user gets every permission from every role they qualify for. Give "Submit payment requests" to the people who log work on behalf of others. Roles are separate from sign-in access: someone can sign in with no roles, and will only see their own payments until a role is granted.</p>
       </div>
 
       <div class="manage-grid">
@@ -8787,7 +8873,7 @@
               <div class="role-row-top">
                 <div>
                   <strong>${esc(r.name)}</strong>
-                  <div class="role-meta">${r.discord_role_id ? `Discord role ${esc(r.discord_role_id)} &middot; ` : ''}${r.link_only ? `Link only${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ''}` : r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
+                  <div class="role-meta">${discordOn() && r.discord_role_id ? `Discord role ${esc(r.discord_role_id)} &middot; ` : ''}${r.link_only ? `Link only${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ''}` : r.roblox_group_id ? `Group ${esc(r.roblox_group_id)}${r.min_rank != null ? `, rank must equal ${esc(r.min_rank)}` : ', any rank'}` : 'Manual assignment only'} &middot; Hierarchy ${esc(roleHierarchy)}</div>
                 </div>
                 <div style="display:flex;gap:6px;">
                   <button type="button" class="btn btn-ghost btn-sm" data-edit-role="${esc(r.id)}" ${canManageThisRole ? '' : 'disabled'} title="${canManageThisRole ? '' : "You can't manage a role at or above your own hierarchy level"}">${isEditing ? 'Close' : 'Edit'}</button>
@@ -8812,7 +8898,7 @@
                   </label>
                 </div>
                 <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" class="editRoleHierarchy" data-role-id="${esc(r.id)}" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}" value="${esc(roleHierarchy)}"></div>
-                <div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" class="editRoleDiscordRoleId" data-role-id="${esc(r.id)}" placeholder="e.g. 123456789012345678" value="${r.discord_role_id ? esc(r.discord_role_id) : ''}"></div>
+                ${discordOn() ? `<div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" class="editRoleDiscordRoleId" data-role-id="${esc(r.id)}" placeholder="e.g. 123456789012345678" value="${r.discord_role_id ? esc(r.discord_role_id) : ''}"></div>` : ''}
                 <div class="field">
                   <label>Permissions</label>
                   ${permissionPickerHtml('editRolePerm', r.permissions || [], r.id)}
@@ -8837,7 +8923,7 @@
               </label>
             </div>
             <div class="field"><label>Hierarchy level <span class="hint">(must be lower than your own, currently ${esc(hrMaxHierarchy)})</span></label><input type="number" id="newRoleHierarchy" placeholder="e.g. 10" min="0" max="${Math.max(hrMaxHierarchy - 1, 0)}"></div>
-            <div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" id="newRoleDiscordRoleId" placeholder="e.g. 123456789012345678"></div>
+            ${discordOn() ? `<div class="field"><label>Discord role ID <span class="hint">(optional, given and taken away automatically)</span></label><input type="text" id="newRoleDiscordRoleId" placeholder="e.g. 123456789012345678"></div>` : ''}
             <div class="field">
               <label>Permissions</label>
               ${permissionPickerHtml('newRolePerm', [], '')}
@@ -8878,7 +8964,7 @@
       ${manageTab === 'teams' && canManageOnboarding ? `
       <div class="heading-block" id="sec-teams">
         <h2 class="sec-title">Teams &amp; skillsets</h2>
-        <p class="sub">Create a team for each Discord/Roblox group, tag it with the skillsets that apply to it, then generate an invite link below. Anyone who signs in through that link gets assigned to that team and skillset automatically, and sees the right Discord and Roblox group buttons in their onboarding.</p>
+        <p class="sub">Create a team for each group of people that works together, tag it with the skillsets that apply to it, then create an invite link under Invites. Anyone who signs in through that link is put on that team and skillset automatically.</p>
       </div>
 
       <div class="manage-grid">
@@ -8893,7 +8979,7 @@
             <div class="role-row-top">
               <div>
                 <strong style="color:${safeColor(t.color, 'var(--ink)')};">${esc(t.name)}</strong>
-                <div class="role-meta">${t.discord_url ? 'Discord linked' : 'No Discord linked'}${t.roblox_group_url ? ' &middot; Roblox group linked' : ''}</div>
+                <div class="role-meta">${[discordOn() ? (t.discord_url ? 'Discord linked' : 'No Discord linked') : '', t.roblox_group_url || t.roblox_group_id ? 'Roblox group linked' : 'No Roblox group'].filter(Boolean).join(' &middot; ')}</div>
               </div>
               <div style="display:flex;gap:6px;">
                 <button type="button" class="btn btn-ghost btn-sm" data-edit-team="${esc(t.id)}">${isEditing ? 'Close' : 'Edit'}</button>
@@ -8910,7 +8996,7 @@
                 <div class="field"><label>Team name</label><input type="text" class="editTeamName" data-team-id="${esc(t.id)}" value="${esc(t.name)}"></div>
                 <div class="field"><label>Color <span class="hint">(optional, hex)</span></label><input type="text" class="editTeamColor" data-team-id="${esc(t.id)}" value="${esc(t.color || '')}"></div>
               </div>
-              <div class="field"><label>Discord invite URL</label><input type="text" class="editTeamDiscord" data-team-id="${esc(t.id)}" value="${esc(t.discord_url || '')}"></div>
+              ${discordOn() ? `<div class="field"><label>Discord invite URL</label><input type="text" class="editTeamDiscord" data-team-id="${esc(t.id)}" value="${esc(t.discord_url || '')}"></div>` : ''}
               <div class="field"><label>Roblox group URL</label><input type="text" class="editTeamGroupUrl" data-team-id="${esc(t.id)}" value="${esc(t.roblox_group_url || '')}"></div>
               <div class="row2">
                 <div class="field"><label>Roblox group ID</label><input type="number" class="editTeamGroupId" data-team-id="${esc(t.id)}" placeholder="e.g. 1090702452" value="${t.roblox_group_id != null ? esc(t.roblox_group_id) : ''}"></div>
@@ -8935,7 +9021,7 @@
               <div class="field"><label>Team name</label><input type="text" id="newTeamName" placeholder="e.g. Team Alpha"></div>
               <div class="field"><label>Color <span class="hint">(optional, hex)</span></label><input type="text" id="newTeamColor" placeholder="#3730D9"></div>
             </div>
-            <div class="field"><label>Discord invite URL</label><input type="text" id="newTeamDiscord" placeholder="https://discord.gg/..."></div>
+            ${discordOn() ? `<div class="field"><label>Discord invite URL</label><input type="text" id="newTeamDiscord" placeholder="https://discord.gg/..."></div>` : ''}
             <div class="field"><label>Roblox group URL</label><input type="text" id="newTeamGroupUrl" placeholder="https://www.roblox.com/groups/..."></div>
             <div class="row2">
               <div class="field"><label>Roblox group ID</label><input type="number" id="newTeamGroupId" placeholder="e.g. 1090702452"></div>
@@ -8987,12 +9073,12 @@
       </div>
       <div class="panel" style="max-width:640px;">
         <ol class="ob-overview">
-          <li><strong>Link Discord.</strong> Required for everyone.</li>
-          <li><strong>Join their team.</strong> Only if they came in through an invite link below. The bot DMs them the Roblox group step, and the team, skill and role are added once they finish.</li>
+          ${discordOn() ? `<li><strong>Link Discord.</strong> Required for everyone.</li>
+          <li><strong>Join their team.</strong> Only if they came in through an invite link below. The bot DMs them the Roblox group step, and the team, skill and role are added once they finish.</li>` : `<li><strong>Join their team.</strong> Only if they came in through an invite link below. The team, skill and role are added as soon as they sign in.</li>`}
           <li><strong>Welcome, team info, Terms of Service and Acceptable Use Policy.</strong> They read and accept each one.</li>
           <li><strong>Add a payout method.</strong> Optional, they can skip it.</li>
         </ol>
-        <p class="hint" style="margin:10px 0 0;">Recruits hired through Recruitment go through the same Roblox group step after they're finalised.</p>
+        ${featureOn('recruitment') ? `<p class="hint" style="margin:10px 0 0;">Recruits hired through Recruitment go through the same Roblox group step after they're finalised.</p>` : ''}
       </div>
 
       </div></details>
@@ -9048,7 +9134,7 @@
         </div>
       </div>
 
-      
+      ${discordOn() ? `
       <details class="advanced" style="margin-top:28px;"><summary>Roblox group step <small>Auto-join and rank new people in a Roblox group</small></summary><div class="advanced-body">
       <div class="heading-block" id="sec-onboarding-flow">
         <h2 class="sec-title">Roblox group step</h2>
@@ -9077,7 +9163,7 @@
         </div>
         <button type="button" class="btn btn-primary" id="saveOnboardingGroupConfigBtn" style="width:auto;" ${savingOnboardingGroupConfig ? 'disabled' : ''}>${savingOnboardingGroupConfig ? 'Saving...' : 'Save settings'}</button>
         `}
-      </div></div></details>` : ''}
+      </div></div></details>` : ''}` : ''}
       ${manageTab === 'recruitment' && canManageOnboarding ? `
       <div class="heading-block" id="sec-positions">
         <h2 class="sec-title">Positions</h2>
@@ -9238,7 +9324,9 @@
 
         wireTopbarSignOut();
 
-        document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', () => { manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); if (manageTab === 'rates' && !rateBandsLoaded) loadRateBands(); }));
+        const brandingMount = document.getElementById('brandingMount');
+        if (brandingMount) mountBrandingEditor(brandingMount);
+        document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', async () => { if (manageTab === 'branding' && b.dataset.manageTab !== 'branding' && brandingState.dirty && !(await askConfirm('You have unsaved branding changes. Leave without saving?'))) return; manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); if (manageTab === 'rates' && !rateBandsLoaded) loadRateBands(); }));
 
         const bandSaveBtn = document.getElementById('bandSaveBtn');
         if (bandSaveBtn) bandSaveBtn.addEventListener('click', async () => {
@@ -9309,12 +9397,12 @@
 
           document.querySelectorAll('[data-del-base-group]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delBaseGroup;
-            if (!confirm('Remove this sign-in group?')) return;
+            if (!(await askConfirm('Remove this sign-in group?'))) return;
             try {
               await deleteBaseAccessGroup(id);
               await loadBaseAccessGroups();
             } catch (err) {
-              alert('Could not remove that group. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that group.', 'err');
             }
           }));
 
@@ -9337,12 +9425,12 @@
 
           document.querySelectorAll('[data-del-base-discord]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delBaseDiscord;
-            if (!confirm('Remove this sign-in Discord server?')) return;
+            if (!(await askConfirm('Remove this sign-in Discord server?'))) return;
             try {
               await deleteBaseAccessDiscordServer(id);
               await loadBaseAccessDiscordServers();
             } catch (err) {
-              alert('Could not remove that server. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that server.', 'err');
             }
           }));
         }
@@ -9367,12 +9455,12 @@
 
           document.querySelectorAll('[data-del-position]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delPosition;
-            if (!confirm('Remove this position? It will disappear from the application dropdown.')) return;
+            if (!(await askConfirm('Remove this position? It will disappear from the application dropdown.'))) return;
             try {
               await deleteRecruitmentPosition(id);
               await loadPositions();
             } catch (err) {
-              alert('Could not remove that position. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that position.', 'err');
             }
           }));
 
@@ -9487,12 +9575,12 @@
 
           document.querySelectorAll('[data-del-game]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delGame;
-            if (!confirm('Remove this game from the list? Existing requests keep the game name they were logged with.')) return;
+            if (!(await askConfirm('Remove this game from the list? Existing requests keep the game name they were logged with.'))) return;
             try {
               await deleteGame(id);
               paint();
             } catch (err) {
-              alert('Could not remove that game. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that game.', 'err');
             }
           }));
         }
@@ -9533,12 +9621,12 @@
 
           document.querySelectorAll('[data-del-group]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delGroup;
-            if (!confirm('Remove this eligibility requirement?')) return;
+            if (!(await askConfirm('Remove this eligibility requirement?'))) return;
             try {
               await deleteRequiredGroup(id);
               await loadGroups();
             } catch (err) {
-              alert('Could not remove that group. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that group.', 'err');
             }
           }));
         }
@@ -9569,12 +9657,12 @@
 
           document.querySelectorAll('[data-del-role]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delRole;
-            if (!confirm('Remove this role? Anyone who only had access through it will lose access.')) return;
+            if (!(await askConfirm('Remove this role? Anyone who only had access through it will lose access.'))) return;
             try {
               await deleteRole(id);
               await loadRoles();
             } catch (err) {
-              alert('Could not remove that role. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that role.', 'err');
             }
           }));
 
@@ -9605,7 +9693,7 @@
             const minRank = document.querySelector(`.editRoleMinRank[data-role-id="${id}"]`).value;
             const hierarchy = document.querySelector(`.editRoleHierarchy[data-role-id="${id}"]`).value;
             const linkOnly = document.querySelector(`.editRoleLinkOnly[data-role-id="${id}"]`).checked;
-            const discordRoleId = document.querySelector(`.editRoleDiscordRoleId[data-role-id="${id}"]`).value.trim();
+            const discordRoleId = (document.querySelector(`.editRoleDiscordRoleId[data-role-id="${id}"]`) || { value: '' }).value.trim();
             const permissions = Array.from(document.querySelectorAll(`.editRolePerm[data-role-id="${id}"]:checked`)).map(x => x.value);
             if (!name) { editRoleError = 'Enter a role name.'; paint(); return; }
             if (hierarchy !== '' && Number(hierarchy) >= hrMaxHierarchy) { editRoleError = 'Hierarchy level must be lower than your own.'; paint(); return; }
@@ -9645,7 +9733,7 @@
               await deleteRoleAssignment(id);
               await loadAssignments();
             } catch (err) {
-              alert('Could not remove that assignment. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that assignment.', 'err');
             }
           }));
         }
@@ -9655,7 +9743,7 @@
           if (addTeamBtn) addTeamBtn.addEventListener('click', async () => {
             const name = document.getElementById('newTeamName').value.trim();
             const color = document.getElementById('newTeamColor').value.trim();
-            const discordUrl = document.getElementById('newTeamDiscord').value.trim();
+            const discordUrl = (document.getElementById('newTeamDiscord') || { value: '' }).value.trim();
             const robloxGroupUrl = document.getElementById('newTeamGroupUrl').value.trim();
             const robloxGroupId = document.getElementById('newTeamGroupId').value.trim() || null;
             const defaultGroupRoleId = document.getElementById('newTeamGroupRoleId').value.trim() || null;
@@ -9685,7 +9773,7 @@
             const id = Number(el.dataset.saveTeam);
             const name = document.querySelector(`.editTeamName[data-team-id="${id}"]`).value.trim();
             const color = document.querySelector(`.editTeamColor[data-team-id="${id}"]`).value.trim();
-            const discordUrl = document.querySelector(`.editTeamDiscord[data-team-id="${id}"]`).value.trim();
+            const discordUrl = (document.querySelector(`.editTeamDiscord[data-team-id="${id}"]`) || { value: '' }).value.trim();
             const robloxGroupUrl = document.querySelector(`.editTeamGroupUrl[data-team-id="${id}"]`).value.trim();
             const robloxGroupId = document.querySelector(`.editTeamGroupId[data-team-id="${id}"]`).value.trim() || null;
             const defaultGroupRoleId = document.querySelector(`.editTeamGroupRoleId[data-team-id="${id}"]`).value.trim() || null;
@@ -9707,12 +9795,12 @@
 
           document.querySelectorAll('[data-del-team]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delTeam;
-            if (!confirm('Remove this team? Anyone assigned to it keeps their assignment record, but the team info disappears from their onboarding.')) return;
+            if (!(await askConfirm('Remove this team? Anyone assigned to it keeps their assignment record, but the team info disappears from their onboarding.'))) return;
             try {
               await deleteTeam(id);
               await loadTeamsData();
             } catch (err) {
-              alert('Could not remove that team. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that team.', 'err');
             }
           }));
 
@@ -9736,12 +9824,12 @@
 
           document.querySelectorAll('[data-del-skillset]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delSkillset;
-            if (!confirm('Remove this skillset?')) return;
+            if (!(await askConfirm('Remove this skillset?'))) return;
             try {
               await deleteSkillset(id);
               await loadTeamsData();
             } catch (err) {
-              alert('Could not remove that skillset. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that skillset.', 'err');
             }
           }));
 
@@ -9751,12 +9839,12 @@
 
           document.querySelectorAll('[data-del-link]').forEach(el => el.addEventListener('click', async () => {
             const token = el.dataset.delLink;
-            if (!confirm('Remove this invite link? It will stop working immediately.')) return;
+            if (!(await askConfirm('Remove this invite link? It will stop working immediately.'))) return;
             try {
               await deleteOnboardingLink(token);
               await loadLinksData();
             } catch (err) {
-              alert('Could not remove that link. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that link.', 'err');
             }
           }));
 
@@ -9807,12 +9895,12 @@
 
           document.querySelectorAll('[data-del-broadcast]').forEach(el => el.addEventListener('click', async () => {
             const id = el.dataset.delBroadcast;
-            if (!confirm('Remove this broadcast? It will disappear from everyone\'s "My payments" tab.')) return;
+            if (!(await askConfirm('Remove this broadcast? It will disappear from everyone\'s "My payments" tab.'))) return;
             try {
               await deleteBroadcast(id);
               await loadBroadcastsData();
             } catch (err) {
-              alert('Could not remove that broadcast. Check your connection and try again.');
+              toast((err && err.message) || 'Could not remove that broadcast.', 'err');
             }
           }));
         }
@@ -10010,15 +10098,436 @@
 
       paint();
       if (canManageGroups) { loadGroups(); loadIgnoreEligibility(); }
-      if (canManageBaseAccess) { loadBaseAccessGroups(); loadBaseAccessDiscordServers(); }
+      if (canManageBaseAccess) { loadBaseAccessGroups(); if (discordOn()) loadBaseAccessDiscordServers(); }
       if (canManageRoles) {
         loadRoles().then(loadAssignments);
       } else if (canManageOnboarding) {
         loadRoles();
       }
-      if (canManageOnboarding) { loadTeamsData(); loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); loadOnboardingGroupConfig(); loadRobloxGroupApiKeyStatus(); }
+      if (canManageOnboarding) {
+        loadTeamsData();
+        loadRobloxGroupApiKeyStatus();
+        if (featureOn('recruitment')) { loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); }
+        if (discordOn()) loadOnboardingGroupConfig();
+      }
       if (canManageRate) { loadUsdMinimum(); loadRateBands(); }
       if (canManageBroadcasts) loadBroadcastsData();
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Settings > Branding. Everything that makes the panel look like the studio's own:
+    // name, logo, colours, sign-in page, features, payout options and legal text. Saved to
+    // the database and applied for everyone straight away. Only people with
+    // settings.manage_branding can open it.
+    //
+    // The draft lives outside the Settings page so it survives the page re-painting while
+    // other settings finish loading.
+    // ---------------------------------------------------------------------------------
+    const brandingState = { loading: false, loaded: false, error: null, data: null, draft: null, dirty: false, saving: false, notice: null, legalTab: 'tos' };
+
+    const BRANDING_FEATURES = [
+      ['payments', 'Payments', 'Logging work, approvals and payouts'],
+      ['claims', 'Payment requests', 'Staff can ask to be paid for work'],
+      ['paymentRuns', 'Payment runs', 'Group approved work into a pay day'],
+      ['analytics', 'Analytics', 'Spend and output charts'],
+      ['teams', 'Teams & games', 'Teams, games, task boards and deadlines'],
+      ['staffDatabase', 'Staff database', 'Everyone in one searchable list'],
+      ['broadcasts', 'Announcements', 'Messages shown to everyone or a team'],
+      ['security', 'Security centre', 'Security levels, holds and sessions'],
+      ['audit', 'Audit log', 'Every important change, with undo'],
+      ['backups', 'Backups', 'Snapshots of the database you can restore'],
+      ['pushNotifications', 'Browser notifications', 'Push notifications where supported']
+    ];
+    const BRANDING_METHOD_LABELS = { PAYPAL: 'PayPal', DEVEX_ROBUX: 'Robux', VENMO: 'Venmo', BANK_TRANSFER: 'Bank transfer' };
+    const BRANDING_CURRENCY_LABELS = { ROBUX: 'Robux', USD: 'US dollars' };
+
+    function brandingGet(path) {
+      return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), brandingState.draft);
+    }
+    function brandingSet(path, value) {
+      const keys = path.split('.');
+      let o = brandingState.draft;
+      keys.slice(0, -1).forEach(k => { if (!o[k] || typeof o[k] !== 'object') o[k] = {}; o = o[k]; });
+      o[keys[keys.length - 1]] = value;
+      brandingState.dirty = true;
+    }
+
+    // Shrinks an uploaded image in the browser so it can be stored with the branding.
+    function brandingResizeImage(file, maxW, maxH, type) {
+      return new Promise((resolve, reject) => {
+        if (!/^image\//.test(file.type)) { reject(new Error('Pick an image file (PNG, JPG, WebP or SVG).')); return; }
+        if (file.size > 8 * 1024 * 1024) { reject(new Error('That image is over 8 MB. Pick a smaller one.')); return; }
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Couldn't read that file."));
+        reader.onload = () => {
+          const img = new Image();
+          img.onerror = () => reject(new Error("Couldn't open that image."));
+          img.onload = () => {
+            const scale = Math.min(1, maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
+            const w = Math.max(1, Math.round((img.naturalWidth || maxW) * scale));
+            const h = Math.max(1, Math.round((img.naturalHeight || maxH) * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, 0, 0, w, h);
+            let quality = 0.86;
+            let out = canvas.toDataURL(type, quality);
+            while (out.length > 280 * 1024 && quality > 0.4 && type !== 'image/png') { quality -= 0.1; out = canvas.toDataURL(type, quality); }
+            if (out.length > 280 * 1024 && type === 'image/png') out = canvas.toDataURL('image/webp', 0.85);
+            if (out.length > 290 * 1024) { reject(new Error('That image is still too large after shrinking it. Try a simpler one.')); return; }
+            resolve(out);
+          };
+          img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function brandingValidate(d) {
+      const errs = [];
+      const st = d.studio || {};
+      const hex = /^#[0-9a-fA-F]{6}$/;
+      const url = (v) => !v || /^https:\/\/[^\s"'<>]+$/i.test(v) || /^(#\/|\/|\.\/)?[a-zA-Z0-9._\-/#?=&%]+$/.test(v) || /^data:image\//.test(v);
+      if (!String(st.name || '').trim()) errs.push('Studio name can’t be empty.');
+      if (st.shortName && String(st.shortName).length > 4) errs.push('Initials can be at most 4 characters.');
+      if (st.requestIdPrefix && !/^[A-Z0-9]{1,6}$/.test(st.requestIdPrefix)) errs.push('Request ID prefix must be 1 to 6 capital letters or numbers.');
+      if (st.website && !/^https:\/\//i.test(st.website)) errs.push('Website must start with https://');
+      if (st.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(st.contactEmail)) errs.push('Contact email doesn’t look right.');
+      if (!url(st.logoUrl)) errs.push('Logo must be an uploaded image or an https:// link.');
+      if (!url((d.signIn || {}).backgroundImage)) errs.push('Background image must be an uploaded image or an https:// link.');
+      if (!hex.test((d.theme || {}).accent || '')) errs.push('Accent colour must be a hex colour like #5B5FEF.');
+      if (!hex.test((d.theme || {}).accentDark || '')) errs.push('Dark mode accent must be a hex colour like #8C8FFF.');
+      if (!((d.payments || {}).currencies || []).length) errs.push('Keep at least one currency switched on.');
+      if (!((d.payments || {}).methods || []).length) errs.push('Keep at least one payout method switched on.');
+      return errs;
+    }
+
+    function brandingPreviewHtml() {
+      const d = brandingState.draft;
+      const st = d.studio || {};
+      const th = d.theme || {};
+      const name = [st.name || 'Studio', st.productName].filter(Boolean).join(' ');
+      const mark = st.logoUrl ? `<img src="${esc(st.logoUrl)}" alt="">` : `<span>${esc((st.shortName || (st.name || 'S').slice(0, 2)).toUpperCase())}</span>`;
+      const accent = /^#[0-9a-fA-F]{6}$/.test(th.accent || '') ? th.accent : '#5B5FEF';
+      return `
+        <div class="bp-card" style="--bp-accent:${accent};--bp-radius:${Math.max(4, Math.min(28, Number(th.radius) || 14))}px;">
+          <div class="bp-label">Preview</div>
+          <div class="bp-app">
+            <div class="bp-side">
+              <div class="bp-brand"><span class="bp-mark">${mark}</span><b>${esc(name)}</b></div>
+              <div class="bp-nav on">Home</div><div class="bp-nav">My payments</div><div class="bp-nav">Review &amp; pay</div>
+            </div>
+            <div class="bp-main">
+              <div class="bp-title">Good morning</div>
+              <div class="bp-tile"><small>Owed to you</small><strong>R$ 12,500</strong></div>
+              <span class="bp-btn">Request payment</span>
+            </div>
+          </div>
+          <div class="bp-signin">
+            <div class="bp-art"${d.signIn && d.signIn.backgroundImage ? ` style="background-image:linear-gradient(rgba(8,9,12,.55),rgba(8,9,12,.55)),url('${esc(d.signIn.backgroundImage)}')"` : ''}><b>${esc((d.signIn || {}).headline || '')}</b></div>
+            <div class="bp-form"><b>${esc((d.signIn || {}).title || 'Sign in')}</b><span class="bp-btn dark">${esc((d.signIn || {}).buttonLabel || 'Sign in')}</span></div>
+          </div>
+        </div>`;
+    }
+
+    function brandingFieldHtml(path, label, opts) {
+      const o = opts || {};
+      const val = brandingGet(path);
+      const id = 'bk_' + path.replace(/\./g, '_');
+      const hint = o.hint ? `<span class="hint">${esc(o.hint)}</span>` : '';
+      if (o.textarea) {
+        return `<div class="field"><label for="${id}">${esc(label)} ${hint}</label><textarea id="${id}" data-bk="${esc(path)}" rows="${o.rows || 3}" maxlength="${o.max || 240}" placeholder="${esc(o.placeholder || '')}">${esc(val || '')}</textarea></div>`;
+      }
+      return `<div class="field"><label for="${id}">${esc(label)} ${hint}</label><input type="${o.type || 'text'}" id="${id}" data-bk="${esc(path)}" value="${esc(val == null ? '' : val)}" maxlength="${o.max || 120}" placeholder="${esc(o.placeholder || '')}"${o.upper ? ' style="text-transform:uppercase"' : ''} autocomplete="off" spellcheck="${o.spell ? 'true' : 'false'}"></div>`;
+    }
+
+    function brandingImageHtml(path, label, help) {
+      const val = brandingGet(path) || '';
+      const isUpload = /^data:image\//.test(val);
+      return `
+        <div class="field bk-image">
+          <label>${esc(label)}</label>
+          <div class="bk-image-row">
+            <div class="bk-thumb${path === 'signIn.backgroundImage' ? ' wide' : ''}">${val ? `<img src="${esc(val)}" alt="">` : '<span>None</span>'}</div>
+            <div class="bk-image-actions">
+              <label class="btn btn-ghost btn-sm bk-upload">Upload image<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif" data-bk-upload="${esc(path)}" hidden></label>
+              ${val ? `<button type="button" class="btn btn-ghost btn-sm" data-bk-clear="${esc(path)}">Remove</button>` : ''}
+            </div>
+          </div>
+          <input type="text" data-bk="${esc(path)}" value="${isUpload ? '' : esc(val)}" placeholder="${isUpload ? 'Using the uploaded image' : 'Or paste an https:// link'}" autocomplete="off" spellcheck="false">
+          ${help ? `<p class="hint">${esc(help)}</p>` : ''}
+        </div>`;
+    }
+
+    function brandingColorHtml(path, label, hint) {
+      const val = brandingGet(path) || '#000000';
+      return `
+        <div class="field">
+          <label>${esc(label)} ${hint ? `<span class="hint">${esc(hint)}</span>` : ''}</label>
+          <div class="bk-color">
+            <input type="color" value="${esc(/^#[0-9a-fA-F]{6}$/.test(val) ? val : '#000000')}" data-bk-color="${esc(path)}" aria-label="${esc(label)}">
+            <input type="text" data-bk="${esc(path)}" value="${esc(val)}" maxlength="7" spellcheck="false" autocomplete="off">
+          </div>
+        </div>`;
+    }
+
+    function brandingEditorHtml() {
+      const S = brandingState;
+      if (S.loading && !S.data) return `<div class="dash-loading">Loading branding...</div>`;
+      if (S.error && !S.data) return `<div class="error-box"><span>${esc(S.error)}</span></div><button type="button" class="btn btn-ghost btn-sm" id="bkRetry">Try again</button>`;
+      const d = S.draft;
+      const locked = new Set(S.data.lockedFeatures || []);
+      const feats = BRANDING_FEATURES.filter(f => !locked.has(f[0]));
+      const legalKeys = [['tos', 'Terms of Service'], ['privacy', 'Privacy Policy'], ['aup', 'Acceptable Use']];
+      const lt = S.legalTab;
+      const legalVal = (d.legal || {})[lt] || '';
+      return `
+      <div class="heading-block">
+        <h2 class="sec-title">Branding</h2>
+        <p class="sub">How the panel looks and reads for everyone, including the sign-in page. Changes go live as soon as you save.</p>
+      </div>
+      ${S.notice ? `<div class="${S.notice.ok ? 'confirm-box' : 'error-box'}" role="status">${S.notice.ok ? '<div class="icon">&#10003;</div><div class="txt">' : '<span>'}${S.notice.ok ? `<strong>${esc(S.notice.text)}</strong></div>` : `${esc(S.notice.text)}</span>`}</div>` : ''}
+      <div class="bk-layout">
+        <div class="bk-form">
+          <section class="panel bk-section">
+            <h3>Studio</h3>
+            <div class="row2">
+              ${brandingFieldHtml('studio.name', 'Studio name', { max: 60, placeholder: 'e.g. Northwind Games' })}
+              ${brandingFieldHtml('studio.productName', 'Product name', { max: 40, hint: '(optional)', placeholder: 'e.g. Hub' })}
+            </div>
+            <div class="row3">
+              ${brandingFieldHtml('studio.shortName', 'Initials', { max: 4, upper: true, placeholder: 'NW' })}
+              ${brandingFieldHtml('studio.requestIdPrefix', 'Request ID prefix', { max: 6, upper: true, placeholder: 'NW' })}
+              ${brandingFieldHtml('studio.contactEmail', 'Contact email', { max: 120, type: 'email', placeholder: 'ops@studio.com' })}
+            </div>
+            <div class="row2">
+              ${brandingFieldHtml('studio.website', 'Website', { max: 200, hint: '(optional)', placeholder: 'https://studio.com' })}
+              ${brandingFieldHtml('studio.websiteLabel', 'Website label', { max: 60, hint: '(optional)', placeholder: 'studio.com' })}
+            </div>
+            <p class="hint" style="margin:0;">The name shown everywhere is the studio name followed by the product name. Initials are used when there's no logo, and the contact email appears in the legal pages.</p>
+          </section>
+
+          <section class="panel bk-section">
+            <h3>Logo &amp; colours</h3>
+            ${brandingImageHtml('studio.logoUrl', 'Logo', 'Square images work best. Uploads are resized to 256 × 256. Also used as the browser tab icon.')}
+            <div class="row2">
+              ${brandingColorHtml('theme.accent', 'Accent colour', '(buttons, links)')}
+              ${brandingColorHtml('theme.accentDark', 'Accent in dark mode', '(a lighter shade reads better)')}
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label for="bkRadius">Corner roundness <span class="hint">${esc(String(d.theme.radius))} px</span></label>
+                <input type="range" id="bkRadius" min="4" max="24" step="1" value="${esc(d.theme.radius)}" data-bk-range="theme.radius">
+              </div>
+              <div class="field">
+                <label for="bkMode">Default theme <span class="hint">(people can still switch)</span></label>
+                <select id="bkMode" data-bk-select="theme.defaultMode"><option value="light" ${d.theme.defaultMode !== 'dark' ? 'selected' : ''}>Light</option><option value="dark" ${d.theme.defaultMode === 'dark' ? 'selected' : ''}>Dark</option></select>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel bk-section">
+            <h3>Sign-in page</h3>
+            <div class="row2">
+              ${brandingFieldHtml('signIn.title', 'Title', { max: 40, placeholder: 'Sign in' })}
+              ${brandingFieldHtml('signIn.buttonLabel', 'Roblox button label', { max: 40, placeholder: 'Sign in with Roblox' })}
+            </div>
+            ${brandingFieldHtml('signIn.subtitle', 'Text under the title', { max: 240, textarea: true, rows: 2, spell: true })}
+            ${brandingFieldHtml('signIn.headline', 'Headline', { max: 80, hint: '(right-hand panel)', placeholder: 'Paid for what you build.', spell: true })}
+            ${brandingFieldHtml('signIn.tagline', 'Tagline', { max: 240, textarea: true, rows: 2, hint: '{studio} is replaced with your studio name', spell: true })}
+            ${brandingFieldHtml('signIn.footerNote', 'Note at the bottom', { max: 240, hint: '(optional)', spell: true, placeholder: 'Staff only. Not on the team yet? Ask a lead for an invite link.' })}
+            ${brandingImageHtml('signIn.backgroundImage', 'Background image', 'Optional. Fills the right-hand panel; it is darkened so the text stays readable. Uploads are resized to 1600 px wide.')}
+            <label class="pp-check"><input type="checkbox" data-bk-check="signIn.showPreview" ${d.signIn.showPreview !== false ? 'checked' : ''}> Show the product preview on the sign-in page</label>
+          </section>
+
+          <section class="panel bk-section">
+            <h3>Features</h3>
+            <p class="hint" style="margin:-4px 0 12px;">A feature that's off disappears from the menu, can't be opened by link, and the server refuses its actions.</p>
+            <div class="bk-toggles">
+              ${feats.map(f => `<label class="bk-toggle"><input type="checkbox" data-bk-feature="${esc(f[0])}" ${d.features[f[0]] !== false ? 'checked' : ''}><span class="bk-switch" aria-hidden="true"></span><span><b>${esc(f[1])}</b><small>${esc(f[2])}</small></span></label>`).join('')}
+            </div>
+          </section>
+
+          <section class="panel bk-section">
+            <h3>Payouts</h3>
+            <div class="row2">
+              <div class="field"><label>Currencies</label><div class="bk-chips">${(S.data.allCurrencies || []).map(c => `<label class="bk-chip"><input type="checkbox" data-bk-list="payments.currencies" value="${esc(c)}" ${(d.payments.currencies || []).includes(c) ? 'checked' : ''}> ${esc(BRANDING_CURRENCY_LABELS[c] || c)}</label>`).join('')}</div></div>
+              <div class="field"><label>Payout methods</label><div class="bk-chips">${(S.data.allMethods || []).map(m => `<label class="bk-chip"><input type="checkbox" data-bk-list="payments.methods" value="${esc(m)}" ${(d.payments.methods || []).includes(m) ? 'checked' : ''}> ${esc(BRANDING_METHOD_LABELS[m] || m)}</label>`).join('')}</div></div>
+            </div>
+          </section>
+
+          <section class="panel bk-section">
+            <h3>Legal pages</h3>
+            <p class="hint" style="margin:-4px 0 12px;">Leave a page empty to use the built-in text. Lines like “1. Payments” become headings and lines starting with “- ” become lists. Have your final text checked before going live.</p>
+            <div class="legal-tabs bk-legal-tabs">${legalKeys.map(([k, l]) => `<a href="#" data-bk-legal="${k}" class="${lt === k ? 'on' : ''}">${esc(l)}${(d.legal || {})[k] ? ' <span class="bk-dot" title="Custom text"></span>' : ''}</a>`).join('')}</div>
+            <textarea class="bk-legal" data-bk="legal.${lt}" rows="12" maxlength="20000" placeholder="Using the built-in ${esc(legalKeys.find(x => x[0] === lt)[1])}.">${esc(legalVal)}</textarea>
+            <div class="bk-legal-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="bkLegalDefault">${legalVal ? 'Replace with built-in text' : 'Start from the built-in text'}</button>
+              ${legalVal ? `<button type="button" class="btn btn-ghost btn-sm" id="bkLegalClear">Use built-in text</button>` : ''}
+              <a class="btn btn-ghost btn-sm" href="#/${lt === 'tos' ? 'terms' : lt}" target="_blank" rel="noopener">View live page</a>
+            </div>
+          </section>
+
+          <div class="bk-reset"><button type="button" class="pp-linkbtn" id="bkResetAll">Reset all branding to the defaults in studio.config.json</button></div>
+        </div>
+        <aside class="bk-aside">${brandingPreviewHtml()}</aside>
+      </div>
+      <div class="bk-savebar${S.dirty ? ' show' : ''}" role="region" aria-label="Unsaved changes">
+        <span>You have unsaved changes</span>
+        <div>
+          <button type="button" class="btn btn-ghost btn-sm" id="bkDiscard" ${S.saving ? 'disabled' : ''}>Discard</button>
+          <button type="button" class="btn btn-primary btn-sm" id="bkSave" ${S.saving ? 'disabled' : ''}>${S.saving ? 'Saving...' : 'Save changes'}</button>
+        </div>
+      </div>`;
+    }
+
+    function mountBrandingEditor(root) {
+      const S = brandingState;
+      const repaint = () => {
+        const el = document.getElementById('brandingMount');
+        if (!el) return;
+        const y = window.scrollY;
+        el.innerHTML = brandingEditorHtml();
+        wire(el);
+        window.scrollTo(0, y);
+      };
+      const softUpdate = () => {
+        const aside = document.querySelector('.bk-aside');
+        if (aside) aside.innerHTML = brandingPreviewHtml();
+        const bar = document.querySelector('.bk-savebar');
+        if (bar) bar.classList.toggle('show', S.dirty);
+      };
+
+      async function load() {
+        S.loading = true; S.error = null; repaint();
+        try {
+          const json = await callHrData('get_branding');
+          S.data = json.data;
+          S.draft = JSON.parse(JSON.stringify(json.data.current));
+          S.dirty = false; S.loaded = true;
+        } catch (e) {
+          S.error = ((e && e.message) || friendlyError());
+        }
+        S.loading = false;
+        repaint();
+      }
+
+      async function save(payload, okText) {
+        const errs = brandingValidate(payload);
+        if (errs.length) { S.notice = { ok: false, text: errs.join(' ') }; repaint(); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+        S.saving = true; S.notice = null; repaint();
+        try {
+          const json = await callHrData('save_branding', { branding: payload });
+          S.data.current = json.data.current;
+          S.data.saved = json.data.saved;
+          S.draft = JSON.parse(JSON.stringify(json.data.current));
+          S.dirty = false;
+          S.notice = { ok: true, text: okText || 'Branding saved. Everyone sees it on their next page load.' };
+          try { await fetchBootstrap(); } catch (e) { }
+          S.saving = false;
+          route();
+          return;
+        } catch (e) {
+          S.notice = { ok: false, text: ((e && e.message) || friendlyError()) };
+        }
+        S.saving = false;
+        repaint();
+      }
+
+      function wire(el) {
+        const retry = el.querySelector('#bkRetry');
+        if (retry) retry.addEventListener('click', load);
+        if (!S.draft) return;
+        el.querySelectorAll('[data-bk]').forEach(inp => inp.addEventListener('input', () => {
+          let v = inp.value;
+          const path = inp.dataset.bk;
+          if (/shortName|requestIdPrefix/.test(path)) v = v.toUpperCase();
+          if (/^theme\.accent/.test(path)) {
+            const sw = el.querySelector(`[data-bk-color="${path}"]`);
+            if (sw && /^#[0-9a-fA-F]{6}$/.test(v)) sw.value = v;
+          }
+          if (/logoUrl|backgroundImage/.test(path) && !v && /^data:/.test(brandingGet(path) || '')) return;
+          brandingSet(path, v.trim() === '' && !/^legal\./.test(path) ? '' : v);
+          softUpdate();
+        }));
+        el.querySelectorAll('[data-bk-color]').forEach(inp => inp.addEventListener('input', () => {
+          const path = inp.dataset.bkColor;
+          brandingSet(path, inp.value.toUpperCase());
+          const txt = el.querySelector(`[data-bk="${path}"]`);
+          if (txt) txt.value = inp.value.toUpperCase();
+          softUpdate();
+        }));
+        el.querySelectorAll('[data-bk-range]').forEach(inp => inp.addEventListener('input', () => {
+          brandingSet(inp.dataset.bkRange, Number(inp.value));
+          const hint = inp.parentElement.querySelector('.hint');
+          if (hint) hint.textContent = inp.value + ' px';
+          softUpdate();
+        }));
+        el.querySelectorAll('[data-bk-select]').forEach(inp => inp.addEventListener('change', () => { brandingSet(inp.dataset.bkSelect, inp.value); softUpdate(); }));
+        el.querySelectorAll('[data-bk-check]').forEach(inp => inp.addEventListener('change', () => { brandingSet(inp.dataset.bkCheck, inp.checked); softUpdate(); }));
+        el.querySelectorAll('[data-bk-feature]').forEach(inp => inp.addEventListener('change', () => { brandingSet('features.' + inp.dataset.bkFeature, inp.checked); softUpdate(); }));
+        el.querySelectorAll('[data-bk-list]').forEach(inp => inp.addEventListener('change', () => {
+          const path = inp.dataset.bkList;
+          const list = Array.from(el.querySelectorAll(`[data-bk-list="${path}"]:checked`)).map(x => x.value);
+          brandingSet(path, list);
+          softUpdate();
+        }));
+        el.querySelectorAll('[data-bk-upload]').forEach(inp => inp.addEventListener('change', async () => {
+          const file = inp.files && inp.files[0];
+          if (!file) return;
+          const path = inp.dataset.bkUpload;
+          const isLogo = path === 'studio.logoUrl';
+          try {
+            const url = await brandingResizeImage(file, isLogo ? 256 : 1600, isLogo ? 256 : 1200, isLogo ? 'image/png' : 'image/jpeg');
+            brandingSet(path, url);
+            S.notice = null;
+          } catch (e) {
+            S.notice = { ok: false, text: e.message };
+          }
+          repaint();
+        }));
+        el.querySelectorAll('[data-bk-clear]').forEach(btn => btn.addEventListener('click', () => { brandingSet(btn.dataset.bkClear, ''); repaint(); }));
+        el.querySelectorAll('[data-bk-legal]').forEach(a => a.addEventListener('click', (e) => { e.preventDefault(); S.legalTab = a.dataset.bkLegal; repaint(); }));
+        const legalDefault = el.querySelector('#bkLegalDefault');
+        if (legalDefault) legalDefault.addEventListener('click', async () => {
+          const cur = (S.draft.legal || {})[S.legalTab];
+          if (cur && !(await askConfirm('Replace your text with the built-in version?'))) return;
+          brandingSet('legal.' + S.legalTab, (S.data.legalDefaults || {})[S.legalTab] || '');
+          repaint();
+        });
+        const legalClear = el.querySelector('#bkLegalClear');
+        if (legalClear) legalClear.addEventListener('click', async () => {
+          if (!(await askConfirm('Remove your text and use the built-in version?'))) return;
+          brandingSet('legal.' + S.legalTab, '');
+          repaint();
+        });
+        const discard = el.querySelector('#bkDiscard');
+        if (discard) discard.addEventListener('click', () => { S.draft = JSON.parse(JSON.stringify(S.data.current)); S.dirty = false; S.notice = null; repaint(); });
+        const saveBtn = el.querySelector('#bkSave');
+        if (saveBtn) saveBtn.addEventListener('click', () => save(S.draft));
+        const resetAll = el.querySelector('#bkResetAll');
+        if (resetAll) resetAll.addEventListener('click', async () => {
+          if (!(await askConfirm('Reset every branding setting to the defaults in studio.config.json? Your logo, colours, sign-in text and legal text saved here will be removed.'))) return;
+          S.saving = true; repaint();
+          try {
+            await callHrData('save_branding', { branding: {} });
+            S.saving = false;
+            S.notice = { ok: true, text: 'Branding reset to the defaults.' };
+            try { await fetchBootstrap(); } catch (e) { }
+            S.data = null; S.draft = null; S.loaded = false;
+            route();
+          } catch (e) {
+            S.saving = false;
+            S.notice = { ok: false, text: ((e && e.message) || friendlyError()) };
+            repaint();
+          }
+        });
+      }
+
+      if (!S.loaded && !S.loading) { load(); return; }
+      root.innerHTML = brandingEditorHtml();
+      wire(root);
     }
 
     function renderTeamRemovedPage() {
@@ -10066,53 +10575,113 @@
       if (signOutBtn) signOutBtn.addEventListener('click', hrSignOut);
     }
 
-    function renderPolicyPage(type) {
-      if (!authReady) { app.innerHTML = topbar(); return; }
-      if (!isHrAuthed) { renderHrGate(); return; }
+    // Terms, Privacy and Acceptable Use. Public: anyone can read them, signed in or not.
+    const LEGAL_PAGES = [
+      { key: 'terms', hash: '#/terms', label: 'Terms of Service' },
+      { key: 'privacy', hash: '#/privacy', label: 'Privacy Policy' },
+      { key: 'aup', hash: '#/aup', label: 'Acceptable Use' }
+    ];
+    let legalCache = null;
 
+    function fetchLegal() {
+      if (legalCache) return Promise.resolve(legalCache);
+      return fetchWithTimeout(EDGE_BASE + '/public/legal', {}, 12000)
+        .then(r => r.json())
+        .then(j => { if (!j || !j.data) throw new Error('legal_failed'); legalCache = j.data; return legalCache; });
+    }
+
+    // Turns the plain-text policy into headed sections. Lines like "3. Payments" become headings,
+    // "- item" lines become lists, everything else is a paragraph. All text is escaped.
+    function legalBodyHtml(text) {
+      const bullet = /^[-*•]\s+/;
+      return String(text || '').replace(/\r/g, '').split(/\n\s*\n/).map(block => {
+        const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+        if (!lines.length) return '';
+        if (/^last updated/i.test(lines[0]) && lines.length === 1) return `<p class="legal-updated">${esc(lines[0])}</p>`;
+        let out = '';
+        let start = 0;
+        if (/^\d+\.\s+\S/.test(lines[0]) && lines[0].length < 90) { out += `<h2>${esc(lines[0])}</h2>`; start = 1; }
+        let para = [];
+        let list = [];
+        const flushPara = () => { if (para.length) out += `<p>${esc(para.join(' '))}</p>`; para = []; };
+        const flushList = () => { if (list.length) out += `<ul>${list.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`; list = []; };
+        lines.slice(start).forEach(l => {
+          if (bullet.test(l)) { flushPara(); list.push(l.replace(bullet, '')); }
+          else { flushList(); para.push(l); }
+        });
+        flushPara(); flushList();
+        return out;
+      }).join('');
+    }
+
+    function renderPolicyPage(type) {
+      if (type === 'tos') type = 'terms';
+      const page = LEGAL_PAGES.find(p => p.key === type) || LEGAL_PAGES[0];
       const myGen = renderGen;
-      let loading = true;
+      let doc = null;
       let loadError = null;
-      let step = null;
+
+      function tabs() {
+        return `<nav class="legal-tabs" aria-label="Policies">${LEGAL_PAGES.map(p => `<a href="${p.hash}" class="${p.key === page.key ? 'on' : ''}"${p.key === page.key ? ' aria-current="page"' : ''}>${esc(p.label)}</a>`).join('')}</nav>`;
+      }
+
+      function body() {
+        if (loadError) return `<div class="dash-empty"><h3>Couldn't load this page</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryPolicyBtn">Try again</button></div>`;
+        if (!doc) return `<div class="legal-skeleton" aria-busy="true"><i></i><i></i><i></i><i></i><i></i></div>`;
+        return `<article class="legal-doc">${legalBodyHtml(doc.content)}</article>`;
+      }
 
       function paint() {
-        app.innerHTML = `
+        if (myGen !== renderGen) return;
+        if (isHrAuthed) {
+          app.innerHTML = `
     ${topbar()}
-    <div class="shell">
-      <div class="heading-block">
-        <h1>${type === 'tos' ? 'Terms of Service' : 'Acceptable Use Policy'}</h1>
-      </div>
-      <div class="table-wrap">
-        ${loading ? `<div class="dash-loading">Loading...</div>` : loadError ? `
-          <div class="dash-empty"><h3>Could not load this policy</h3><p>${esc(loadError)}</p><button type="button" class="btn btn-ghost btn-sm" id="retryPolicyBtn">Try again</button></div>
-        ` : `
-        <div class="panel" style="margin:18px;">
-          ${step.description ? `<p class="sub" style="margin:0 0 10px;">${esc(step.description)}</p>` : ''}
-          <div class="empty-note" style="white-space:pre-wrap;">${esc(step.content || '')}</div>
-        </div>`}
-      </div>
+    <div class="shell legal-shell">
+      <div class="heading-block"><h1>${esc(page.label === 'Acceptable Use' ? 'Acceptable Use Policy' : page.label)}</h1></div>
+      ${tabs()}
+      <div class="legal-card">${body()}</div>
     </div>`;
-
-        wireTopbarSignOut();
+          wireTopbarSignOut();
+        } else {
+          const st = STUDIO.studio || {};
+          const logo = st.logoUrl ? `<img src="${esc(st.logoUrl)}" alt="">` : `<span class="auth-brand-mark">${esc(studioShort())}</span>`;
+          app.innerHTML = `
+    <div class="legal-public">
+      <header class="legal-public-head">
+        <a class="auth-brand" href="#/">${logo}<span>${esc(brandName())}</span></a>
+        <div class="legal-public-actions">
+          <button type="button" class="auth-icon-btn" id="themeToggleBtn" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
+          <a class="btn btn-primary btn-sm" href="#/">Sign in</a>
+        </div>
+      </header>
+      <main class="legal-public-main">
+        <h1>${esc(page.label === 'Acceptable Use' ? 'Acceptable Use Policy' : page.label)}</h1>
+        ${tabs()}
+        ${body()}
+      </main>
+      <footer class="legal-public-foot">&copy; ${new Date().getFullYear()} ${esc(studioName())}${st.website ? ` &middot; ${studioWebsiteLink('')}` : ''}</footer>
+    </div>`;
+          wireAuthShell();
+        }
         const retryBtn = document.getElementById('retryPolicyBtn');
         if (retryBtn) retryBtn.addEventListener('click', load);
+        document.title = `${page.label} · ${brandName()}`;
       }
 
       async function load() {
-        loading = true; loadError = null; paint();
+        loadError = null; doc = null; paint();
         try {
-          const json = await callHrData('list_onboarding_steps');
-          step = (json.data || []).find(s => s.type === type) || null;
-          if (!step) loadError = 'This policy is not available right now.';
+          const data = await fetchLegal();
+          doc = data[page.key] || null;
+          if (!doc) loadError = 'This page is not available right now.';
         } catch (err) {
-          loadError = (err && err.message) ? err.message : 'Could not load this policy.';
+          loadError = 'Check your connection and try again.';
         }
-        if (myGen !== renderGen) return;
-        loading = false;
         paint();
       }
 
       paint();
+      window.scrollTo(0, 0);
       load();
     }
 
@@ -10146,14 +10715,14 @@
 
       function buildSteps() {
         const list = [];
-        list.push({
+        if (discordOn()) list.push({
           id: 'discord', title: 'Link Discord', blurb: 'So we can reach you and give you access.',
           required: true, done: !needsDiscordLink, skipped: needsDiscordLink && discordSkipped
         });
         if (inviteToken && !invite.invalid) {
           const teamName = invite.info && invite.info.team ? invite.info.team.name : null;
           list.push({
-            id: 'invite', title: teamName ? `Join ${teamName}` : 'Join your team', blurb: 'Finish your invite in Discord.',
+            id: 'invite', title: teamName ? `Join ${teamName}` : 'Join your team', blurb: 'Accept the invite to join the team.',
             required: true, done: invite.done, skipped: !invite.done && needsDiscordLink && discordSkipped
           });
         }
@@ -10260,8 +10829,8 @@
             ${a.team ? `<strong style="color:${safeColor(a.team.color, 'var(--ink)')};font-size:15px;">${esc(a.team.name)}</strong>` : ''}
             ${a.skillset ? `<span class="hint"> as ${esc(a.skillset.name)}</span>` : ''}
             ${a.team && a.team.info ? `<p class="sub" style="margin:8px 0 0;white-space:pre-wrap;">${esc(a.team.info)}</p>` : ''}
-            ${a.team && (a.team.discord_url || a.team.roblox_group_url) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-              ${a.team.discord_url ? `<a class="btn btn-primary btn-sm" href="${esc(safeUrl(a.team.discord_url) || '#')}" target="_blank" rel="noopener">Team Discord</a>` : ''}
+            ${a.team && ((discordOn() && a.team.discord_url) || a.team.roblox_group_url) ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+              ${discordOn() && a.team.discord_url ? `<a class="btn btn-primary btn-sm" href="${esc(safeUrl(a.team.discord_url) || '#')}" target="_blank" rel="noopener">Team Discord</a>` : ''}
               ${a.team.roblox_group_url ? `<a class="btn btn-ghost btn-sm" href="${esc(safeUrl(a.team.roblox_group_url) || '#')}" target="_blank" rel="noopener">Team Roblox group</a>` : ''}
             </div>` : ''}
           </div>`).join('')}</div>`;
@@ -10272,7 +10841,7 @@
         const isPolicy = st.type === 'tos' || st.type === 'aup';
         let body = '';
         if (st.type === 'team_info') body = teamInfoHtml();
-        else if (isPolicy) body = `<div class="ob-policy" tabindex="0" aria-label="${esc(st.title)}">${esc(st.content)}</div>`;
+        else if (isPolicy) body = `<div class="ob-policy legal-doc" tabindex="0" aria-label="${esc(st.title)}">${legalBodyHtml(st.content)}</div>${st.type === 'tos' ? '<p class="hint" style="margin-top:10px;">How we handle your information is in the <a href="#/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>' : ''}`;
         else body = `<div class="ob-copy">${paragraphs(st.content)}</div>`;
         return `
           <h2>${esc(st.title)}</h2>
@@ -10287,11 +10856,11 @@
       function payoutStepHtml(s) {
         return `
           <h2>Add a payout method</h2>
-          <p class="ob-lead">Tell us whether you want to be paid in Robux, PayPal or Venmo. You can skip this and do it any time from My payments.</p>
+          <p class="ob-lead">Tell us how you want to be paid. You can skip this and do it any time from My payments.</p>
           ${s.done ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Payout method saved</strong><span>${esc(PAYMENT_METHODS[payoutMethod.method] ? PAYMENT_METHODS[payoutMethod.method].label : payoutMethod.method)}</span></div></div>`
             : needsDiscordLink
               ? `<p class="hint">My payments is locked until Discord is linked.</p><div style="display:flex;gap:8px;flex-wrap:wrap;"><button type="button" class="btn btn-ghost" id="obFinish">Continue</button></div>`
-              : `<div style="display:flex;gap:8px;flex-wrap:wrap;"><a class="btn btn-primary" href="#/my">Add payout method</a><button type="button" class="btn btn-ghost" id="obFinish">Skip for now</button></div>`}`;
+              : `<div style="display:flex;gap:8px;flex-wrap:wrap;"><a class="btn btn-primary" href="#/my?focus=payout">Add payout method</a><button type="button" class="btn btn-ghost" id="obFinish">Skip for now</button></div>`}`;
       }
 
       function finishHtml(list) {
@@ -10628,7 +11197,7 @@
         const payBtn = document.getElementById('taskPayBtn');
         if (payBtn) payBtn.addEventListener('click', async () => {
           const t = data.task;
-          if (!confirm(`Log ${money(t)} for ${t.assigned_to_username} as a pending payment?\n\nIt'll show up on the payments dashboard to be paid out from there.`)) return;
+          if (!(await askConfirm(`Log ${money(t)} for ${t.assigned_to_username} as a pending payment?\n\nIt'll show up on the payments dashboard to be paid out from there.`))) return;
           busy = true; paint();
           try {
             const r = await callHrData('pay_team_task', { id: t.id });
@@ -10778,7 +11347,7 @@
           <div class="field"><label for="claimAmount">Amount</label>
             <input type="number" id="claimAmount" min="1" step="1" placeholder="e.g. 5000"></div>
           <div class="field"><label for="claimCurrency">Paid in</label>
-            <select id="claimCurrency"><option value="ROBUX">Robux</option><option value="USD">USD</option></select></div>
+            <select id="claimCurrency">${currencyEnabled('ROBUX') ? '<option value="ROBUX">Robux</option>' : ''}${currencyEnabled('USD') ? '<option value="USD">USD</option>' : ''}</select></div>
           <div class="field"><label for="claimGame">Game <span class="hint">(optional)</span></label>
             <input type="text" id="claimGame" placeholder="e.g. Obby Rush"></div>
         </div>
@@ -10851,7 +11420,7 @@
           }
         });
         document.querySelectorAll('[data-withdraw]').forEach(el => el.addEventListener('click', async () => {
-          if (!confirm('Withdraw this request?')) return;
+          if (!(await askConfirm('Withdraw this request?'))) return;
           try {
             await callHrData('withdraw_claim', { id: el.dataset.withdraw });
             toast('Withdrawn');
@@ -11807,7 +12376,7 @@
           await run(() => callHrData('set_team_games', { teamId, gameId: sel.value, mode: 'add' }), 'Game assigned');
         });
         document.querySelectorAll('[data-remove-game]').forEach(el => el.addEventListener('click', async () => {
-          if (!confirm('Take this game off the team?')) return;
+          if (!(await askConfirm('Take this game off the team?'))) return;
           await run(() => callHrData('set_team_games', { teamId, gameId: el.dataset.removeGame, mode: 'remove' }), 'Game removed');
         }));
         document.querySelectorAll('[data-chart-metric]').forEach(el => el.addEventListener('click', () => { chartMetric = el.dataset.chartMetric; paint(); }));
@@ -11882,7 +12451,7 @@
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }));
         document.querySelectorAll('[data-batch-delete]').forEach(el => el.addEventListener('click', async () => {
-          if (!confirm('Delete this task for everyone it was given to?')) return;
+          if (!(await askConfirm('Delete this task for everyone it was given to?'))) return;
           await run(() => callHrData('delete_team_task', { batchId: el.dataset.batchDelete }), 'Task deleted for everyone');
         }));
         document.querySelectorAll('[data-task-edit]').forEach(el => el.addEventListener('click', () => {
@@ -11894,7 +12463,7 @@
           await run(() => callHrData('set_team_task_status', { id: el.dataset.taskToggle, status: el.dataset.status }), el.dataset.status === 'done' ? 'Marked done' : 'Reopened');
         }));
         document.querySelectorAll('[data-task-delete]').forEach(el => el.addEventListener('click', async () => {
-          if (!confirm('Delete this task? It disappears from the on-time figures too.')) return;
+          if (!(await askConfirm('Delete this task? It disappears from the on-time figures too.'))) return;
           await run(() => callHrData('delete_team_task', { id: el.dataset.taskDelete }), 'Task deleted');
         }));
       }
@@ -12005,13 +12574,13 @@
           boardAction(() => callHrData('board_save_list', { teamId, mode: 'rename', id: el.dataset.renameList, title: title.trim() }), 'Column renamed');
         }));
 
-        document.querySelectorAll('[data-delete-list]').forEach(el => el.addEventListener('click', () => {
+        document.querySelectorAll('[data-delete-list]').forEach(el => el.addEventListener('click', async () => {
           const id = el.dataset.deleteList;
           const count = board.cards.filter(c => String(c.list_id) === String(id)).length;
           const msg = count
             ? `Delete this column and its ${count} card${count === 1 ? '' : 's'}? This cannot be undone.`
             : 'Delete this column?';
-          if (!confirm(msg)) return;
+          if (!(await askConfirm(msg))) return;
           boardAction(() => callHrData('board_save_list', { teamId, mode: 'delete', id, force: true }), 'Column deleted');
         }));
 
@@ -12185,8 +12754,8 @@
         });
 
         const deleteCard = document.getElementById('bdDeleteCard');
-        if (deleteCard) deleteCard.addEventListener('click', () => {
-          if (!confirm('Delete this card?')) return;
+        if (deleteCard) deleteCard.addEventListener('click', async () => {
+          if (!(await askConfirm('Delete this card?'))) return;
           const id = boardCard.id;
           boardCard = null;
           boardAction(() => callHrData('board_save_card', { teamId, mode: 'delete', id }), 'Card deleted');
@@ -12906,13 +13475,13 @@
 
         document.querySelectorAll('[data-revert-id]').forEach(btn => btn.addEventListener('click', async () => {
           const id = btn.dataset.revertId;
-          if (!confirm('Revert this action? This will undo it where possible.')) return;
+          if (!(await askConfirm('Revert this action? This will undo it where possible.'))) return;
           revertBusyId = id; paint();
           try {
             await revertAuditLog(id);
             await loadLogs();
           } catch (e) {
-            alert(e.message || 'Could not revert this entry.');
+            toast(e.message || 'Could not revert this entry.', 'err');
             revertBusyId = null; paint();
           }
         }));
@@ -12947,7 +13516,7 @@
 
         document.querySelectorAll('[data-restore-backup]').forEach(btn => btn.addEventListener('click', async () => {
           const id = btn.dataset.restoreBackup;
-          if (!confirm('Restore this backup? This will upsert every row from the backup back into the live database. It will not delete newer rows.')) return;
+          if (!(await askConfirm('Restore this backup? This will upsert every row from the backup back into the live database. It will not delete newer rows.'))) return;
           backupBusyId = id; backupMsg = null; paint();
           try {
             const res = await restoreBackupData(id);
@@ -13066,8 +13635,8 @@
     ${topbar()}
     <div class="shell">
       <div class="heading-block">
-        <h1>Log a payment for a developer</h1>
-        <p class="sub">Log this on behalf of a developer. Fill in what they completed and send it for HR review, it'll show up under their "My payments" once submitted.</p>
+        <h1>Log work</h1>
+        <p class="sub">Log work someone else did. It goes to Review &amp; pay for approval and shows up in their My payments straight away.</p>
       </div>
 
       ${configError ? `<div class="error-box"><span>${esc(configError)}</span></div>` : ''}
@@ -13075,7 +13644,7 @@
       ${submitted ? `
       <div class="confirm-box">
         <div class="icon">&#10003;</div>
-        <div class="txt"><strong>Request submitted</strong><span>HR can see it on the dashboard now, and the developer will see it under their payments.</span></div>
+        <div class="txt"><strong>Logged</strong><span>It's waiting in Review &amp; pay, and they can see it in their My payments.</span></div>
       </div>
       <button type="button" class="btn btn-ghost" id="anotherBtn" style="margin-bottom:26px;">Log another request</button>
       ` : ''}
@@ -13084,7 +13653,7 @@
         <div class="panel">
           ${submitError ? `<div class="error-box"><span>${esc(submitError)}</span></div>` : ''}
           <div class="field" style="position:relative;">
-            <label>Developer's Roblox Username</label>
+            <label>Their Roblox username</label>
             <input type="text" id="f_username" placeholder="Builderman" autocomplete="off" class="${fieldErrors.f_username ? 'field-invalid' : ''}">
             ${fieldErrors.f_username ? `<div class="err-hint">${esc(fieldErrors.f_username)}</div>` : ''}
             <div id="usernameSuggestSlot"></div>
@@ -13100,12 +13669,12 @@
             ${appDataReady && GAMES.length === 0 ? `<div class="err-hint" style="color:var(--muted);">Ask an admin to add a game from the Manage panel first.</div>` : ''}
           </div>
           <div class="field">
-            <label>Task Name</label>
+            <label>Task</label>
             <input type="text" id="f_task" placeholder="Rebirth System" class="${fieldErrors.f_task ? 'field-invalid' : ''}">
             ${fieldErrors.f_task ? `<div class="err-hint">${esc(fieldErrors.f_task)}</div>` : ''}
           </div>
           <div class="field" id="f_skillset_field">
-            <label>Skill(s) used <span class="hint">(optional - pick any that apply)</span></label>
+            <label>Skills used <span class="hint">(optional)</span></label>
             ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">${userSkillsetsLoaded ? 'This person has no skillsets assigned yet - ask an admin to add some under Manage.' : 'Enter a Roblox username above to see this person\'s skillsets.'}</div>` : `
             <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
               ${userSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
@@ -13114,13 +13683,13 @@
             `}
           </div>
           <div class="field">
-            <label>Work Completed <span class="hint">(one line per item)</span></label>
-            <textarea id="f_work" placeholder="Added stuff to the rebirth system"></textarea>
+            <label>Work done <span class="hint">(one line per item)</span></label>
+            <textarea id="f_work" placeholder="Rebirth UI\nRebirth data saving\nBalance pass"></textarea>
           </div>
           <div class="row3">
-            <div class="field"><label>Time Worked</label><input type="text" id="f_time" placeholder="2h 30m"></div>
+            <div class="field"><label>Time spent</label><input type="text" id="f_time" placeholder="2h 30m"></div>
             <div class="field">
-              <label>Payment Amount</label>
+              <label>Amount</label>
               <input type="number" id="f_payment" placeholder="1250" min="0" class="${fieldErrors.f_payment ? 'field-invalid' : ''}">
               ${fieldErrors.f_payment ? `<div class="err-hint">${esc(fieldErrors.f_payment)}</div>` : ''}
             </div>
@@ -13134,8 +13703,8 @@
           </div>
           <div class="field" style="margin-top:-10px;"><span class="hint" style="margin-left:0;">${devexLabel()}</span></div>
           <div class="field" id="usdEquivSlot" style="margin-top:-10px;${robuxEquivalentLabel(currentData()) ? '' : 'display:none;'}"><span class="hint" style="margin-left:0;">${robuxEquivalentLabel(currentData())}</span></div>
-          <div class="field"><label>Submitted by (you)</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
-          <button type="button" class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Submitting...' : 'Submit to HR review'}</button>
+          <div class="field"><label>Logged by</label><input type="text" id="f_requester" value="${esc(hrUsername)}" disabled></div>
+          <button type="button" class="btn btn-primary" id="submitBtn" ${submitting || configError ? 'disabled' : ''}>${submitting ? 'Logging...' : 'Log payment'}</button>
         </div>
 
         <div>
@@ -13305,7 +13874,7 @@
         const field = document.getElementById('f_skillset_field');
         if (!field) return;
         field.innerHTML = `
-          <label>Skill(s) used <span class="hint">(optional - pick any that apply)</span></label>
+          <label>Skills used <span class="hint">(optional)</span></label>
           ${userSkillsetsLoading ? `<div class="hint" style="margin-left:0;display:block;">Checking their skillsets...</div>` : userSkillsets.length === 0 ? `<div class="hint" style="margin-left:0;display:block;">${userSkillsetsLoaded ? 'This person has no skillsets assigned yet - ask an admin to add some under Manage.' : 'Enter a Roblox username above to see this person\'s skillsets.'}</div>` : `
           <div style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:8px;">
             ${userSkillsets.map(s => `<label class="perm-check-item"><input type="checkbox" class="f_skillset_check" value="${esc(s.id)}" ${selectedSkillsetIds.has(String(s.id)) ? 'checked' : ''}> ${esc(s.name)}</label>`).join('')}
@@ -13360,14 +13929,8 @@
           const missingGroups = eligibility.filter(g => !g.eligible);
           if (missingGroups.length > 0) {
             submitting = false;
-            submitError = 'Request failed: the developer does not meet all payout requirements.';
+            submitError = `They can't be paid yet. Still missing: ${missingGroups.map(g => g.name).join(', ')}. Ask them to sort that out, then try again.`;
             paint();
-            alert(
-              'Request failed.\n\n' +
-              'The developer is missing:\n\n' +
-              missingGroups.map(g => '- ' + g.name).join('\n') +
-              '\n\nHave them join, then try again.'
-            );
             return;
           }
 
