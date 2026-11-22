@@ -4,6 +4,8 @@ const {
 } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
+const studio = require('./lib/studio');
+const studioName = () => studio.get().studio.name;
 
 const {
     DISCORD_BOT_TOKEN,
@@ -16,7 +18,7 @@ const {
     APP_ORIGIN
 } = process.env;
 
-const LEAD_ROLE_ID = DISCORD_LEAD_ROLE_ID || '1539922527013572668';
+const LEAD_ROLE_ID = studio.SERVER.discord.leadRoleId || null;
 
 
 
@@ -365,7 +367,7 @@ async function requireLink(interaction) {
     const viewer = await viewerContext(interaction.user.id);
     if (!viewer) {
         const link = siteLink('/');
-        await interaction.editReply(`Your Discord isn't linked to a PlayVerse account yet.${link ? ` Sign in at ${link} and link it from your account menu.` : ''}`);
+        await interaction.editReply(`Your Discord isn't linked to a ${studioName()} account yet.${link ? ` Sign in at ${link} and link it from your account menu.` : ''}`);
         return null;
     }
     return viewer;
@@ -543,7 +545,7 @@ const COMMAND_HANDLERS = {
         }
         const target = interaction.options.getUser('member');
         const theirs = await viewerContext(target.id);
-        if (!theirs) { await interaction.editReply(`${target.username} has not linked a PlayVerse account.`); return; }
+        if (!theirs) { await interaction.editReply(`${target.username} has not linked a ${studioName()} account.`); return; }
 
         const [teamsRes, tasksRes] = await Promise.all([
             supabase.from('user_assignments').select('team_id').eq('roblox_user_id', theirs.robloxUserId),
@@ -577,7 +579,7 @@ const COMMAND_HANDLERS = {
         const target = interaction.options.getUser('member');
         const text = interaction.options.getString('text');
         const theirs = await viewerContext(target.id);
-        if (!theirs) { await interaction.editReply(`${target.username} has not linked a PlayVerse account, so there is nothing to attach a note to.`); return; }
+        if (!theirs) { await interaction.editReply(`${target.username} has not linked a ${studioName()} account, so there is nothing to attach a note to.`); return; }
         if (theirs.maxHierarchy >= viewer.maxHierarchy) { await interaction.editReply('Their role is at or above yours, so you cannot add notes to their record.'); return; }
 
         await botAudit({
@@ -595,7 +597,7 @@ const COMMAND_HANDLERS = {
         const target = interaction.options.getUser('member');
         const reason = interaction.options.getString('reason');
         const theirs = await viewerContext(target.id);
-        if (!theirs) { await interaction.editReply(`${target.username} has not linked a PlayVerse account, so a warning cannot be recorded.`); return; }
+        if (!theirs) { await interaction.editReply(`${target.username} has not linked a ${studioName()} account, so a warning cannot be recorded.`); return; }
         if (String(theirs.robloxUserId) === String(viewer.robloxUserId)) { await interaction.editReply('You cannot warn your own account.'); return; }
         if (theirs.maxHierarchy >= viewer.maxHierarchy) { await interaction.editReply('Their role is at or above yours, so you cannot warn them.'); return; }
 
@@ -617,7 +619,7 @@ const COMMAND_HANDLERS = {
             targetUserId: theirs.robloxUserId, targetUsername: theirs.robloxUsername,
             details: { reason, via: 'discord' }
         });
-        await dmRobloxUser(theirs.robloxUserId, `You've been given a warning on PlayVerse.\nReason: ${reason}`);
+        await dmRobloxUser(theirs.robloxUserId, `You've been given a warning on ${studioName()}.\nReason: ${reason}`);
         await interaction.editReply(`Warned ${theirs.robloxUsername}. They have been told why.`);
     },
 

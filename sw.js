@@ -1,9 +1,9 @@
 self.addEventListener('push', event => {
-    let payload = { title: 'PlayVerse', body: 'You have an update.' };
+    let payload = { title: 'New update', body: 'You have an update.' };
     try { payload = event.data.json(); } catch (e) { }
 
     event.waitUntil(
-        self.registration.showNotification(payload.title || 'PlayVerse', {
+        self.registration.showNotification(payload.title || 'New update', {
             body: payload.body || '',
             icon: '/favicon.ico',
             badge: '/favicon.ico',

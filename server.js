@@ -1,4 +1,5 @@
 const express = require('express');
+const compression = require('compression');
 const cors = require('cors');
 const crypto = require('crypto');
 const zlib = require('zlib');
@@ -6,6 +7,11 @@ const { createClient } = require('@supabase/supabase-js');
 let webpush = null;
 try { webpush = require('web-push'); } catch (e) { }
 require('dotenv').config();
+const security = require('./lib/security');
+const studio = require('./lib/studio');
+const { TtlCache } = require('./lib/cache');
+const { hashToken, publicError } = security;
+const studioName = () => studio.get().studio.name;
 
 const PORT = process.env.PORT || 3000;
 const APP_ORIGIN = process.env.APP_ORIGIN;
@@ -27,8 +33,8 @@ const DISCORD_REDIRECT_URI = process.env.DISCORD_REDIRECT_URI;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_GUILD_ID = process.env.DISCORD_GUILD_ID;
 const DISCORD_LEAD_CHANNEL_ID = process.env.DISCORD_LEAD_CHANNEL_ID;
-const DISCORD_LEAD_ROLE_ID = process.env.DISCORD_LEAD_ROLE_ID || '1539922527013572668';
-const DISCORD_TICKET_CATEGORY_ID = process.env.DISCORD_TICKET_CATEGORY_ID || '1540256971096072295';
+const DISCORD_LEAD_ROLE_ID = studio.SERVER.discord.leadRoleId || null;
+const DISCORD_TICKET_CATEGORY_ID = studio.SERVER.discord.ticketCategoryId || null;
 const DISCORD_HR_ROLE_IDS = (process.env.DISCORD_HR_ROLE_IDS || process.env.DISCORD_HR_ROLE_ID || '')
     .split(',').map(s => s.trim()).filter(Boolean);
 const RECRUIT_SESSION_LIFETIME_MS = 30 * 60 * 1000;
@@ -46,7 +52,8 @@ if (!DISCORD_HR_ROLE_IDS.length) {
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
-const VAPID_CONTACT_EMAIL = process.env.VAPID_CONTACT_EMAIL || 'mailto:admin@playverse.cc';
+const VAPID_CONTACT_EMAIL = process.env.VAPID_CONTACT_EMAIL
+    || (studio.get().studio.contactEmail ? `mailto:${studio.get().studio.contactEmail}` : 'mailto:admin@example.com');
 const PUSH_CONFIGURED = !!(webpush && VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 if (webpush && PUSH_CONFIGURED) {
     webpush.setVapidDetails(VAPID_CONTACT_EMAIL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
@@ -66,8 +73,15 @@ for (const key of Object.keys(requiredEnv)) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false }
+    auth: { persistSession: false, autoRefreshToken: false }
 });
+
+// Signs short-lived tickets (e.g. the Discord linking hand-off). Set SESSION_SECRET to a
+// long random string in production; it falls back to a value derived from the service key.
+if (!process.env.SESSION_SECRET) {
+    console.warn('SESSION_SECRET is not set - deriving one from the service role key. Set a dedicated random SESSION_SECRET in production.');
+}
+security.setTicketSecret(process.env.SESSION_SECRET || `derived:${SUPABASE_SERVICE_ROLE_KEY}`);
 
 const PERMISSIONS = [
     'dashboard.view',
@@ -95,16 +109,17 @@ const PERMISSIONS = [
     'payouts.view_bank_details',
     'security.manage',
     'teams.view',
-    'teams.manage'
+    'teams.manage',
+    'settings.manage_branding'
 ];
 
 const TOS_CONTENT = `Last updated: August 2026
 
 1. Who this applies to
-These Terms of Service apply to anyone signing in to the PlayVerse HR & Payment tool ("the Tool") using their Roblox account, including staff, developers, and contributors of PlayVerse (playverse.cc).
+These Terms of Service apply to anyone signing in to the {studio} HR & Payment tool ("the Tool") using their Roblox account, including staff, developers, and contributors of {studio}.
 
 2. Your account
-You sign in with your own Roblox account through Roblox OAuth. You're responsible for keeping that account secure. Access to the Tool can be granted or revoked at any time based on your role or group standing within PlayVerse.
+You sign in with your own Roblox account through Roblox OAuth. You're responsible for keeping that account secure. Access to the Tool can be granted or revoked at any time based on your role or group standing within {studio}.
 
 3. What the Tool is for
 The Tool is used to log completed work, submit and review payment requests, track DevEx/Robux and cash payouts, and manage staff access and roles. It is an internal tool, not a public product, and it is not affiliated with or endorsed by Roblox Corporation.
@@ -113,20 +128,20 @@ The Tool is used to log completed work, submit and review payment requests, trac
 Any payment request, task log, or work summary you submit must be accurate and represent work you actually completed. Submitting false, inflated, or duplicated work entries is a violation of these Terms and may result in the request being rejected, access being revoked, and, in serious cases, referral to group leadership for further action.
 
 5. Payments
-Payment amounts, currencies, and DevEx rates shown in the Tool are set by PlayVerse and may change at any time. Being able to submit a request does not guarantee payment; requests are reviewed and approved at PlayVerse's discretion. It's your responsibility to keep your payout details (PayPal, Venmo, or Roblox username for DevEx) accurate and up to date.
+Payment amounts, currencies, and DevEx rates shown in the Tool are set by {studio} and may change at any time. Being able to submit a request does not guarantee payment; requests are reviewed and approved at {studio}'s discretion. It's your responsibility to keep your payout details (PayPal, Venmo, or Roblox username for DevEx) accurate and up to date.
 
 6. No warranty
-The Tool is provided "as is." PlayVerse makes reasonable efforts to keep it available and your data accurate, but does not guarantee uninterrupted access or that the Tool will be free of errors.
+The Tool is provided "as is." {studio} makes reasonable efforts to keep it available and your data accurate, but does not guarantee uninterrupted access or that the Tool will be free of errors.
 
 7. Changes
 These Terms may be updated from time to time. Continued use of the Tool after an update means you accept the revised Terms. Material changes will be reflected here with an updated date.
 
 8. Contact
-Questions about these Terms can be directed to PlayVerse leadership through your usual staff channels.`;
+Questions about these Terms can be directed to {studio} leadership through your usual staff channels.`;
 
 const AUP_CONTENT = `Last updated: August 2026
 
-This Acceptable Use Policy explains what is and isn't okay when using the PlayVerse HR & Payment tool ("the Tool"). It applies to everyone with access, regardless of role.
+This Acceptable Use Policy explains what is and isn't okay when using the {studio} HR & Payment tool ("the Tool"). It applies to everyone with access, regardless of role.
 
 1. Use the Tool for its intended purpose
 Only submit payment requests and work logs for work you actually did. Only use the accounts, groups, and permissions you've been given for the purpose they were given to you.
@@ -135,30 +150,30 @@ Only submit payment requests and work logs for work you actually did. Only use t
 Do not attempt to access data, requests, or settings you have not been granted permission to view or edit. Do not share your session, login link, or account access with anyone else. Do not attempt to bypass, disable, or trick the Tool's permission or eligibility checks.
 
 3. Respect other staff
-Treat other staff, developers, and contributors with respect when interacting through or about the Tool. Harassment, discrimination, or abusive behavior toward other members of the team is not tolerated and may result in removal from all PlayVerse groups and revocation of Tool access.
+Treat other staff, developers, and contributors with respect when interacting through or about the Tool. Harassment, discrimination, or abusive behavior toward other members of the team is not tolerated and may result in removal from all {studio} groups and revocation of Tool access.
 
 4. Financial integrity
 Do not submit duplicate, inflated, or fraudulent payment requests. Do not mark your own requests as paid, approve your own submissions, or otherwise use elevated access for your own benefit. If you're granted a role with financial permissions, that access is for processing the team's requests, not your own.
 
 5. Data handling
-Information in the Tool, including payment history, personal payout details, and staff roles, is internal and confidential. Do not export, screenshot, or share this data outside of PlayVerse without authorization.
+Information in the Tool, including payment history, personal payout details, and staff roles, is internal and confidential. Do not export, screenshot, or share this data outside of {studio} without authorization.
 
 6. Required groups and access
 Some access to the Tool is tied to membership in specific Roblox groups. Do not attempt to join required groups, achieve a rank, or gain access under false pretenses (for example, using an alternate account to bypass a restriction placed on your main account).
 
 7. Consequences
-Violating this policy may result in a rejected or reversed payment request, loss of specific permissions, removal from PlayVerse groups, and loss of access to the Tool, depending on the severity of the violation.
+Violating this policy may result in a rejected or reversed payment request, loss of specific permissions, removal from {studio} groups, and loss of access to the Tool, depending on the severity of the violation.
 
 8. Reporting concerns
-If you see something that looks like a violation of this policy, report it to PlayVerse leadership through your usual staff channels.`;
+If you see something that looks like a violation of this policy, report it to {studio} leadership through your usual staff channels.`;
 
 const ONBOARDING_STEPS = [
     {
         id: 'welcome',
         type: 'intro',
-        title: 'Welcome to the PlayVerse HR tool',
+        title: 'Welcome to the {studio} HR tool',
         description: 'A quick tour before you get started.',
-        content: `This tool is how PlayVerse staff log completed work, submit and track payment requests, and see what's been paid.
+        content: `This tool is how {studio} staff log completed work, submit and track payment requests, and see what's been paid.
 
 If you can submit requests: use "New request" to log a task, the game it was for, time worked, and the payout amount. Add a payout method under "My payments" first so it's ready to go.
 
@@ -173,7 +188,7 @@ That's the basics, take a look around once you're through this checklist.`,
         id: 'team_info',
         type: 'team_info',
         title: 'Your team & skillset',
-        description: 'Where you fit in at PlayVerse.',
+        description: 'Where you fit in at {studio}.',
         content: '',
         required: false
     },
@@ -196,6 +211,18 @@ That's the basics, take a look around once you're through this checklist.`,
 ];
 const ONBOARDING_STEP_IDS = new Set(ONBOARDING_STEPS.map(s => s.id));
 
+// Onboarding steps with the studio's name filled in, and its own Terms / AUP text when
+// one has been configured (studio.config.json "legal", or the Branding panel).
+function onboardingSteps() {
+    const legal = studio.get().legal || {};
+    return ONBOARDING_STEPS.map(step => {
+        let content = step.content;
+        if (step.id === 'tos' && legal.tos) content = legal.tos;
+        if (step.id === 'aup' && legal.aup) content = legal.aup;
+        return { ...step, title: studio.interpolate(step.title), description: studio.interpolate(step.description), content: studio.interpolate(content) };
+    });
+}
+
 const PAYMENT_METHOD_TYPES = {
     PAYPAL: { fields: ['paypalEmail'] },
     DEVEX_ROBUX: { fields: ['robloxUsername'] },
@@ -208,6 +235,47 @@ const PAYMENT_METHOD_TYPES = {
 
 const USD_PAYMENT_METHODS = ['PAYPAL', 'VENMO', 'BANK_TRANSFER'];
 const USD_METHOD_LABELS = { PAYPAL: 'PayPal', VENMO: 'Venmo', BANK_TRANSFER: 'bank transfer' };
+
+// ---------------------------------------------------------------------------
+// Money safety rails
+// ---------------------------------------------------------------------------
+// Separation of duties: nobody approves, re-prices or pays out their own money, no matter
+// which permissions their role has. Opt out with moneyRules.allowSelfApproval.
+function isOwnMoney(session, row) {
+    if (!row || studio.SERVER.moneyRules.allowSelfApproval) return false;
+    if (row.roblox_user_id != null && String(row.roblox_user_id) === String(session.roblox_user_id)) return true;
+    return row.roblox_user_id == null && row.roblox_username
+        && String(row.roblox_username).toLowerCase() === String(session.roblox_username || '').toLowerCase();
+}
+
+function blockedAsOwnMoney(res, session, row, what) {
+    if (!isOwnMoney(session, row)) return false;
+    logSecurityEvent({
+        kind: 'self_approval_blocked', severity: 'notice', session,
+        targetUserId: row.roblox_user_id, targetUsername: row.roblox_username,
+        detail: `Tried to ${what} their own payment`, context: { id: row.id || null, what }
+    });
+    res.status(403).json({ ok: false, error: 'own_payment' });
+    return true;
+}
+
+// Amounts must be finite, positive and below the studio's per-request ceiling.
+function amountOk(amount, currency) {
+    const max = studio.SERVER.moneyRules.maxAmount[currency] || studio.SERVER.moneyRules.maxAmount.ROBUX;
+    return Number.isFinite(amount) && amount > 0 && amount <= max;
+}
+
+// Team / skillset colours are rendered into style attributes, so only plain hex is stored.
+function cleanColor(value) {
+    const v = value ? String(value).trim() : '';
+    return /^#[0-9a-fA-F]{3,8}$/.test(v) ? v : null;
+}
+
+// The requested currency if this studio pays in it, otherwise the studio's first currency.
+function pickCurrency(requested) {
+    const allowed = studio.get().payments.currencies;
+    return allowed.includes(requested) ? requested : (allowed[0] || 'ROBUX');
+}
 
 function canSeeSensitivePayoutDetails(session) {
     return hasPermission(session, 'payouts.view_bank_details');
@@ -452,13 +520,39 @@ function redactPayoutMethod(method, session) {
 }
 
 const app = express();
+app.disable('x-powered-by');
+// Behind Render / Cloudflare / a load balancer, trust the first proxy hop so req.ip is the
+// real client (used for rate limiting). Override with TRUST_PROXY if your setup differs.
+app.set('trust proxy', process.env.TRUST_PROXY != null ? (Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY) : 1);
+
+const ALLOWED_ORIGINS = [APP_ORIGIN, ...String(process.env.EXTRA_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)];
+
+app.use(security.securityHeaders);
+app.use(compression({ threshold: 1024 }));
 app.use(cors({
-    origin: APP_ORIGIN,
+    origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin) ? (origin || false) : false),
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning']
+    allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning'],
+    maxAge: 600
 }));
 
-app.use(express.json({ limit: '8mb' }));
+// Global per-IP ceiling: generous for real people, stops scripted floods.
+app.use(security.rateLimitByIp('global', Number(process.env.RATE_LIMIT_PER_MIN) || 600, 60 * 1000));
+app.use(security.requireJson);
+app.use(express.json({ limit: '1mb', strict: true }));
+app.use((err, req, res, next) => {
+    // Malformed / oversized JSON bodies end here instead of leaking a stack trace.
+    if (err && (err.type === 'entity.parse.failed' || err.type === 'entity.too.large')) {
+        res.status(err.type === 'entity.too.large' ? 413 : 400).json({ ok: false, error: err.type === 'entity.too.large' ? 'payload_too_large' : 'invalid_json' });
+        return;
+    }
+    next(err);
+});
+
+const authLimiter = security.rateLimitByIp('auth', 40, 60 * 1000);
+const publicLimiter = security.rateLimitByIp('public', 120, 60 * 1000);
+['/roblox-auth-start', '/roblox-auth-callback', '/discord-auth-start', '/discord-auth-start-staff', '/discord-auth-callback'].forEach(p => app.use(p, authLimiter));
+['/recruitment', '/recruit-session', '/onboarding-link-preview', '/api/roblox', '/public'].forEach(p => app.use(p, publicLimiter));
 
 app.get('/ping', (req, res) => {
     res.status(200).json({ ok: true, time: new Date().toISOString() });
@@ -507,7 +601,7 @@ app.get("/api/roblox/avatar/:userId", async (req, res) => {
 });
 
 app.get('/api/roblox/avatars', async (req, res) => {
-    const ids = String(req.query.ids || '').split(',').slice(0, 1000);
+    const ids = String(req.query.ids || '').split(',').slice(0, 200);
     try {
         res.json({ ok: true, data: await getAvatarUrls(ids) });
     } catch (e) {
@@ -536,9 +630,9 @@ function generateLinkToken() {
 }
 
 function generateRequestId() {
-    const rand = Math.floor(100000 + Math.random() * 900000);
+    const rand = crypto.randomInt(100000, 1000000);
     const stamp = Date.now().toString(36).slice(-4);
-    return `PV_${rand}_${stamp}`;
+    return `${studio.get().studio.requestIdPrefix || 'REQ'}_${rand}_${stamp}`;
 }
 
 async function getRecruitSession(req) {
@@ -821,10 +915,10 @@ async function sendDiscordDM(discordUserId, content) {
 }
 
 const STATUS_DM_MESSAGES = {
-    in_review: () => `Your PlayVerse application is now in review. Someone is actively looking at it.`,
-    accepted: () => `Your PlayVerse application has been accepted. Someone from the team will reach out here shortly.`,
-    rejected: () => `Thanks for applying to PlayVerse. Unfortunately your application wasn't accepted this time. You're welcome to apply again in the future.`,
-    withdrawn: () => `Your PlayVerse application has been marked as withdrawn.`,
+    in_review: () => `Your ${studioName()} application is now in review. Someone is actively looking at it.`,
+    accepted: () => `Your ${studioName()} application has been accepted. Someone from the team will reach out here shortly.`,
+    rejected: () => `Thanks for applying to ${studioName()}. Unfortunately your application wasn't accepted this time. You're welcome to apply again in the future.`,
+    withdrawn: () => `Your ${studioName()} application has been marked as withdrawn.`,
     team_selection: () => `Your application has moved to team selection. Please wait while leads finish placing you.`,
     signed_off: () => `Your placement has been reviewed and is now awaiting final approval.`,
     finalised: () => `You are fully placed and roled onto your team. Welcome aboard.`
@@ -882,7 +976,7 @@ async function notifyDiscordNextPhase(ticket, skillset) {
         const message = await discordApi(`/channels/${DISCORD_LEAD_CHANNEL_ID}/messages`, {
             method: 'POST',
             body: JSON.stringify({
-                content: `<@&${DISCORD_LEAD_ROLE_ID}> ${ticket.roblox_username} is ready for team selection.`,
+                content: `${DISCORD_LEAD_ROLE_ID ? `<@&${DISCORD_LEAD_ROLE_ID}> ` : ''}${ticket.roblox_username} is ready for team selection.`,
                 embeds: [{
                     title: `${ticket.roblox_username} - ready for team selection`,
                     color: 0x178A4C,
@@ -1093,7 +1187,7 @@ async function runRecruitmentAutoAccept() {
             await processHire(merged, { reviewerUserId: null, reviewerUsername: null });
 
             sendPushToApplicant(ticket.roblox_user_id, {
-                title: 'Your PlayVerse application was updated',
+                title: `Your ${studioName()} application was updated`,
                 body: 'Your application was automatically accepted after the review window passed.',
                 url: `${APP_ORIGIN}/#/recruit/status`
             });
@@ -1262,16 +1356,31 @@ async function syncRobloxUsername(robloxUserId, newUsername) {
     }
 }
 
+const rolesCache = new TtlCache({ ttlMs: 30 * 1000, max: 4 });
+const baseAccessCache = new TtlCache({ ttlMs: 30 * 1000, max: 4 });
+
+async function getAllRolesCached() {
+    return rolesCache.wrap('roles', async () => {
+        const { data, error } = await supabase.from('roles').select('*');
+        if (error) throw error;
+        return data || [];
+    });
+}
+
 async function getBaseAccessGroups() {
-    const { data, error } = await supabase.from('base_access_groups').select('*').order('created_at', { ascending: true });
-    if (error) throw error;
-    return data || [];
+    return baseAccessCache.wrap('groups', async () => {
+        const { data, error } = await supabase.from('base_access_groups').select('*').order('created_at', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    });
 }
 
 async function getBaseAccessDiscordServers() {
-    const { data, error } = await supabase.from('base_access_discord_servers').select('*').order('created_at', { ascending: true });
-    if (error) throw error;
-    return data || [];
+    return baseAccessCache.wrap('discord', async () => {
+        const { data, error } = await supabase.from('base_access_discord_servers').select('*').order('created_at', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    });
 }
 
 async function syncDiscordRole(robloxUserId, discordRoleId, mode) {
@@ -1349,7 +1458,7 @@ async function runTaskReminders() {
         const overdue = due.getTime() < Date.now();
         const when = overdue ? `was due ${due.toUTCString()}` : `is due on ${due.toUTCString()}`;
         const text = overdue
-            ? `Your ${teamName[String(task.team_id)] || 'team'} task "${task.title}" ${when}. Mark it done on PlayVerse, or tell your lead if it needs moving.`
+            ? `Your ${teamName[String(task.team_id)] || 'team'} task "${task.title}" ${when}. Mark it done on ${studioName()}, or tell your lead if it needs moving.`
             : `Reminder: your ${teamName[String(task.team_id)] || 'team'} task "${task.title}" ${when}.`;
         let delivered = false;
         try {
@@ -1398,7 +1507,7 @@ async function notifyTaskEvent(task, teamId, kind, extra) {
     const link = taskLink(task.id);
     const due = task.due_at ? `\nDue ${new Date(task.due_at).toUTCString()}.` : '';
     const lines = {
-        assigned: `New ${teamName} task for you on PlayVerse: "${task.title}".${due}${taskMoneyLine(task)}`,
+        assigned: `New ${teamName} task for you on ${studioName()}: "${task.title}".${due}${taskMoneyLine(task)}`,
         updated: `Your ${teamName} task "${task.title}" was updated.${due}${taskMoneyLine(task)}`,
         done: `Nice one, you finished "${task.title}" for ${teamName}.${task.due_at && new Date(task.completed_at || Date.now()) <= new Date(task.due_at) ? ' Right on time.' : ''}${taskMoneyLine(task)}`,
         reopened: `Your ${teamName} task "${task.title}" has been reopened.${due}`,
@@ -1471,7 +1580,7 @@ async function legacyNotifyTaskAssigned(task, teamId) {
     const due = task.due_at ? `\nDue ${new Date(task.due_at).toUTCString()}.` : '';
     const details = task.details ? `\n${task.details}` : '';
     const repeats = task.repeat_every ? `\nThis one repeats ${{ weekly: 'every week', fortnightly: 'every 2 weeks', monthly: 'every month' }[task.repeat_every]}.` : '';
-    const text = `New ${teamName} task for you on PlayVerse: "${task.title}".${due}${details}${repeats}`;
+    const text = `New ${teamName} task for you on ${studioName()}: "${task.title}".${due}${details}${repeats}`;
     try {
         return await notifyModeratedUser(task.assigned_to_user_id, text);
     } catch (e) {
@@ -1485,8 +1594,8 @@ async function notifyPaymentOutcome(request, outcome, note) {
         ? `R$ ${Number(request.payment || 0).toLocaleString()}`
         : `$${Number(request.payment || 0).toFixed(2)}`;
     const text = outcome === 'paid'
-        ? `Your PlayVerse payment for "${request.task_name}" (${amount}) has been marked as paid.`
-        : `Your PlayVerse payment request for "${request.task_name}" (${amount}) was rejected.${note ? `\nReason: ${note}` : ''}`;
+        ? `Your ${studioName()} payment for "${request.task_name}" (${amount}) has been marked as paid.`
+        : `Your ${studioName()} payment request for "${request.task_name}" (${amount}) was rejected.${note ? `\nReason: ${note}` : ''}`;
     try {
         return await notifyModeratedUser(request.roblox_user_id, text);
     } catch (e) {
@@ -1834,8 +1943,8 @@ async function startAccessOnboardingFlow({ robloxUserId, robloxUsername, discord
             method: 'POST',
             body: JSON.stringify({
                 content: relink
-                    ? `Welcome back, ${robloxUsername}. Join the PlayVerse Roblox group to unlock your account again.${teamGroupLine}`
-                    : `Welcome to the team, ${robloxUsername}. To finish setting up your access, you need to join the PlayVerse Roblox group first.${teamGroupLine}`,
+                    ? `Welcome back, ${robloxUsername}. Join the ${studioName()} Roblox group to unlock your account again.${teamGroupLine}`
+                    : `Welcome to the team, ${robloxUsername}. To finish setting up your access, you need to join the ${studioName()} Roblox group first.${teamGroupLine}`,
                 components
             })
         });
@@ -2033,7 +2142,7 @@ async function runOnboardingJoinCheck() {
             } else if (mainJoined) {
                 content = `You've joined the main group. You still need to request to join ${team.name}'s group to continue.`;
             } else if (team && teamRequested) {
-                content = `You've requested to join ${team.name}'s group. You still need to join the main PlayVerse group to continue.`;
+                content = `You've requested to join ${team.name}'s group. You still need to join the main ${studioName()} group to continue.`;
             } else {
                 content = team
                     ? `Still waiting for you to join the main group and request to join ${team.name}'s group.`
@@ -2341,17 +2450,16 @@ async function checkBaseAccess(robloxUserId) {
 }
 
 async function computeAccess(robloxUserId) {
-    const { data: roles, error: rolesErr } = await supabase.from('roles').select('*');
-    if (rolesErr) throw rolesErr;
-
-    const { data: manualRows, error: manualErr } = await supabase
-        .from('user_role_assignments')
-        .select('role_id')
-        .eq('roblox_user_id', robloxUserId);
+    // Roles, manual assignments and Roblox group ranks are independent: fetch them together.
+    const [roles, manualRes, groupRoles] = await Promise.all([
+        getAllRolesCached(),
+        supabase.from('user_role_assignments').select('role_id').eq('roblox_user_id', robloxUserId),
+        fetchRobloxGroupRolesStrict(robloxUserId)
+    ]);
+    const { data: manualRows, error: manualErr } = manualRes;
     if (manualErr) throw manualErr;
     const manualRoleIds = new Set((manualRows || []).map(r => r.role_id));
 
-    const groupRoles = await fetchRobloxGroupRolesStrict(robloxUserId);
     const rankByGroupId = {};
     groupRoles.forEach(g => { rankByGroupId[g.group.id] = g.role.rank; });
 
@@ -2467,7 +2575,7 @@ async function upsertUserAssignmentRecord({ robloxUserId, robloxUsername, teamId
         .eq('roblox_user_id', robloxUserId)
         .eq('team_id', teamId)
         .maybeSingle();
-    if (findErr) return { ok: false, error: findErr.message };
+    if (findErr) return { ok: false, error: publicError(findErr) };
 
     if (existing) {
         const { error: updateErr } = await supabase.from('user_assignments')
@@ -2478,7 +2586,7 @@ async function upsertUserAssignmentRecord({ robloxUserId, robloxUsername, teamId
             })
             .eq('roblox_user_id', robloxUserId)
             .eq('team_id', teamId);
-        if (updateErr) return { ok: false, error: updateErr.message };
+        if (updateErr) return { ok: false, error: publicError(updateErr) };
         return { ok: true, mode: 'updated' };
     }
 
@@ -2489,7 +2597,7 @@ async function upsertUserAssignmentRecord({ robloxUserId, robloxUsername, teamId
         skillset_id: skillsetId ?? null,
         assigned_at: new Date().toISOString()
     });
-    if (insertErr) return { ok: false, error: insertErr.message };
+    if (insertErr) return { ok: false, error: publicError(insertErr) };
     return { ok: true, mode: 'inserted' };
 }
 
@@ -2602,7 +2710,7 @@ async function writeBan({ robloxUserId, robloxUsername, reason, bannedBy, durati
         ({ error } = await supabase.from('banned_users').upsert(row, { onConflict: 'roblox_user_id' }));
     }
     if (error) throw new Error(error.message);
-    await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+    await hrSessionsDelete().eq('roblox_user_id', robloxUserId);
     return { expiresAt: temporaryUnsupported ? null : (row.expires_at || null), temporaryUnsupported };
 }
 
@@ -2644,6 +2752,22 @@ function requirePermission(res, session, permission) {
     return false;
 }
 
+// You can only hand out permissions you hold yourself. Without this, a role manager could
+// create a lower role with e.g. security.manage, assign it to themselves and escalate.
+function blockedGrantingUnheldPermissions(res, session, nextPermissions, previousPermissions) {
+    const before = new Set(previousPermissions || []);
+    const added = (nextPermissions || []).filter(p => !before.has(p));
+    const unheld = added.filter(p => !hasPermission(session, p));
+    if (!unheld.length) return false;
+    logSecurityEvent({
+        kind: 'permission_escalation_blocked', severity: 'alert', session,
+        detail: `Tried to grant permissions they do not hold: ${unheld.join(', ')}`,
+        context: { permissions: unheld }
+    });
+    res.status(403).json({ ok: false, error: 'cannot_grant_permission' });
+    return true;
+}
+
 function requireHigherHierarchy(res, session, targetHierarchy) {
     const actorHierarchy = Number(session && session.max_hierarchy) || 0;
     if (actorHierarchy > (Number(targetHierarchy) || 0)) return true;
@@ -2680,49 +2804,49 @@ async function applyRevert(revert) {
             const { error } = await supabase.from('payment_requests')
                 .update({ paid: false, paid_at: null, status: 'pending', status_note: null })
                 .eq('id', revert.id);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'unmark_paid_bulk': {
             const { error } = await supabase.from('payment_requests')
                 .update({ paid: false, paid_at: null, status: 'pending', status_note: null })
                 .in('id', revert.ids || []);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'reopen_request': {
             const { error } = await supabase.from('payment_requests')
                 .update({ status: 'pending', status_note: null })
                 .eq('id', revert.id);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'restore_request_amount': {
             const { error } = await supabase.from('payment_requests')
                 .update({ payment: revert.payment, currency: revert.currency })
                 .eq('id', revert.id);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'delete_payment_request': {
             const { error } = await supabase.from('payment_requests').delete().eq('id', revert.id);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'restore_payment_request': {
             const { error } = await supabase.from('payment_requests').upsert(revert.row);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'remove_warning': {
             const { error } = await supabase.from('staff_warnings').delete().eq('id', revert.warningId);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'restore_warning': {
             const { error } = await supabase.from('staff_warnings').upsert(revert.row);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'unban_user': {
             const { error } = await supabase.from('banned_users').delete().eq('roblox_user_id', revert.robloxUserId);
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         case 'reban_user': {
             const { error } = await supabase.from('banned_users').upsert(revert.row, { onConflict: 'roblox_user_id' });
-            return error ? { ok: false, error: error.message } : { ok: true };
+            return error ? { ok: false, error: publicError(error) } : { ok: true };
         }
         default:
             return { ok: false, error: 'unknown_revert_type' };
@@ -2807,80 +2931,142 @@ setInterval(() => {
     runTaskReminders().catch(e => console.error('scheduled task reminder pass failed:', e.message));
 }, TASK_REMINDER_INTERVAL_MS);
 
+// ---------------------------------------------------------------------------
+// Sessions
+//
+// Tokens are stored as SHA-256 hashes (see lib/security.js). A short in-memory cache
+// keeps the per-request cost to zero database round trips for active users; any
+// write that removes sessions calls invalidateSessions() so revocation is immediate.
+// ---------------------------------------------------------------------------
+const SESSION_CACHE_MS = 20 * 1000;
+const sessionCache = new TtlCache({ ttlMs: SESSION_CACHE_MS, max: 10000 });
+let sessionCacheBlockedUntil = 0;
+const accessRefreshInflight = new Set();
+
+function invalidateSessions() {
+    sessionCache.clear();
+    // Requests that started before the delete landed must not re-cache stale rows.
+    sessionCacheBlockedUntil = Date.now() + 3000;
+}
+
+// Every delete on hr_sessions goes through here so the cache can never outlive a revocation.
+function hrSessionsDelete() {
+    invalidateSessions();
+    const builder = supabase.from('hr_sessions').delete();
+    const originalThen = builder.then.bind(builder);
+    builder.then = (onOk, onErr) => originalThen((r) => { invalidateSessions(); return r; }).then(onOk, onErr);
+    return builder;
+}
+
+async function loadSessionRow(rawToken) {
+    const key = hashToken(rawToken);
+    const { data, error } = await supabase.from('hr_sessions').select('*').eq('token', key).maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+
+    // One-time migration for sessions created before tokens were hashed: find the legacy
+    // plaintext row and rewrite it in place, so nobody gets signed out by the upgrade.
+    if (!security.isHashedToken(rawToken) && rawToken.length >= 32) {
+        const { data: legacy } = await supabase.from('hr_sessions').select('*').eq('token', rawToken).maybeSingle();
+        if (legacy) {
+            const { error: upErr } = await supabase.from('hr_sessions').update({ token: key }).eq('token', rawToken);
+            if (!upErr) return { ...legacy, token: key };
+        }
+    }
+    return null;
+}
+
 async function getSession(req) {
-    const token = getBearerToken(req);
-    if (!token) return null;
-    const { data, error } = await supabase
-        .from('hr_sessions')
-        .select('*')
-        .eq('token', token)
-        .maybeSingle();
-    if (error || !data) return null;
+    const raw = getBearerToken(req);
+    if (!raw || raw.length > 256 || security.isHashedToken(raw)) return null;
+    const key = hashToken(raw);
+
+    let data = Date.now() > sessionCacheBlockedUntil ? sessionCache.get(key) : undefined;
+    if (!data) {
+        let row;
+        try { row = await loadSessionRow(raw); } catch (e) { console.error('getSession: lookup failed:', e.message); return null; }
+        if (!row) return null;
+
+        if (new Date(row.expires_at).getTime() < Date.now()) {
+            await hrSessionsDelete().eq('token', key);
+            return null;
+        }
+        try {
+            if (await isUserBanned(row.roblox_user_id)) {
+                await hrSessionsDelete().eq('token', key);
+                return null;
+            }
+        } catch (e) { }
+        try {
+            row.team_state = await getTeamState(row.roblox_user_id);
+            row.team_removed = row.team_state === 'removed';
+        } catch (e) {
+            row.team_state = 'ok';
+            row.team_removed = false;
+        }
+        data = row;
+        if (Date.now() > sessionCacheBlockedUntil) sessionCache.set(key, data);
+    }
+
     if (new Date(data.expires_at).getTime() < Date.now()) {
-        await supabase.from('hr_sessions').delete().eq('token', token);
+        sessionCache.delete(key);
+        hrSessionsDelete().eq('token', key).then(() => { }, () => { });
         return null;
     }
 
-    try {
-        if (await isUserBanned(data.roblox_user_id)) {
-            await supabase.from('hr_sessions').delete().eq('token', token);
-            return null;
-        }
-    } catch (e) { }
-
-    try {
-        data.team_state = await getTeamState(data.roblox_user_id);
-        data.team_removed = data.team_state === 'removed';
-    } catch (e) {
-        data.team_state = 'ok';
-        data.team_removed = false;
+    // Sliding expiry, written at most every few minutes and never on the request path.
+    const lastSeen = data.last_seen_at ? new Date(data.last_seen_at).getTime() : 0;
+    if (Date.now() - lastSeen > SESSION_TOUCH_INTERVAL_MS) {
+        const touch = {
+            last_seen_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + SESSION_LIFETIME_MS).toISOString()
+        };
+        const agent = req.headers && req.headers['user-agent'];
+        if (agent && !data.user_agent) touch.user_agent = String(agent).slice(0, 200);
+        data.last_seen_at = touch.last_seen_at;
+        data.expires_at = touch.expires_at;
+        if (touch.user_agent) data.user_agent = touch.user_agent;
+        supabase.from('hr_sessions').update(touch).eq('token', key).then(() => { }, () => { });
     }
 
-    try {
-        const lastSeen = data.last_seen_at ? new Date(data.last_seen_at).getTime() : 0;
-        if (Date.now() - lastSeen > SESSION_TOUCH_INTERVAL_MS) {
-            const touch = {
-                last_seen_at: new Date().toISOString(),
-                expires_at: new Date(Date.now() + SESSION_LIFETIME_MS).toISOString()
-            };
-            const agent = req.headers && req.headers['user-agent'];
-            if (agent && !data.user_agent) touch.user_agent = String(agent).slice(0, 200);
-            await supabase.from('hr_sessions').update(touch).eq('token', token);
-            data.last_seen_at = touch.last_seen_at;
-            data.expires_at = touch.expires_at;
-        }
-    } catch (e) { }
-
+    // Roles/permissions re-sync with Roblox. The first sync blocks (we need permissions);
+    // later ones run in the background so no request ever waits on Roblox.
     const lastSynced = data.last_synced_at ? new Date(data.last_synced_at).getTime() : 0;
     if (Date.now() - lastSynced > ACCESS_SYNC_INTERVAL_MS) {
-        try {
-            const baseCheck = await checkBaseAccess(data.roblox_user_id);
-            if (!baseCheck.allowed) {
-                await supabase.from('hr_sessions').delete().eq('token', token);
-                return null;
-            }
-
-            const access = await computeAccess(data.roblox_user_id);
-            const updated = {
-                ...data,
-                roles: access.roleNames,
-                permissions: access.permissions,
-                max_hierarchy: access.maxHierarchy,
-                last_synced_at: new Date().toISOString()
-            };
-            await supabase.from('hr_sessions').update({
-                roles: updated.roles,
-                permissions: updated.permissions,
-                max_hierarchy: updated.max_hierarchy,
-                last_synced_at: updated.last_synced_at
-            }).eq('token', token);
-            return updated;
-        } catch (e) {
-            return data;
+        if (!lastSynced) {
+            const refreshed = await refreshSessionAccess(key, data);
+            return refreshed;
+        }
+        if (!accessRefreshInflight.has(key)) {
+            accessRefreshInflight.add(key);
+            refreshSessionAccess(key, data).catch(() => { }).finally(() => accessRefreshInflight.delete(key));
         }
     }
 
     return data;
+}
+
+async function refreshSessionAccess(key, data) {
+    try {
+        const baseCheck = await checkBaseAccess(data.roblox_user_id);
+        if (!baseCheck.allowed) {
+            await hrSessionsDelete().eq('token', key);
+            return null;
+        }
+        const access = await computeAccess(data.roblox_user_id);
+        const patch = {
+            roles: access.roleNames,
+            permissions: access.permissions,
+            max_hierarchy: access.maxHierarchy,
+            last_synced_at: new Date().toISOString()
+        };
+        await supabase.from('hr_sessions').update(patch).eq('token', key);
+        Object.assign(data, patch);
+        if (Date.now() > sessionCacheBlockedUntil) sessionCache.set(key, data);
+        return data;
+    } catch (e) {
+        return data;
+    }
 }
 
 app.get('/roblox-auth-start', async (req, res) => {
@@ -3114,7 +3300,7 @@ app.get('/roblox-auth-callback', async (req, res) => {
         const expiresAt = new Date(Date.now() + SESSION_LIFETIME_MS).toISOString();
 
         const { error: sessionErr } = await supabase.from('hr_sessions').insert({
-            token,
+            token: hashToken(token),
             roblox_user_id: robloxUserId,
             roblox_username: robloxUsername,
             roles: access.roleNames,
@@ -3166,7 +3352,7 @@ app.get('/discord-auth-start', async (req, res) => {
     const returnHash = req.query.return ? String(req.query.return).slice(0, 128) : '#/recruit/apply';
     const { error } = await supabase.from('discord_oauth_states').insert({ state, rt, return_hash: returnHash });
     if (error) { res.status(500).send('Could not start Discord sign-in.'); return; }
-    console.log(`[discord-auth-start] created state ${state} for rt ${rt} (supabase url: ${SUPABASE_URL})`);
+    console.log(`[discord-auth-start] created state ${state.slice(0, 6)}`);
 
     const authorizeUrl = new URL('https://discord.com/oauth2/authorize');
     authorizeUrl.searchParams.set('client_id', DISCORD_CLIENT_ID);
@@ -3178,16 +3364,30 @@ app.get('/discord-auth-start', async (req, res) => {
     res.redirect(authorizeUrl.toString());
 });
 
+// Staff Discord linking. The browser first asks for a signed, two-minute ticket (with its
+// bearer token in a header), then navigates here with only the ticket in the URL. The
+// session token itself never appears in a URL, a log line or a Referer header.
+app.post('/auth/discord-link-ticket', async (req, res) => {
+    const session = await getSession(req);
+    if (!session) { res.status(401).json({ ok: false, error: 'not_authenticated' }); return; }
+    if (!DISCORD_CONFIGURED) { res.status(503).json({ ok: false, error: 'discord_not_configured' }); return; }
+    const returnHash = req.body && typeof req.body.return === 'string' && /^#\/[a-zA-Z0-9/_\-?=&]*$/.test(req.body.return)
+        ? req.body.return.slice(0, 200) : '#/home';
+    const ticket = security.signTicket({ h: hashToken(getBearerToken(req)), r: returnHash, k: 'discord_link' }, 2 * 60 * 1000);
+    res.json({ ok: true, url: `/discord-auth-start-staff?ticket=${encodeURIComponent(ticket)}` });
+});
+
 app.get('/discord-auth-start-staff', async (req, res) => {
     if (!DISCORD_CONFIGURED) { res.status(500).send('Discord sign-in is not configured.'); return; }
-    const token = req.query.token ? String(req.query.token) : '';
-    if (!token) { res.status(400).send('Missing session.'); return; }
-    const { data: hrSession } = await supabase.from('hr_sessions').select('token').eq('token', token).maybeSingle();
+    const ticket = security.verifyTicket(req.query.ticket ? String(req.query.ticket) : '');
+    if (!ticket || ticket.k !== 'discord_link' || !ticket.h) { res.redirect(`${APP_ORIGIN}/#/home?discordLinkError=session_expired`); return; }
+    const sessionKey = ticket.h;
+    const { data: hrSession } = await supabase.from('hr_sessions').select('token').eq('token', sessionKey).maybeSingle();
     if (!hrSession) { res.redirect(`${APP_ORIGIN}/#/?error=session_expired`); return; }
 
     const state = randomToken(16);
-    const returnHash = req.query.return ? String(req.query.return).slice(0, 200) : null;
-    const { error } = await supabase.from('discord_oauth_states').insert({ state, rt: token, is_staff: true, return_hash: returnHash });
+    const returnHash = ticket.r || null;
+    const { error } = await supabase.from('discord_oauth_states').insert({ state, rt: sessionKey, is_staff: true, return_hash: returnHash });
     if (error) { res.status(500).send('Could not start Discord sign-in.'); return; }
 
     const authorizeUrl = new URL('https://discord.com/oauth2/authorize');
@@ -3218,7 +3418,7 @@ async function exchangeDiscordCode(code, context) {
         try {
             tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'PlayVerseHR (https://playverse.cc, 1.0)' },
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'StudioHub/1.0' },
                 body
             });
         } catch (e) {
@@ -3281,7 +3481,7 @@ app.get('/discord-auth-callback', async (req, res) => {
         fail(null, 'invalid_state');
         return;
     }
-    console.log(`[discord-auth-callback] matched state ${state} -> rt ${stateRow.rt}`);
+    console.log(`[discord-auth-callback] matched state ${String(state).slice(0, 6)}`);
 
     if (stateRow.is_staff) {
         const returnHash = stateRow.return_hash || null;
@@ -3450,7 +3650,7 @@ app.post('/recruitment/apply', async (req, res) => {
         status: 'pending'
     }).select('*').maybeSingle();
 
-    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+    if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
 
     const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
     await supabase.from('recruit_sessions').update({ expires_at: portalExpiresAt }).eq('token', recruitSession.token);
@@ -3470,7 +3670,7 @@ app.get('/recruitment/my-ticket', async (req, res) => {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-    if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+    if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
     if (!ticket) { res.status(404).json({ ok: false, error: 'no_ticket' }); return; }
 
     const portalExpiresAt = new Date(Date.now() + RECRUIT_SESSION_PORTAL_LIFETIME_MS).toISOString();
@@ -3504,7 +3704,7 @@ app.post('/recruitment/push-subscribe', async (req, res) => {
         p256dh: sub.keys.p256dh,
         auth: sub.keys.auth
     }, { onConflict: 'endpoint' });
-    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+    if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
     res.json({ ok: true });
 });
 
@@ -3521,13 +3721,13 @@ app.get('/recruitment/recruiters', async (req, res) => {
         const recruiters = await listRecruiters();
         res.json({ ok: true, data: recruiters });
     } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
+        res.status(500).json({ ok: false, error: publicError(e) });
     }
 });
 
 app.get('/recruitment/positions', async (req, res) => {
     const { data, error } = await supabase.from('recruitment_positions').select('id, name').order('name', { ascending: true });
-    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+    if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
     res.json({ ok: true, data: data || [] });
 });
 
@@ -3535,7 +3735,7 @@ app.get('/onboarding-link-preview', async (req, res) => {
     const token = req.query.token ? String(req.query.token).trim() : '';
     if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
     const { data: link, error } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
-    if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+    if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
     if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
     let team = null, skillset = null;
     if (link.team_id) { const { data } = await supabase.from('teams').select('name, color, info').eq('id', link.team_id).maybeSingle(); team = data || null; }
@@ -3543,14 +3743,83 @@ app.get('/onboarding-link-preview', async (req, res) => {
     res.json({ ok: true, data: { team, skillset, label: link.label } });
 });
 
+// ---------------------------------------------------------------------------
+// Public bootstrap: one request gives the browser everything it needs to paint the first
+// screen (branding, site status, games list, DevEx rate). Replaces the old direct
+// Supabase reads from the browser, so the database no longer needs to be reachable with
+// a public key at all.
+// ---------------------------------------------------------------------------
+const publicBootstrapCache = new TtlCache({ ttlMs: 10 * 1000, max: 2 });
+const PUBLIC_SITE_FIELDS = ['closed', 'indev', 'services_down', 'status_message', 'status_started_at', 'status_eta', 'status_timeline', 'services', 'devex_rate'];
+
+async function loadBrandingOverrides() {
+    try {
+        const { data, error } = await supabase.from('app_settings').select('branding').eq('id', 1).maybeSingle();
+        if (error) return; // column not created yet: file/env config still applies
+        studio.applyOverrides((data && data.branding) || {});
+    } catch (e) { }
+}
+loadBrandingOverrides();
+setInterval(loadBrandingOverrides, 60 * 1000).unref();
+
+async function buildPublicBootstrap() {
+    const [settingsRes, viewRes, gamesRes] = await Promise.all([
+        supabase.from('app_settings').select('*').eq('id', 1).maybeSingle(),
+        // Older installs exposed site status through this view; merge it in when present.
+        supabase.from('public_app_settings').select('*').eq('id', 1).maybeSingle(),
+        supabase.from('games').select('id, name').order('name', { ascending: true })
+    ]);
+    const row = { ...(settingsRes.data || {}), ...((!viewRes.error && viewRes.data) || {}) };
+    const site = {};
+    PUBLIC_SITE_FIELDS.forEach(k => { if (k in row) site[k] = row[k]; });
+    return {
+        ok: true,
+        config: studio.publicConfig(),
+        site: {
+            readable: !settingsRes.error || !viewRes.error,
+            closed: !!site.closed,
+            indev: !!site.indev,
+            servicesDown: !!site.services_down,
+            message: site.status_message || '',
+            startedAt: site.status_started_at || null,
+            eta: site.status_eta || null,
+            timeline: site.status_timeline || [],
+            services: site.services || []
+        },
+        devexRate: site.devex_rate != null ? Number(site.devex_rate) : null,
+        games: (gamesRes.data || []).map(g => ({ id: g.id, name: g.name })),
+        push: { publicKey: PUSH_CONFIGURED ? VAPID_PUBLIC_KEY : null },
+        serverTime: new Date().toISOString()
+    };
+}
+
+app.get('/public/bootstrap', async (req, res) => {
+    try {
+        const data = await publicBootstrapCache.wrap('bootstrap', buildPublicBootstrap);
+        res.setHeader('Cache-Control', 'no-cache');
+        res.json(data);
+    } catch (e) {
+        console.error('[bootstrap] failed:', e.message);
+        res.status(500).json({ ok: false, error: 'server_error', config: studio.publicConfig() });
+    }
+});
+
 app.get('/hr-session', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false }); return; }
 
-    const discordUserId = await getLinkedDiscordUserId(session.roblox_user_id);
+    const [discordUserId, securityState] = await Promise.all([
+        getLinkedDiscordUserId(session.roblox_user_id),
+        getSecurityState()
+    ]);
 
     res.json({
         ok: true,
+        security: {
+            level: securityState.level,
+            note: securityState.note,
+            canManage: hasPermission(session, 'security.manage')
+        },
         robloxUserId: session.roblox_user_id,
         robloxUsername: session.roblox_username,
         roles: session.roles || [],
@@ -3564,7 +3833,7 @@ app.get('/hr-session', async (req, res) => {
 
 app.delete('/hr-session', async (req, res) => {
     const token = getBearerToken(req);
-    if (token) await supabase.from('hr_sessions').delete().eq('token', token);
+    if (token) await hrSessionsDelete().eq('token', hashToken(token));
     res.json({ ok: true });
 });
 
@@ -3629,12 +3898,60 @@ async function grantInviteLinkAccessNow({ robloxUserId, robloxUsername, link }) 
         });
         if (error && error.code !== '23505') console.error('grantInviteLinkAccessNow: could not assign the role:', error.message);
     }
-    await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+    await hrSessionsDelete().eq('roblox_user_id', robloxUserId);
+}
+
+// Which product feature each action belongs to. Turning a feature off in studio.config.json
+// (or the Branding panel) hides it in the UI *and* refuses its actions here.
+const ACTION_FEATURES = [
+    [/^recruitment_/, 'recruitment'],
+    [/^(submit_claim|withdraw_claim|decide_claim|list_claims|list_my_claims)$/, 'claims'],
+    [/payment_run|^mark_run_person_paid$/, 'paymentRuns'],
+    [/^(teams_overview|team_detail|games_overview|game_detail|board_|save_team_task|delete_team_task|set_team_task_status|submit_task_for_review|decide_task_review|pay_team_task|my_tasks|get_task|set_team_games|org_chart)/, 'teams'],
+    [/^(backup_all_data|list_backups|load_backup|restore_backup)$/, 'backups'],
+    [/^(list_audit_logs|revert_audit_log)$/, 'audit'],
+    [/^(create_broadcast|delete_broadcast|list_broadcasts)$/, 'broadcasts'],
+    [/^list_staff_database$/, 'staffDatabase']
+];
+function featureForAction(action) {
+    for (const [re, feature] of ACTION_FEATURES) if (re.test(action)) return feature;
+    return null;
+}
+
+// Caches that depend on configuration tables are dropped after any action that can
+// change them, so admins see their edits immediately.
+function invalidateAfterAction(action) {
+    if (/role|base_access|required_group|security|ban|moderate|warning|hold|team|assign/.test(action)) {
+        rolesCache.clear();
+        baseAccessCache.clear();
+        invalidateSessions();
+    }
 }
 
 app.post('/hr-data', async (req, res) => {
+    const action = req.body && req.body.action;
+    if (typeof action !== 'string' || !/^[a-z_]{2,64}$/.test(action)) {
+        res.status(400).json({ ok: false, error: 'unknown_action' });
+        return;
+    }
+    if (req.body.payload != null && (typeof req.body.payload !== 'object' || !security.isSafePayload(req.body.payload))) {
+        res.status(400).json({ ok: false, error: 'invalid_fields' });
+        return;
+    }
+    const feature = featureForAction(action);
+    if (action === 'list_my_broadcasts' && !studio.feature('broadcasts')) { res.json({ ok: true, data: [] }); return; }
+    if (feature && !studio.feature(feature)) {
+        res.status(404).json({ ok: false, error: 'feature_disabled' });
+        return;
+    }
+    // Per-session ceiling, plus a tighter one for anything that moves money.
+    const tokenKey = hashToken(getBearerToken(req)).slice(-24) || security.clientIp(req);
+    if (!security.checkRate(res, `hr:${tokenKey}`, Number(process.env.RATE_LIMIT_SESSION_PER_MIN) || 240, 60 * 1000)) return;
+    if (SECURITY_MONEY_ACTIONS.has(action) && !security.checkRate(res, `money:${tokenKey}`, 40, 60 * 1000)) return;
+
     try {
         await handleHrData(req, res);
+        if (!/^(get_|list_|load_)/.test(action)) invalidateAfterAction(action);
     } catch (err) {
         console.error('[hr-data] unhandled error on action', (req.body && req.body.action) || 'unknown', ':', err && err.stack ? err.stack : err);
         if (!res.headersSent) res.status(500).json({ ok: false, error: 'server_error' });
@@ -3651,6 +3968,28 @@ async function handleHrData(req, res) {
 
     if (!(await securityGate(res, session, action))) return;
 
+    if (action === 'get_branding') {
+        if (!requirePermission(res, session, 'settings.manage_branding')) return;
+        res.json({ ok: true, data: { effective: studio.get(), overrides: studio.getOverrides(), defaults: studio.DEFAULTS } });
+        return;
+    }
+
+    if (action === 'save_branding') {
+        if (!requirePermission(res, session, 'settings.manage_branding')) return;
+        const clean = studio.sanitizeBranding(payload.branding || {});
+        const { error } = await supabase.from('app_settings').update({ branding: clean }).eq('id', 1);
+        if (error) {
+            console.error('save_branding failed (did you run sql/002_branding.sql?):', error.message);
+            res.status(500).json({ ok: false, error: 'branding_column_missing' });
+            return;
+        }
+        studio.applyOverrides(clean);
+        publicBootstrapCache.clear();
+        logAudit(session, { category: 'settings', action: 'save_branding', details: { keys: Object.keys(clean) } });
+        res.json({ ok: true, data: { effective: studio.get(), overrides: clean } });
+        return;
+    }
+
     if (action === 'submit_request') {
         if (!requirePermission(res, session, 'dashboard.submit_request')) return;
 
@@ -3660,7 +3999,7 @@ async function handleHrData(req, res) {
         const workRaw = payload.workRaw != null ? String(payload.workRaw) : '';
         const timeWorked = payload.timeWorked != null ? String(payload.timeWorked).trim() : '';
         const payment = Number(payload.payment);
-        const currency = payload.currency === 'USD' ? 'USD' : 'ROBUX';
+        const currency = pickCurrency(payload.currency);
         const skillsetIds = Array.isArray(payload.skillsetIds)
             ? [...new Set(payload.skillsetIds.map(Number).filter(n => n > 0))]
             : [];
@@ -3669,6 +4008,13 @@ async function handleHrData(req, res) {
             res.status(400).json({ ok: false, error: 'invalid_fields' });
             return;
         }
+        if (!amountOk(payment, currency)) { res.status(400).json({ ok: false, error: 'invalid_amount' }); return; }
+        if (taskName.length > 200 || game.length > 120 || workRaw.length > 20000 || timeWorked.length > 120 || robloxUsername.length > 40) {
+            res.status(400).json({ ok: false, error: 'invalid_fields' });
+            return;
+        }
+        // Logging work for yourself goes through "Request payment" so someone else approves it.
+        if (blockedAsOwnMoney(res, session, { roblox_username: robloxUsername }, 'log work for')) return;
 
         let recipientUserId = null;
         try {
@@ -3712,7 +4058,7 @@ async function handleHrData(req, res) {
             created_at: new Date().toISOString()
         });
 
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'payments', action: 'submit_request',
             targetUserId: recipientUserId, targetUsername: robloxUsername,
@@ -3729,9 +4075,11 @@ async function handleHrData(req, res) {
         const taskName = payload.taskName ? String(payload.taskName).trim() : '';
         const game = payload.game ? String(payload.game).trim() : null;
         const amount = Number(payload.payment);
-        const currency = payload.currency === 'USD' ? 'USD' : 'ROBUX';
+        const currency = pickCurrency(payload.currency);
         const note = payload.note ? String(payload.note).trim() : '';
         if (!taskName || !Number.isFinite(amount) || amount <= 0) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        if (!amountOk(amount, currency)) { res.status(400).json({ ok: false, error: 'invalid_amount' }); return; }
+        if (taskName.length > 200 || (game && game.length > 120) || note.length > 20000) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
         if (await isUserBanned(session.roblox_user_id)) { res.status(403).json({ ok: false, error: 'already_banned' }); return; }
 
         const { count } = await supabase
@@ -3760,7 +4108,7 @@ async function handleHrData(req, res) {
             status: 'proposed',
             created_at: new Date().toISOString()
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         await logAudit(session, {
             category: 'payments', action: 'submit_claim',
             targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
@@ -3828,6 +4176,8 @@ async function handleHrData(req, res) {
             res.status(404).json({ ok: false, error: 'claim_withdrawn' });
             return;
         }
+
+        if (blockedAsOwnMoney(res, session, row, 'decide on')) return;
 
         const claimStatus = row.status ? String(row.status).trim().toLowerCase() : 'proposed';
         if (row.paid === true || claimStatus === 'paid') {
@@ -3999,7 +4349,7 @@ async function handleHrData(req, res) {
             const { data: others } = await supabase.from('hr_sessions').select('token, roblox_user_id');
             const drop = (others || []).filter(row => String(row.roblox_user_id) !== String(session.roblox_user_id));
             if (drop.length) {
-                await supabase.from('hr_sessions').delete().in('token', drop.map(r => r.token));
+                await hrSessionsDelete().in('token', drop.map(r => r.token));
                 revoked = drop.length;
             }
         }
@@ -4059,7 +4409,7 @@ async function handleHrData(req, res) {
         const { data: theirSessions } = await supabase.from('hr_sessions').select('token').eq('roblox_user_id', robloxUserId);
         const tokens = (theirSessions || []).map(r => r.token);
         if (payload.signThemOut === true && tokens.length) {
-            await supabase.from('hr_sessions').delete().in('token', tokens);
+            await hrSessionsDelete().in('token', tokens);
         }
 
         await logSecurityEvent({
@@ -4165,7 +4515,7 @@ async function handleHrData(req, res) {
             lastSeenAt: r.last_seen_at,
             expiresAt: r.expires_at,
             userAgent: r.user_agent || null,
-            isYou: r.token === getBearerToken(req)
+            isYou: r.token === hashToken(getBearerToken(req))
         }));
         res.json({ ok: true, data: rows });
         return;
@@ -4180,7 +4530,7 @@ async function handleHrData(req, res) {
         if (String(target.roblox_user_id) !== String(session.roblox_user_id)
             && !requireHigherHierarchy(res, session, target.max_hierarchy)) return;
 
-        await supabase.from('hr_sessions').delete().eq('token', token);
+        await hrSessionsDelete().eq('token', token);
         await logSecurityEvent({
             kind: 'session_revoked', severity: 'notice', session,
             targetUserId: target.roblox_user_id, targetUsername: target.roblox_username,
@@ -4192,11 +4542,11 @@ async function handleHrData(req, res) {
 
     if (action === 'revoke_all_sessions') {
         if (!requirePermission(res, session, 'security.manage')) return;
-        const myToken = getBearerToken(req);
+        const myToken = hashToken(getBearerToken(req));
         const { data: all } = await supabase.from('hr_sessions').select('token, roblox_user_id, max_hierarchy');
         const mine = Number(session.max_hierarchy) || 0;
         const drop = (all || []).filter(r => r.token !== myToken && (Number(r.max_hierarchy) || 0) < mine);
-        if (drop.length) await supabase.from('hr_sessions').delete().in('token', drop.map(r => r.token));
+        if (drop.length) await hrSessionsDelete().in('token', drop.map(r => r.token));
         await logSecurityEvent({
             kind: 'all_sessions_revoked', severity: 'alert', session,
             detail: `Signed out ${drop.length} ${drop.length === 1 ? 'person' : 'people'}`,
@@ -4213,7 +4563,7 @@ async function handleHrData(req, res) {
             .select('token, created_at, last_seen_at, expires_at, user_agent')
             .eq('roblox_user_id', session.roblox_user_id)
             .order('last_seen_at', { ascending: false });
-        const myToken = getBearerToken(req);
+        const myToken = hashToken(getBearerToken(req));
         res.json({
             ok: true,
             data: (data || []).map(r => ({
@@ -4237,7 +4587,7 @@ async function handleHrData(req, res) {
             res.status(403).json({ ok: false, error: 'not_your_session' });
             return;
         }
-        await supabase.from('hr_sessions').delete().eq('token', token);
+        await hrSessionsDelete().eq('token', token);
         await logSecurityEvent({
             kind: 'session_revoked', severity: 'info', session,
             targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
@@ -4680,6 +5030,7 @@ async function handleHrData(req, res) {
         if (run.status === 'open') { res.status(409).json({ ok: false, error: 'freeze_run_first' }); return; }
         if (run.status === 'closed') { res.status(409).json({ ok: false, error: 'run_closed' }); return; }
 
+        if (blockedAsOwnMoney(res, session, { roblox_user_id: robloxUserId, roblox_username: robloxUsername }, 'pay out a run line for')) return;
         if (robloxUserId != null && await blockedByAccountHold(res, robloxUserId, 'be paid')) return;
 
         let query = supabase.from('payment_requests').select('id').eq('run_id', id).eq('paid', false);
@@ -4733,7 +5084,7 @@ async function handleHrData(req, res) {
             .select('*')
             .neq('status', 'proposed')
             .order('created_at', { ascending: false });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
 
         const rows = data || [];
         const userIds = [...new Set(rows.filter(r => r.roblox_user_id != null).map(r => r.roblox_user_id))];
@@ -4809,12 +5160,14 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
-        if (existing && await blockedByAccountHold(res, existing.roblox_user_id, 'be paid')) return;
+        if (!existing) { res.status(404).json({ ok: false, error: 'request_not_found' }); return; }
+        if (blockedAsOwnMoney(res, session, existing, 'mark as paid')) return;
+        if (await blockedByAccountHold(res, existing.roblox_user_id, 'be paid')) return;
         const { error } = await supabase
             .from('payment_requests')
             .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
             .eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const paidNotified = await notifyPaymentOutcome(existing, 'paid');
         logAudit(session, {
             category: 'payments', action: 'mark_paid',
@@ -4831,6 +5184,7 @@ async function handleHrData(req, res) {
         const robloxUserId = payload.robloxUserId != null && payload.robloxUserId !== '' ? Number(payload.robloxUserId) : null;
         const robloxUsername = payload.robloxUsername ? String(payload.robloxUsername).trim() : '';
         if (robloxUserId == null && !robloxUsername) { res.status(400).json({ ok: false, error: 'missing_user' }); return; }
+        if (blockedAsOwnMoney(res, session, { roblox_user_id: robloxUserId, roblox_username: robloxUsername }, 'bulk pay')) return;
         if (robloxUserId != null && await blockedByAccountHold(res, robloxUserId, 'be paid')) return;
 
         let query = supabase.from('payment_requests').select('id').eq('status', 'pending');
@@ -4839,7 +5193,7 @@ async function handleHrData(req, res) {
             : query.is('roblox_user_id', null).ilike('roblox_username', robloxUsername);
 
         const { data: rows, error } = await query;
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const ids = (rows || []).map(r => r.id);
         if (!ids.length) { res.json({ ok: true, count: 0 }); return; }
 
@@ -4847,7 +5201,7 @@ async function handleHrData(req, res) {
             .from('payment_requests')
             .update({ paid: true, paid_at: new Date().toISOString(), status: 'paid', status_note: null })
             .in('id', ids);
-        if (updateError) { res.status(500).json({ ok: false, error: updateError.message }); return; }
+        if (updateError) { res.status(500).json({ ok: false, error: publicError(updateError) }); return; }
         logAudit(session, {
             category: 'payments', action: 'mark_all_paid',
             targetUserId: robloxUserId, targetUsername: robloxUsername || null,
@@ -4864,13 +5218,14 @@ async function handleHrData(req, res) {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const payment = Number(payload.payment);
         const currency = payload.currency === 'USD' ? 'USD' : payload.currency === 'ROBUX' ? 'ROBUX' : null;
-        if (!Number.isFinite(payment) || payment <= 0 || !currency) { res.status(400).json({ ok: false, error: 'invalid_fields' }); return; }
+        if (!currency || !amountOk(payment, currency)) { res.status(400).json({ ok: false, error: 'invalid_amount' }); return; }
         const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
         if (!existing) { res.status(404).json({ ok: false, error: 'request_not_found' }); return; }
+        if (blockedAsOwnMoney(res, session, existing, 'change the amount of')) return;
         if (existing.paid || existing.status === 'paid') { res.status(409).json({ ok: false, error: 'already_paid' }); return; }
         const newPayment = currency === 'USD' ? Number(payment.toFixed(2)) : Math.round(payment);
         const { error } = await supabase.from('payment_requests').update({ payment: newPayment, currency }).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'payments', action: 'edit_request_amount',
             targetUserId: existing.roblox_user_id, targetUsername: existing.roblox_username,
@@ -4891,7 +5246,7 @@ async function handleHrData(req, res) {
             .from('payment_requests')
             .update({ paid: false, paid_at: null, status: 'rejected', status_note: note || null })
             .eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const rejectNotified = await notifyPaymentOutcome(existing, 'rejected', note);
         logAudit(session, {
             category: 'payments', action: 'reject_request',
@@ -4912,7 +5267,7 @@ async function handleHrData(req, res) {
             .from('payment_requests')
             .update({ paid: false, paid_at: null, status: 'pending', status_note: null })
             .eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'payments', action: 'reopen_request',
             targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
@@ -4928,7 +5283,7 @@ async function handleHrData(req, res) {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: existing } = await supabase.from('payment_requests').select('*').eq('id', id).maybeSingle();
         const { error } = await supabase.from('payment_requests').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'payments', action: 'delete_request',
             targetUserId: existing ? existing.roblox_user_id : null, targetUsername: existing ? existing.roblox_username : null,
@@ -4963,7 +5318,7 @@ async function handleHrData(req, res) {
         const { error } = await supabase.from('payment_requests')
             .update({ payment: amount, currency: to, currency_locked: true })
             .eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
 
         await logAudit(session, {
             category: 'payments', action: 'convert_currency',
@@ -5034,7 +5389,7 @@ async function handleHrData(req, res) {
             .select('*')
             .eq('roblox_user_id', session.roblox_user_id)
             .maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const safe = data ? redactPayoutMethod({ method: data.method, details: data.details || {}, roblox_user_id: data.roblox_user_id }, session) : null;
         res.json({ ok: true, data: safe ? { method: safe.method, details: safe.details || {}, detailsHidden: !!safe.detailsHidden } : null });
         return;
@@ -5052,7 +5407,7 @@ async function handleHrData(req, res) {
             .select('*')
             .ilike('roblox_username', robloxUsername)
             .maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const safe = data ? redactPayoutMethod({ method: data.method, details: data.details || {}, roblox_user_id: data.roblox_user_id }, session) : null;
         res.json({ ok: true, data: safe ? { method: safe.method, details: safe.details || {}, detailsHidden: !!safe.detailsHidden } : null });
         return;
@@ -5067,6 +5422,7 @@ async function handleHrData(req, res) {
         const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
         const methodDef = PAYMENT_METHOD_TYPES[method];
         if (!methodDef) { res.status(400).json({ ok: false, error: 'invalid_method' }); return; }
+        if (!studio.get().payments.methods.includes(method)) { res.status(400).json({ ok: false, error: 'method_disabled' }); return; }
         const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
         if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
 
@@ -5082,7 +5438,7 @@ async function handleHrData(req, res) {
         }
 
         const cleanDetails = {};
-        methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim(); });
+        methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim().slice(0, 200); });
 
         let username = payload.robloxUsername ? String(payload.robloxUsername).trim() : null;
         if (!username) {
@@ -5102,7 +5458,7 @@ async function handleHrData(req, res) {
             updated_at: new Date().toISOString(),
             set_by: session.roblox_username
         }, { onConflict: 'roblox_user_id' });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         await convertPendingForUser(robloxUserId, username);
         res.json({ ok: true });
         return;
@@ -5134,7 +5490,7 @@ async function handleHrData(req, res) {
             ? query.eq('roblox_user_id', existing.roblox_user_id)
             : query.ilike('roblox_username', existing.roblox_username);
         const { error } = await query;
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, percentRobux: percent > 0 ? Math.round(percent) : 0 });
         return;
     }
@@ -5145,6 +5501,7 @@ async function handleHrData(req, res) {
         const details = payload.details && typeof payload.details === 'object' ? payload.details : {};
         const methodDef = PAYMENT_METHOD_TYPES[method];
         if (!methodDef) { res.status(400).json({ ok: false, error: 'invalid_method' }); return; }
+        if (!studio.get().payments.methods.includes(method)) { res.status(400).json({ ok: false, error: 'method_disabled' }); return; }
         const missing = methodDef.fields.find(f => !String(details[f] || '').trim());
         if (missing) { res.status(400).json({ ok: false, error: 'missing_field' }); return; }
 
@@ -5160,7 +5517,7 @@ async function handleHrData(req, res) {
         }
 
         const cleanDetails = {};
-        methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim(); });
+        methodDef.fields.forEach(f => { cleanDetails[f] = String(details[f]).trim().slice(0, 200); });
 
         const { data: priorMethod } = await supabase
             .from('payment_methods')
@@ -5179,7 +5536,7 @@ async function handleHrData(req, res) {
             details: cleanDetails,
             updated_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id' });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
 
         const priorWas = (priorMethod && priorMethod.method) || null;
         await logSecurityEvent({
@@ -5247,7 +5604,7 @@ async function handleHrData(req, res) {
         const { error } = await supabase
             .from('app_settings')
             .upsert({ id: 1, usd_minimum_pending: threshold, updated_at: new Date().toISOString() });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5257,7 +5614,7 @@ async function handleHrData(req, res) {
             .from('required_groups')
             .select('*')
             .order('name', { ascending: true });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data });
         return;
     }
@@ -5274,7 +5631,7 @@ async function handleHrData(req, res) {
         if (error?.code === '23505') {
             return res.status(400).json({ ok: false, error: 'That group is already configured.' });
         }
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5284,7 +5641,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('required_groups').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5328,7 +5685,7 @@ async function handleHrData(req, res) {
         if (error?.code === '23505') {
             return res.status(400).json({ ok: false, error: 'A game with that name already exists.' });
         }
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5338,7 +5695,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('games').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5350,7 +5707,7 @@ async function handleHrData(req, res) {
         const { error } = await supabase
             .from('app_settings')
             .upsert({ id: 1, devex_rate: rate, updated_at: new Date().toISOString() });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5376,7 +5733,7 @@ async function handleHrData(req, res) {
             min_rank: minRank,
             name
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5386,7 +5743,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('base_access_groups').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5410,7 +5767,7 @@ async function handleHrData(req, res) {
             discord_guild_id: discordGuildId,
             name
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5420,7 +5777,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('base_access_discord_servers').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5431,7 +5788,7 @@ async function handleHrData(req, res) {
             const data = await getRecruitmentConfig();
             res.json({ ok: true, data });
         } catch (e) {
-            res.status(500).json({ ok: false, error: e.message });
+            res.status(500).json({ ok: false, error: publicError(e) });
         }
         return;
     }
@@ -5453,7 +5810,7 @@ async function handleHrData(req, res) {
                 recruitment_notify_role_id: notifyRoleId,
                 updated_at: new Date().toISOString()
             });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'settings', action: 'update_recruitment_config',
             details: { autoRoleId, discordRoleId, gracePeriodHours, notifyRoleId }
@@ -5468,7 +5825,7 @@ async function handleHrData(req, res) {
             const data = await getRecruitmentApprovalConfig();
             res.json({ ok: true, data });
         } catch (e) {
-            res.status(500).json({ ok: false, error: e.message });
+            res.status(500).json({ ok: false, error: publicError(e) });
         }
         return;
     }
@@ -5489,7 +5846,7 @@ async function handleHrData(req, res) {
                 }
             });
         } catch (e) {
-            res.status(500).json({ ok: false, error: e.message });
+            res.status(500).json({ ok: false, error: publicError(e) });
         }
         return;
     }
@@ -5500,7 +5857,7 @@ async function handleHrData(req, res) {
             const data = await getOnboardingGroupConfig();
             res.json({ ok: true, data });
         } catch (e) {
-            res.status(500).json({ ok: false, error: e.message });
+            res.status(500).json({ ok: false, error: publicError(e) });
         }
         return;
     }
@@ -5512,7 +5869,7 @@ async function handleHrData(req, res) {
         const { error } = await supabase
             .from('app_settings')
             .upsert({ id: 1, onboarding_group_id: groupId, onboarding_group_role_id: groupRoleId, updated_at: new Date().toISOString() });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'settings', action: 'update_onboarding_group_config',
             details: { groupId, groupRoleId }
@@ -5539,7 +5896,7 @@ async function handleHrData(req, res) {
                 recruitment_producer_role_id: producerRoleId,
                 updated_at: new Date().toISOString()
             });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'settings', action: 'update_recruitment_approval_config',
             details: { signoffRoleId, producerRoleId }
@@ -5564,7 +5921,7 @@ async function handleHrData(req, res) {
         const { error } = await supabase
             .from('app_settings')
             .upsert({ id: 1, ignore_eligibility: ignoreEligibility, updated_at: new Date().toISOString() });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5578,7 +5935,7 @@ async function handleHrData(req, res) {
     if (action === 'list_roles') {
         if (!requirePermission(res, session, 'roles.manage')) return;
         const { data, error } = await supabase.from('roles').select('*').order('name', { ascending: true });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data });
         return;
     }
@@ -5593,6 +5950,7 @@ async function handleHrData(req, res) {
         const linkOnly = !!payload.linkOnly;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
         if (!requireHigherHierarchy(res, session, hierarchy)) return;
+        if (blockedGrantingUnheldPermissions(res, session, permissions, [])) return;
         const { error } = await supabase.from('roles').insert({
             name,
             roblox_group_id: robloxGroupId,
@@ -5602,7 +5960,7 @@ async function handleHrData(req, res) {
             permissions,
             discord_role_id: payload.discordRoleId ? String(payload.discordRoleId).trim() : null
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -5611,8 +5969,8 @@ async function handleHrData(req, res) {
         if (!requirePermission(res, session, 'roles.manage')) return;
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
-        const { data: existingRole, error: existingErr } = await supabase.from('roles').select('hierarchy').eq('id', id).maybeSingle();
-        if (existingErr) { res.status(500).json({ ok: false, error: existingErr.message }); return; }
+        const { data: existingRole, error: existingErr } = await supabase.from('roles').select('hierarchy, permissions').eq('id', id).maybeSingle();
+        if (existingErr) { res.status(500).json({ ok: false, error: publicError(existingErr) }); return; }
         if (!existingRole) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
         if (!requireHigherHierarchy(res, session, existingRole.hierarchy)) return;
         const name = payload.name != null ? String(payload.name).trim() : null;
@@ -5623,6 +5981,7 @@ async function handleHrData(req, res) {
         const linkOnly = !!payload.linkOnly;
         if (!requireHigherHierarchy(res, session, hierarchy)) return;
         const permissions = Array.isArray(payload.permissions) ? payload.permissions.filter(p => PERMISSIONS.includes(p)) : [];
+        if (blockedGrantingUnheldPermissions(res, session, permissions, existingRole.permissions || [])) return;
         const { data: roleBeforeUpdate } = await supabase.from('roles').select('discord_role_id').eq('id', id).maybeSingle();
         const newDiscordRoleId = payload.discordRoleId === undefined ? undefined : (payload.discordRoleId ? String(payload.discordRoleId).trim() : null);
         const update = {
@@ -5635,7 +5994,7 @@ async function handleHrData(req, res) {
         if (name) update.name = name;
         if (newDiscordRoleId !== undefined) update.discord_role_id = newDiscordRoleId;
         const { error } = await supabase.from('roles').update(update).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const oldDiscordRoleId = roleBeforeUpdate ? roleBeforeUpdate.discord_role_id : null;
         let reapplied = 0;
         if (newDiscordRoleId !== undefined && String(oldDiscordRoleId || '') !== String(newDiscordRoleId || '')) {
@@ -5657,7 +6016,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: existingRole, error: existingErr } = await supabase.from('roles').select('hierarchy').eq('id', id).maybeSingle();
-        if (existingErr) { res.status(500).json({ ok: false, error: existingErr.message }); return; }
+        if (existingErr) { res.status(500).json({ ok: false, error: publicError(existingErr) }); return; }
         if (!existingRole) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
         if (!requireHigherHierarchy(res, session, existingRole.hierarchy)) return;
         const roleForSync = await getRoleForSync(id);
@@ -5666,9 +6025,9 @@ async function handleHrData(req, res) {
             for (const holder of (holders || [])) await syncDiscordRole(holder.roblox_user_id, roleForSync.discord_role_id, 'remove');
         }
         const { error: assignErr } = await supabase.from('user_role_assignments').delete().eq('role_id', id);
-        if (assignErr) { res.status(500).json({ ok: false, error: assignErr.message }); return; }
+        if (assignErr) { res.status(500).json({ ok: false, error: publicError(assignErr) }); return; }
         const { error } = await supabase.from('roles').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         await logAudit(session, { category: 'roles', action: 'delete_role', details: { id, name: roleForSync ? roleForSync.name : null } });
         res.json({ ok: true });
         return;
@@ -5704,12 +6063,12 @@ async function handleHrData(req, res) {
             query = query.eq('roblox_user_id', Number(payload.robloxUserId));
         }
         const { data: assignments, error } = await query;
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         if (!assignments || !assignments.length) { res.json({ ok: true, data: [] }); return; }
 
         const roleIds = [...new Set(assignments.map(a => a.role_id).filter(Boolean))];
         const { data: roleRows, error: rolesErr } = await supabase.from('roles').select('id, name, hierarchy').in('id', roleIds);
-        if (rolesErr) { res.status(500).json({ ok: false, error: rolesErr.message }); return; }
+        if (rolesErr) { res.status(500).json({ ok: false, error: publicError(rolesErr) }); return; }
         const roleById = {};
         (roleRows || []).forEach(r => { roleById[r.id] = r; });
         const data = assignments.map(a => ({ ...a, roles: roleById[a.role_id] || null }));
@@ -5725,7 +6084,7 @@ async function handleHrData(req, res) {
         if (!roleId || !robloxUserId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
 
         const { data: role, error: roleErr } = await supabase.from('roles').select('hierarchy').eq('id', roleId).maybeSingle();
-        if (roleErr) { res.status(500).json({ ok: false, error: roleErr.message }); return; }
+        if (roleErr) { res.status(500).json({ ok: false, error: publicError(roleErr) }); return; }
         if (!role) { res.status(404).json({ ok: false, error: 'role_not_found' }); return; }
         if (!requireHigherHierarchy(res, session, role.hierarchy)) return;
 
@@ -5737,7 +6096,7 @@ async function handleHrData(req, res) {
             role_id: roleId,
             roblox_username: robloxUsername
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const roleForSync = await getRoleForSync(roleId);
         const discordResult = roleForSync && roleForSync.discord_role_id
             ? await syncDiscordRole(robloxUserId, roleForSync.discord_role_id, 'add')
@@ -5760,14 +6119,14 @@ async function handleHrData(req, res) {
             .select('id, role_id')
             .eq('id', id)
             .maybeSingle();
-        if (assignErr) { res.status(500).json({ ok: false, error: assignErr.message }); return; }
+        if (assignErr) { res.status(500).json({ ok: false, error: publicError(assignErr) }); return; }
         if (!assignment) { res.status(404).json({ ok: false, error: 'assignment_not_found' }); return; }
         const { data: role, error: roleErr } = await supabase.from('roles').select('hierarchy').eq('id', assignment.role_id).maybeSingle();
-        if (roleErr) { res.status(500).json({ ok: false, error: roleErr.message }); return; }
+        if (roleErr) { res.status(500).json({ ok: false, error: publicError(roleErr) }); return; }
         if (!requireHigherHierarchy(res, session, role && role.hierarchy)) return;
         const { data: fullAssignment } = await supabase.from('user_role_assignments').select('roblox_user_id, roblox_username').eq('id', id).maybeSingle();
         const { error } = await supabase.from('user_role_assignments').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const roleForSync = await getRoleForSync(assignment.role_id);
         let discordResult = { synced: false, reason: 'not_configured' };
         if (fullAssignment && roleForSync && roleForSync.discord_role_id) {
@@ -5844,7 +6203,8 @@ async function handleHrData(req, res) {
                 permissions: access.permissions,
                 max_hierarchy: access.maxHierarchy,
                 last_synced_at: new Date().toISOString()
-            }).eq('token', getBearerToken(req));
+            }).eq('token', hashToken(getBearerToken(req)));
+            invalidateSessions();
             res.json({ ok: true, roles: access.roleNames, permissions: access.permissions, maxHierarchy: access.maxHierarchy });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'refresh_failed' });
@@ -5853,7 +6213,7 @@ async function handleHrData(req, res) {
     }
 
     if (action === 'list_onboarding_steps') {
-        res.json({ ok: true, data: ONBOARDING_STEPS });
+        res.json({ ok: true, data: onboardingSteps() });
         return;
     }
 
@@ -5867,7 +6227,7 @@ async function handleHrData(req, res) {
             const completedByStep = {};
             (progress || []).forEach(p => { completedByStep[p.step_id] = p.completed_at; });
 
-            const data = ONBOARDING_STEPS.map(s => ({
+            const data = onboardingSteps().map(s => ({
                 ...s,
                 completedAt: completedByStep[s.id] || null
             }));
@@ -5889,7 +6249,7 @@ async function handleHrData(req, res) {
                 step_id: stepId,
                 completed_at: new Date().toISOString()
             }, { onConflict: 'roblox_user_id,step_id' });
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             res.json({ ok: true });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not save that step. Try again.' });
@@ -6373,7 +6733,7 @@ async function handleHrData(req, res) {
             const { data, error } = await supabase.from('board_lists').insert({
                 team_id: teamId, title, position, created_by: session.roblox_username, created_at: new Date().toISOString()
             }).select('*').maybeSingle();
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             res.json({ ok: true, data });
             return;
         }
@@ -6381,7 +6741,7 @@ async function handleHrData(req, res) {
             const title = String(payload.title || '').trim();
             if (!payload.id || !title) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
             const { error } = await supabase.from('board_lists').update({ title }).eq('id', payload.id).eq('team_id', teamId);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             res.json({ ok: true });
             return;
         }
@@ -6391,7 +6751,7 @@ async function handleHrData(req, res) {
             if (count && !payload.force) { res.status(400).json({ ok: false, error: 'list_not_empty' }); return; }
             await supabase.from('board_cards').delete().eq('list_id', payload.id).eq('team_id', teamId);
             const { error } = await supabase.from('board_lists').delete().eq('id', payload.id).eq('team_id', teamId);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             res.json({ ok: true });
             return;
         }
@@ -6416,7 +6776,7 @@ async function handleHrData(req, res) {
         if (mode === 'delete') {
             if (!payload.id) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
             const { error } = await supabase.from('board_cards').delete().eq('id', payload.id).eq('team_id', teamId);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             res.json({ ok: true });
             return;
         }
@@ -6425,7 +6785,7 @@ async function handleHrData(req, res) {
             const { id, listId, order } = payload;
             if (!id || !listId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
             const { error } = await supabase.from('board_cards').update({ list_id: listId }).eq('id', id).eq('team_id', teamId);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             const ids = Array.isArray(order) ? order : [];
             for (let i = 0; i < ids.length; i++) {
                 await supabase.from('board_cards').update({ position: i * 100 }).eq('id', ids[i]).eq('team_id', teamId);
@@ -6448,7 +6808,7 @@ async function handleHrData(req, res) {
         if (mode === 'update') {
             if (!payload.id) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
             const { error } = await supabase.from('board_cards').update(row).eq('id', payload.id).eq('team_id', teamId);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             res.json({ ok: true });
             return;
         }
@@ -6465,7 +6825,7 @@ async function handleHrData(req, res) {
             created_by: session.roblox_username,
             created_at: new Date().toISOString()
         }).select('*').maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data });
         return;
     }
@@ -6603,10 +6963,10 @@ async function handleHrData(req, res) {
         if (!teamId || !gameId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
         if (mode === 'add') {
             const { error } = await supabase.from('team_games').upsert({ team_id: teamId, game_id: gameId }, { onConflict: 'team_id,game_id' });
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         } else {
             const { error } = await supabase.from('team_games').delete().eq('team_id', teamId).eq('game_id', gameId);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         }
         await logAudit(session, {
             category: 'teams', action: mode === 'add' ? 'assign_game' : 'unassign_game',
@@ -6639,7 +6999,7 @@ async function handleHrData(req, res) {
             icon_url: info ? info.iconUrl : null,
             thumbnail_url: info ? info.thumbnailUrl : null
         }).eq('id', gameId);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const { data: gameRow } = await supabase.from('games').select('*').eq('id', gameId).maybeSingle();
         if (gameRow) await captureGameSnapshots([gameRow], true);
         await logAudit(session, { category: 'teams', action: 'link_game', details: { gameId, placeId, universeId, name: info ? info.name : null } });
@@ -6707,7 +7067,7 @@ async function handleHrData(req, res) {
             paid_at: null,
             created_at: new Date().toISOString()
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         await supabase.from('team_tasks').update({ payment_request_id: requestId }).eq('id', id);
         await logAudit(session, {
             category: 'payments', action: 'submit_request',
@@ -6718,7 +7078,7 @@ async function handleHrData(req, res) {
         runPaymentMethodConversionSweep({ robloxUserId: task.assigned_to_user_id });
         const amount = currency === 'ROBUX' ? `R$ ${Number(task.payment).toLocaleString()}` : `$${Number(task.payment).toFixed(2)}`;
         const notified = await notifyModeratedUser(task.assigned_to_user_id,
-            `Your payment for "${task.title}" (${amount}) has been logged and is waiting to be paid out. You can follow it under My payments on PlayVerse.`);
+            `Your payment for "${task.title}" (${amount}) has been logged and is waiting to be paid out. You can follow it under My payments on ${studioName()}.`);
         res.json({ ok: true, requestId, notified });
         return;
     }
@@ -6763,7 +7123,7 @@ async function handleHrData(req, res) {
             title,
             details: payload.details ? String(payload.details).trim() : null,
             payment: paymentAmount,
-            currency: paymentAmount != null ? (payload.currency === 'USD' ? 'USD' : 'ROBUX') : null,
+            currency: paymentAmount != null ? pickCurrency(payload.currency) : null,
             due_at: newDueAt,
             repeat_every: ['weekly', 'fortnightly', 'monthly'].includes(payload.repeatEvery) ? payload.repeatEvery : null
         };
@@ -6774,7 +7134,7 @@ async function handleHrData(req, res) {
             const batchRow = { ...shared };
             if (!beforeBatch || beforeBatch.due_at !== newDueAt) batchRow.reminders_sent = [];
             const { error } = await supabase.from('team_tasks').update(batchRow).eq('batch_id', payload.batchId);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             const { data: updated } = await supabase.from('team_tasks').select('*').eq('batch_id', payload.batchId);
             let notified = 0;
             for (const row of (updated || [])) {
@@ -6794,7 +7154,7 @@ async function handleHrData(req, res) {
             };
             if (!before || before.due_at !== newDueAt) row.reminders_sent = [];
             const { data: updatedRows, error } = await supabase.from('team_tasks').update(row).eq('id', payload.id).select('id, payment, currency, game_id, due_at');
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             if (!updatedRows || !updatedRows.length) { res.status(404).json({ ok: false, error: 'task_not_found' }); return; }
             let notified = false;
             if (row.assigned_to_user_id) {
@@ -6820,7 +7180,7 @@ async function handleHrData(req, res) {
                 assigned_to_username: m.roblox_username || null
             }));
             const { error } = await supabase.from('team_tasks').insert(rows);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             let notified = 0;
             for (const row of rows) {
                 if (await notifyTaskAssigned(row, teamId)) notified += 1;
@@ -6839,7 +7199,7 @@ async function handleHrData(req, res) {
             assigned_to_username: payload.assignedToUsername ? String(payload.assignedToUsername).trim() : null
         };
         const { error } = await supabase.from('team_tasks').insert(row);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const notified = row.assigned_to_user_id ? await notifyTaskAssigned(row, teamId) : false;
         await logAudit(session, { category: 'teams', action: 'create_task', details: { teamId, title, dueAt: row.due_at } });
         res.json({ ok: true, created: 1, notified: notified ? 1 : 0 });
@@ -6988,7 +7348,7 @@ async function handleHrData(req, res) {
             update.reminders_sent = [];
         }
         const { error } = await supabase.from('team_tasks').update(update).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const notified = await notifyTaskEvent(
             { ...task, ...update },
             task.team_id,
@@ -7038,7 +7398,7 @@ async function handleHrData(req, res) {
         const { error } = batchId
             ? await supabase.from('team_tasks').delete().eq('batch_id', batchId)
             : await supabase.from('team_tasks').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         await logAudit(session, { category: 'teams', action: 'delete_task', details: { taskId: id, batchId } });
         res.json({ ok: true });
         return;
@@ -7046,9 +7406,9 @@ async function handleHrData(req, res) {
 
     if (action === 'list_teams') {
         const { data, error } = await supabase.from('teams').select('*').order('name', { ascending: true });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const { data: links, error: linkErr } = await supabase.from('team_skillsets').select('team_id, skillset_id');
-        if (linkErr) { res.status(500).json({ ok: false, error: linkErr.message }); return; }
+        if (linkErr) { res.status(500).json({ ok: false, error: publicError(linkErr) }); return; }
         const skillsetIdsByTeam = {};
         (links || []).forEach(l => {
             if (!skillsetIdsByTeam[l.team_id]) skillsetIdsByTeam[l.team_id] = [];
@@ -7065,7 +7425,7 @@ async function handleHrData(req, res) {
         if (!name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
         const { data, error } = await supabase.from('teams').insert({
             name,
-            color: payload.color ? String(payload.color).trim() : null,
+            color: cleanColor(payload.color),
             discord_url: payload.discordUrl ? String(payload.discordUrl).trim() : null,
             roblox_group_url: payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null,
             roblox_group_id: payload.robloxGroupId ? Number(payload.robloxGroupId) : null,
@@ -7073,7 +7433,7 @@ async function handleHrData(req, res) {
             info: payload.info ? String(payload.info) : null
         }).select().maybeSingle();
         if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A team with that name already exists.' }); return; }
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const skillsetIds = Array.isArray(payload.skillsetIds) ? payload.skillsetIds : [];
         if (data && skillsetIds.length) {
             await supabase.from('team_skillsets').insert(skillsetIds.map(sid => ({ team_id: data.id, skillset_id: sid })));
@@ -7088,14 +7448,14 @@ async function handleHrData(req, res) {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const update = {};
         if (payload.name != null) update.name = String(payload.name).trim();
-        if (payload.color !== undefined) update.color = payload.color ? String(payload.color).trim() : null;
+        if (payload.color !== undefined) update.color = cleanColor(payload.color);
         if (payload.discordUrl !== undefined) update.discord_url = payload.discordUrl ? String(payload.discordUrl).trim() : null;
         if (payload.robloxGroupUrl !== undefined) update.roblox_group_url = payload.robloxGroupUrl ? String(payload.robloxGroupUrl).trim() : null;
         if (payload.robloxGroupId !== undefined) update.roblox_group_id = payload.robloxGroupId ? Number(payload.robloxGroupId) : null;
         if (payload.defaultGroupRoleId !== undefined) update.default_group_role_id = payload.defaultGroupRoleId ? Number(payload.defaultGroupRoleId) : null;
         if (payload.info !== undefined) update.info = payload.info ? String(payload.info) : null;
         const { error } = await supabase.from('teams').update(update).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         if (Array.isArray(payload.skillsetIds)) {
             await supabase.from('team_skillsets').delete().eq('team_id', id);
             if (payload.skillsetIds.length) {
@@ -7114,14 +7474,14 @@ async function handleHrData(req, res) {
         await supabase.from('team_skillsets').delete().eq('team_id', id);
 
         const { error } = await supabase.from('teams').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
 
     if (action === 'list_skillsets') {
         const { data, error } = await supabase.from('skillsets').select('*').order('name', { ascending: true });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data });
         return;
     }
@@ -7132,11 +7492,11 @@ async function handleHrData(req, res) {
         if (!name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
         const { error } = await supabase.from('skillsets').insert({
             name,
-            color: payload.color ? String(payload.color).trim() : null,
+            color: cleanColor(payload.color),
             description: payload.description ? String(payload.description).trim() : null
         });
         if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A skillset with that name already exists.' }); return; }
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7147,10 +7507,10 @@ async function handleHrData(req, res) {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const update = {};
         if (payload.name != null) update.name = String(payload.name).trim();
-        if (payload.color !== undefined) update.color = payload.color ? String(payload.color).trim() : null;
+        if (payload.color !== undefined) update.color = cleanColor(payload.color);
         if (payload.description !== undefined) update.description = payload.description ? String(payload.description).trim() : null;
         const { error } = await supabase.from('skillsets').update(update).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7160,7 +7520,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('skillsets').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7168,7 +7528,7 @@ async function handleHrData(req, res) {
     if (action === 'list_recruitment_positions') {
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         const { data, error } = await supabase.from('recruitment_positions').select('*').order('name', { ascending: true });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data: data || [] });
         return;
     }
@@ -7180,7 +7540,7 @@ async function handleHrData(req, res) {
         if (!name) { res.status(400).json({ ok: false, error: 'missing_name' }); return; }
         const { error } = await supabase.from('recruitment_positions').insert({ name, discord_role_id: discordRoleId });
         if (error?.code === '23505') { res.status(400).json({ ok: false, error: 'A position with that name already exists.' }); return; }
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7193,7 +7553,7 @@ async function handleHrData(req, res) {
         if (payload.name != null) update.name = String(payload.name).trim();
         if (payload.discordRoleId !== undefined) update.discord_role_id = payload.discordRoleId ? String(payload.discordRoleId).trim() : null;
         const { error } = await supabase.from('recruitment_positions').update(update).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7203,7 +7563,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('recruitment_positions').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7214,7 +7574,7 @@ async function handleHrData(req, res) {
             .from('broadcasts')
             .select('id, type, team_id, message, created_by, created_at, teams(name)')
             .order('created_at', { ascending: false });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data: data || [] });
         return;
     }
@@ -7237,7 +7597,7 @@ async function handleHrData(req, res) {
             created_by: session.roblox_username,
             created_at: new Date().toISOString()
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7247,7 +7607,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { error } = await supabase.from('broadcasts').delete().eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7268,7 +7628,7 @@ async function handleHrData(req, res) {
                 .select('id, type, team_id, message, created_by, created_at, teams(name)')
                 .or(orParts.join(','))
                 .order('created_at', { ascending: false });
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             res.json({ ok: true, data: data || [] });
         } catch (e) {
             res.status(500).json({ ok: false, error: 'Could not load broadcasts.' });
@@ -7279,7 +7639,7 @@ async function handleHrData(req, res) {
     if (action === 'list_onboarding_links') {
         if (!requirePermission(res, session, 'settings.manage_onboarding')) return;
         const { data, error } = await supabase.from('onboarding_links').select('*').order('created_at', { ascending: false });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const teamIds = [...new Set((data || []).filter(l => l.team_id != null).map(l => l.team_id))];
         const skillsetIds = [...new Set((data || []).filter(l => l.skillset_id != null).map(l => l.skillset_id))];
         const roleIds = [...new Set((data || []).filter(l => l.role_id != null).map(l => l.role_id))];
@@ -7335,7 +7695,7 @@ async function handleHrData(req, res) {
             created_by: session.roblox_username,
             uses: 0
         });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, token, url: `${APP_ORIGIN}/#/join/${token}`, targetUsername: targetRobloxUsername });
         return;
     }
@@ -7345,7 +7705,7 @@ async function handleHrData(req, res) {
         const token = payload.token;
         if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
         const { error } = await supabase.from('onboarding_links').delete().eq('token', token);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7354,7 +7714,7 @@ async function handleHrData(req, res) {
         const token = payload.token && String(payload.token).trim();
         if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
         const { data: link, error } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
         let team = null, skillset = null, role = null;
         if (link.team_id) { const { data } = await supabase.from('teams').select('*').eq('id', link.team_id).maybeSingle(); team = data || null; }
@@ -7369,7 +7729,7 @@ async function handleHrData(req, res) {
         if (!token) { res.status(400).json({ ok: false, error: 'missing_token' }); return; }
         try {
             const { data: link, error: linkErr } = await supabase.from('onboarding_links').select('*').eq('token', token).maybeSingle();
-            if (linkErr) { res.status(500).json({ ok: false, error: linkErr.message }); return; }
+            if (linkErr) { res.status(500).json({ ok: false, error: publicError(linkErr) }); return; }
             if (!link) { res.status(404).json({ ok: false, error: 'link_not_found' }); return; }
 
             if (link.target_roblox_user_id != null && Number(link.target_roblox_user_id) !== Number(session.roblox_user_id)) {
@@ -7405,7 +7765,7 @@ async function handleHrData(req, res) {
             .eq('roblox_user_id', session.roblox_user_id)
             .eq('link_token', token)
             .maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data: { started: !!flow, done: !!flow && flow.step === 'done' } });
         return;
     }
@@ -7472,14 +7832,14 @@ async function handleHrData(req, res) {
             .select('discord_username, discord_avatar, linked_at')
             .eq('roblox_user_id', session.roblox_user_id)
             .maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data: data || null });
         return;
     }
 
     if (action === 'unlink_my_discord') {
         const { error } = await supabase.from('discord_links').delete().eq('roblox_user_id', session.roblox_user_id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         logAudit(session, {
             category: 'account', action: 'unlink_discord',
             targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
@@ -7580,7 +7940,7 @@ async function handleHrData(req, res) {
         }));
         if (toInsert.length) {
             const { error } = await supabase.from('user_assignments').insert(toInsert);
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         }
         if (skillsetId && existing.size) {
             await supabase.from('user_assignments')
@@ -7588,7 +7948,7 @@ async function handleHrData(req, res) {
                 .eq('team_id', teamId)
                 .in('roblox_user_id', [...existing].map(Number));
         }
-        await supabase.from('hr_sessions').delete().in('roblox_user_id', ids);
+        await hrSessionsDelete().in('roblox_user_id', ids);
         await logAudit(session, {
             category: 'teams', action: 'bulk_assign_team',
             details: { teamId, teamName: team.name, added: toInsert.length, alreadyOn: existing.size, skillsetId }
@@ -7616,7 +7976,7 @@ async function handleHrData(req, res) {
             skillset_id: skillsetId,
             assigned_at: new Date().toISOString()
         }, { onConflict: 'roblox_user_id,team_id' });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7630,7 +7990,7 @@ async function handleHrData(req, res) {
         const { error } = teamId
             ? await supabase.from('user_assignments').delete().eq('roblox_user_id', robloxUserId).eq('team_id', teamId)
             : await supabase.from('user_assignments').delete().eq('roblox_user_id', robloxUserId).is('team_id', null);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7679,7 +8039,7 @@ async function handleHrData(req, res) {
             .from('skillsets')
             .select('id, name, color')
             .in('id', skillsetIds);
-        if (skillsetsErr) { res.status(500).json({ ok: false, error: skillsetsErr.message }); return; }
+        if (skillsetsErr) { res.status(500).json({ ok: false, error: publicError(skillsetsErr) }); return; }
 
         const out = (skillsetRows || []).map(s => ({ id: s.id, name: s.name, color: s.color }));
         res.json({ ok: true, data: out });
@@ -7703,7 +8063,7 @@ async function handleHrData(req, res) {
             skillset_id: skillsetId
         }));
         const { error } = await supabase.from('user_skillsets').upsert(rows, { onConflict: 'roblox_user_id,skillset_id', ignoreDuplicates: true });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7714,7 +8074,7 @@ async function handleHrData(req, res) {
         const skillsetId = Number(payload.skillsetId);
         if (!robloxUserId || !skillsetId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
         const { error } = await supabase.from('user_skillsets').delete().eq('roblox_user_id', robloxUserId).eq('skillset_id', skillsetId);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true });
         return;
     }
@@ -7725,7 +8085,7 @@ async function handleHrData(req, res) {
             .select('*')
             .eq('roblox_user_id', session.roblox_user_id)
             .order('created_at', { ascending: false });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data: data || [] });
         return;
     }
@@ -7742,7 +8102,7 @@ async function handleHrData(req, res) {
             .select('*')
             .eq('roblox_user_id', robloxUserId)
             .order('created_at', { ascending: false });
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const ban = await getActiveBan(robloxUserId);
         res.json({ ok: true, data: data || [], banned: ban || null, warnCount: (data || []).length });
         return;
@@ -7768,7 +8128,7 @@ async function handleHrData(req, res) {
             warned_by: session.roblox_username,
             created_at: new Date().toISOString()
         }).select('id').maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
 
         const count = await getWarnCount(robloxUserId);
         let banned = false;
@@ -7780,7 +8140,7 @@ async function handleHrData(req, res) {
                 banned_by: session.roblox_username,
                 banned_at: new Date().toISOString()
             }, { onConflict: 'roblox_user_id' });
-            await supabase.from('hr_sessions').delete().eq('roblox_user_id', robloxUserId);
+            await hrSessionsDelete().eq('roblox_user_id', robloxUserId);
             banned = true;
             logAudit(session, {
                 category: 'moderation', action: 'auto_ban',
@@ -7808,12 +8168,12 @@ async function handleHrData(req, res) {
             .select('*')
             .eq('id', warningId)
             .maybeSingle();
-        if (warningErr) { res.status(500).json({ ok: false, error: warningErr.message }); return; }
+        if (warningErr) { res.status(500).json({ ok: false, error: publicError(warningErr) }); return; }
         if (!warning) { res.status(404).json({ ok: false, error: 'warning_not_found' }); return; }
         const targetHierarchy = await getUserHierarchy(warning.roblox_user_id);
         if (!requireHigherHierarchy(res, session, targetHierarchy)) return;
         const { error } = await supabase.from('staff_warnings').delete().eq('id', warningId);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const count = await getWarnCount(warning.roblox_user_id);
         logAudit(session, {
             category: 'moderation', action: 'remove_user_warning',
@@ -7850,7 +8210,7 @@ async function handleHrData(req, res) {
         let query = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(300);
         if (category) query = query.eq('category', category);
         const { data, error } = await query;
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         let rows = data || [];
         if (search) {
             rows = rows.filter(r =>
@@ -7868,7 +8228,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: log, error: logErr } = await supabase.from('audit_logs').select('*').eq('id', id).maybeSingle();
-        if (logErr) { res.status(500).json({ ok: false, error: logErr.message }); return; }
+        if (logErr) { res.status(500).json({ ok: false, error: publicError(logErr) }); return; }
         if (!log) { res.status(404).json({ ok: false, error: 'log_not_found' }); return; }
         if (log.reverted) { res.status(400).json({ ok: false, error: 'already_reverted' }); return; }
         if (!log.revert_data) { res.status(400).json({ ok: false, error: 'not_revertible' }); return; }
@@ -8001,7 +8361,7 @@ async function handleHrData(req, res) {
                 warned_by: session.roblox_username,
                 created_at: new Date().toISOString()
             }).select('id').maybeSingle();
-            if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+            if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
             const count = await getWarnCount(robloxUserId);
             let banned = false;
             if (count >= 3) {
@@ -8023,8 +8383,8 @@ async function handleHrData(req, res) {
             let notified = false;
             if (notify) {
                 notified = await notifyModeratedUser(robloxUserId, banned
-                    ? `You've received a warning on PlayVerse (${count}/3), which means your access has been removed.\nReason: ${reason}`
-                    : `You've received a warning on PlayVerse (${count}/3). Three warnings removes your access.\nReason: ${reason}`);
+                    ? `You've received a warning on ${studioName()} (${count}/3), which means your access has been removed.\nReason: ${reason}`
+                    : `You've received a warning on ${studioName()} (${count}/3). Three warnings removes your access.\nReason: ${reason}`);
             }
             res.json({ ok: true, warnCount: count, banned, notified });
             return;
@@ -8035,7 +8395,7 @@ async function handleHrData(req, res) {
             try {
                 result = await writeBan({ robloxUserId, robloxUsername, reason: reason || 'No reason given', bannedBy: session.roblox_username, durationHours });
             } catch (e) {
-                res.status(500).json({ ok: false, error: e.message });
+                res.status(500).json({ ok: false, error: publicError(e) });
                 return;
             }
             await logAudit(session, {
@@ -8047,8 +8407,8 @@ async function handleHrData(req, res) {
             let notified = false;
             if (notify) {
                 notified = await notifyModeratedUser(robloxUserId, result.expiresAt
-                    ? `Your PlayVerse access has been suspended until ${new Date(result.expiresAt).toUTCString()}.${reason ? `\nReason: ${reason}` : ''}`
-                    : `Your PlayVerse access has been removed.${reason ? `\nReason: ${reason}` : ''}`);
+                    ? `Your ${studioName()} access has been suspended until ${new Date(result.expiresAt).toUTCString()}.${reason ? `\nReason: ${reason}` : ''}`
+                    : `Your ${studioName()} access has been removed.${reason ? `\nReason: ${reason}` : ''}`);
             }
             res.json({ ok: true, expiresAt: result.expiresAt, temporaryUnsupported: result.temporaryUnsupported, notified });
             return;
@@ -8064,7 +8424,7 @@ async function handleHrData(req, res) {
                 revert: banRow ? { type: 'reban_user', row: banRow } : null
             });
             let notified = false;
-            if (notify) notified = await notifyModeratedUser(robloxUserId, `Your PlayVerse access has been restored. You can sign in again.`);
+            if (notify) notified = await notifyModeratedUser(robloxUserId, `Your ${studioName()} access has been restored. You can sign in again.`);
             res.json({ ok: true, notified });
             return;
         }
@@ -8080,7 +8440,7 @@ async function handleHrData(req, res) {
             });
             res.json({ ok: true, data: backup });
         } catch (e) {
-            res.status(500).json({ ok: false, error: e.message });
+            res.status(500).json({ ok: false, error: publicError(e) });
         }
         return;
     }
@@ -8092,7 +8452,7 @@ async function handleHrData(req, res) {
             .select('id, created_by, trigger, tables, row_counts, size_bytes, created_at')
             .order('created_at', { ascending: false })
             .limit(50);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data: data || [] });
         return;
     }
@@ -8102,7 +8462,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data, error } = await supabase.from('backups').select('*').eq('id', id).maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         if (!data) { res.status(404).json({ ok: false, error: 'backup_not_found' }); return; }
         let parsed = null;
         try {
@@ -8124,7 +8484,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data, error } = await supabase.from('backups').select('*').eq('id', id).maybeSingle();
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         if (!data) { res.status(404).json({ ok: false, error: 'backup_not_found' }); return; }
 
         let parsed = null;
@@ -8142,7 +8502,7 @@ async function handleHrData(req, res) {
             const rows = (parsed.dump && parsed.dump[table]) || [];
             if (!rows.length) { summary[table] = { restored: 0 }; continue; }
             const { error: upsertErr } = await supabase.from(table).upsert(rows);
-            summary[table] = upsertErr ? { restored: 0, error: upsertErr.message } : { restored: rows.length };
+            summary[table] = upsertErr ? { restored: 0, error: publicError(upsertErr) } : { restored: rows.length };
         }
 
         logAudit(session, {
@@ -8159,7 +8519,7 @@ async function handleHrData(req, res) {
             const data = await listRecruiters();
             res.json({ ok: true, data });
         } catch (e) {
-            res.status(500).json({ ok: false, error: e.message });
+            res.status(500).json({ ok: false, error: publicError(e) });
         }
         return;
     }
@@ -8170,7 +8530,7 @@ async function handleHrData(req, res) {
         let query = supabase.from('recruitment_tickets').select('*').order('created_at', { ascending: false }).limit(200);
         if (status) query = query.eq('status', status);
         const { data, error } = await query;
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         res.json({ ok: true, data: data || [] });
         return;
     }
@@ -8180,7 +8540,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
         res.json({ ok: true, data: { ticket, discordChannelUrl: discordChannelUrl(ticket.discord_channel_id) } });
         return;
@@ -8195,7 +8555,7 @@ async function handleHrData(req, res) {
         if (!id || !validStatuses.includes(status)) { res.status(400).json({ ok: false, error: 'invalid_status' }); return; }
 
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
 
         const updates = { status, updated_at: new Date().toISOString() };
@@ -8216,7 +8576,7 @@ async function handleHrData(req, res) {
         }
 
         const { error: updateErr } = await supabase.from('recruitment_tickets').update(updates).eq('id', id);
-        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+        if (updateErr) { res.status(500).json({ ok: false, error: publicError(updateErr) }); return; }
 
         if (status === 'accepted' && ticket.status !== 'accepted') {
             await processHire({ ...ticket, ...updates }, {
@@ -8238,7 +8598,7 @@ async function handleHrData(req, res) {
 
         const statusLabels = { pending: 'set to pending', in_review: 'marked in review', accepted: 'accepted', rejected: 'rejected', withdrawn: 'marked withdrawn' };
         sendPushToApplicant(ticket.roblox_user_id, {
-            title: 'Your PlayVerse application was updated',
+            title: `Your ${studioName()} application was updated`,
             body: `Your application was ${statusLabels[status] || status}.`,
             url: `${APP_ORIGIN}/#/recruit/status`
         });
@@ -8263,12 +8623,12 @@ async function handleHrData(req, res) {
         if (!id || !skillsetId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
 
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
         if (ticket.status !== 'accepted') { res.status(400).json({ ok: false, error: 'not_accepted' }); return; }
 
         const { data: skillset, error: skillsetErr } = await supabase.from('skillsets').select('id, name').eq('id', skillsetId).maybeSingle();
-        if (skillsetErr) { res.status(500).json({ ok: false, error: skillsetErr.message }); return; }
+        if (skillsetErr) { res.status(500).json({ ok: false, error: publicError(skillsetErr) }); return; }
         if (!skillset) { res.status(404).json({ ok: false, error: 'skillset_not_found' }); return; }
 
         const nextPhaseAt = new Date().toISOString();
@@ -8280,7 +8640,7 @@ async function handleHrData(req, res) {
             next_phase_by_username: session.roblox_username,
             updated_at: nextPhaseAt
         }).eq('id', id);
-        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+        if (updateErr) { res.status(500).json({ ok: false, error: publicError(updateErr) }); return; }
 
         const updatedTicket = { ...ticket, status: 'team_selection', skillset_id: skillset.id, skillset_name: skillset.name };
         const messageId = await notifyDiscordNextPhase(updatedTicket, skillset);
@@ -8313,12 +8673,12 @@ async function handleHrData(req, res) {
         if (!id || !teamId) { res.status(400).json({ ok: false, error: 'missing_fields' }); return; }
 
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
         if (ticket.status !== 'team_selection' && ticket.status !== 'signed_off') { res.status(400).json({ ok: false, error: 'not_in_team_selection' }); return; }
 
         const { data: team, error: teamErr } = await supabase.from('teams').select('id, name').eq('id', teamId).maybeSingle();
-        if (teamErr) { res.status(500).json({ ok: false, error: teamErr.message }); return; }
+        if (teamErr) { res.status(500).json({ ok: false, error: publicError(teamErr) }); return; }
         if (!team) { res.status(404).json({ ok: false, error: 'team_not_found' }); return; }
 
         const placedAt = new Date().toISOString();
@@ -8328,7 +8688,7 @@ async function handleHrData(req, res) {
             placed_at: placedAt,
             updated_at: placedAt
         }).eq('id', id);
-        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+        if (updateErr) { res.status(500).json({ ok: false, error: publicError(updateErr) }); return; }
 
         notifyDiscordPlacement(ticket, team, session.roblox_username);
 
@@ -8361,7 +8721,7 @@ async function handleHrData(req, res) {
         const id = payload.id;
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
         if (ticket.status !== 'team_selection' || !ticket.placed_team_id) { res.status(400).json({ ok: false, error: 'not_ready_for_signoff' }); return; }
 
@@ -8372,7 +8732,7 @@ async function handleHrData(req, res) {
             signed_off_by_username: session.roblox_username,
             updated_at: nowIso
         }).eq('id', id);
-        if (updateErr) { res.status(500).json({ ok: false, error: updateErr.message }); return; }
+        if (updateErr) { res.status(500).json({ ok: false, error: publicError(updateErr) }); return; }
 
         const updatedTicket = { ...ticket, status: 'signed_off', signed_off_at: nowIso, signed_off_by_username: session.roblox_username };
 
@@ -8405,7 +8765,7 @@ async function handleHrData(req, res) {
         const assignToUsername = payload.assignToUsername ? String(payload.assignToUsername) : null;
 
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
 
         const { error } = await supabase.from('recruitment_tickets').update({
@@ -8413,7 +8773,7 @@ async function handleHrData(req, res) {
             assigned_to_username: assignToUsername,
             updated_at: new Date().toISOString()
         }).eq('id', id);
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
 
         const updatedTicket = { ...ticket, assigned_to_user_id: assignToUserId, assigned_to_username: assignToUsername };
         notifyDiscordAssignment(updatedTicket, assignToUserId, assignToUsername, session.roblox_username);
@@ -8445,7 +8805,7 @@ async function handleHrData(req, res) {
         if (!id) { res.status(400).json({ ok: false, error: 'missing_id' }); return; }
 
         const { data: ticket, error: ticketErr } = await supabase.from('recruitment_tickets').select('*').eq('id', id).maybeSingle();
-        if (ticketErr) { res.status(500).json({ ok: false, error: ticketErr.message }); return; }
+        if (ticketErr) { res.status(500).json({ ok: false, error: publicError(ticketErr) }); return; }
         if (!ticket) { res.status(404).json({ ok: false, error: 'ticket_not_found' }); return; }
         if (!ticket.placed_team_id) { res.status(400).json({ ok: false, error: 'not_placed_on_team_yet' }); return; }
         if (ticket.status !== 'signed_off') { res.status(400).json({ ok: false, error: 'not_signed_off_yet' }); return; }
@@ -8482,7 +8842,7 @@ async function handleHrData(req, res) {
     if (action === 'recruitment_analytics') {
         if (!requirePermission(res, session, 'recruitment.analytics')) return;
         const { data: tickets, error } = await supabase.from('recruitment_tickets').select('*');
-        if (error) { res.status(500).json({ ok: false, error: error.message }); return; }
+        if (error) { res.status(500).json({ ok: false, error: publicError(error) }); return; }
         const all = tickets || [];
 
         const totals = {
