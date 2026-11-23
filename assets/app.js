@@ -67,6 +67,8 @@
       if (hex.test(t.accentDark || '')) root.style.setProperty('--brand-dark', t.accentDark);
       if (t.radius) root.style.setProperty('--radius-lg', Math.max(4, Math.min(28, Number(t.radius) || 18)) + 'px');
       document.title = brandName();
+      const themeMeta = document.querySelector('meta[name="theme-color"]');
+      if (themeMeta && hex.test(t.accent || '')) themeMeta.setAttribute('content', t.accent);
       const icon = document.querySelector('link[rel="icon"]');
       if (icon && STUDIO.studio.logoUrl && icon.getAttribute('href') !== STUDIO.studio.logoUrl) icon.setAttribute('href', STUDIO.studio.logoUrl);
     }
@@ -3180,6 +3182,13 @@
       warmUpForUser();
     }
 
+    // Installable app + offline screen. Registered once the page is idle so it never slows boot.
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      window.addEventListener('load', () => {
+        setTimeout(() => { navigator.serviceWorker.register('sw.js').catch(() => { }); }, 2000);
+      });
+    }
+
     // After the first paint, quietly fetch the libraries this user is likely to need.
     function warmUpForUser() {
       if (!isHrAuthed) return;
@@ -3356,7 +3365,7 @@
         else if (isHrAuthed) window.location.hash = '#/home';
         else renderHrGate();
       } else if (path === '#/home') {
-        if (isHrAuthed) renderHome(); else renderHrGate();
+        if (isHrAuthed) { renderHome(); maybeOfferSetup(); } else renderHrGate();
       } else if (path === '#/revenue') {
         if (isHrAuthed) renderRevenue(); else renderHrGate();
       } else if (path === '#/contracts') {
@@ -8734,6 +8743,7 @@
         { id: 'branding', group: 'Studio', label: 'Branding', desc: 'Name, logo, colours, sign-in', enabled: canManageBranding },
         { id: 'notifications', group: 'Studio', label: 'Notifications', desc: 'Email and channel alerts', enabled: canManageBranding },
         { id: 'plan', group: 'Studio', label: 'Plan', desc: 'Licence and features', enabled: canManageBranding || canManageRoles },
+        { id: 'health', group: 'Studio', label: 'Health', desc: 'Errors, backups, alerts', enabled: hasPermission('audit.view') || hasPermission('security.manage') || hasPermission('backups.manage') },
         { id: 'access', group: 'Access', label: 'Sign-in', desc: 'Who can get in', enabled: canManageBaseAccess || canManageGroups },
         { id: 'roles', group: 'Access', label: 'Roles', desc: 'Permissions and rank', enabled: canManageRoles },
         { id: 'games', group: 'Payments', label: 'Games & DevEx', desc: 'Games, DevEx rate, minimums', enabled: canManageGames || canManageRate },
@@ -8894,6 +8904,7 @@
       ${manageTab === 'branding' && canManageBranding ? '<div id="brandingMount"></div>' : ''}
       ${manageTab === 'notifications' && canManageBranding ? '<div id="webhookMount"></div>' : ''}
       ${manageTab === 'plan' ? '<div id="planMount"></div>' : ''}
+      ${manageTab === 'health' ? `<div id="healthMount">${healthHtml()}</div>` : ''}
 
       ${manageTab === 'access' ? `
       ${canManageBaseAccess ? `
@@ -9571,6 +9582,10 @@
         if (webhookMount) mountWebhookSettings(webhookMount);
         const planMount = document.getElementById('planMount');
         if (planMount) mountPlan(planMount);
+        if (document.getElementById('healthMount')) {
+          const repaintHealth = () => { const host = document.getElementById('healthMount'); if (host) { host.innerHTML = healthHtml(); wireHealth(repaintHealth); } };
+          wireHealth(repaintHealth);
+        }
         document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', async () => { if (manageTab === 'branding' && b.dataset.manageTab !== 'branding' && brandingState.dirty && !(await askConfirm('You have unsaved branding changes. Leave without saving?'))) return; manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); if (manageTab === 'rates' && !rateBandsLoaded) loadRateBands(); }));
 
         const bandSaveBtn = document.getElementById('bandSaveBtn');
@@ -10864,7 +10879,8 @@ ${featureOn('multiCurrency') ? `              <div class="field"><label for="bkC
       security_changed: 'The security level changes',
       budget_warning: 'A game nears its budget',
       contract_signed: 'A contract is signed',
-      revenue_recorded: 'Monthly revenue is recorded'
+      revenue_recorded: 'Monthly revenue is recorded',
+      system_alert: 'Something breaks (errors, missed backups)'
     };
 
     function webhookHtml() {
@@ -11983,6 +11999,555 @@ Either side can end the contract in writing. Milestones already approved are sti
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'recovery-codes.txt'; document.body.appendChild(a); a.click(); a.remove();
       });
     }
+
+    // ---------------------------------------------------------------------------------
+    // First-run setup wizard (#/setup). Shown once to whoever owns the panel. Each step
+    // saves through the same actions Settings uses, so nothing here bypasses a check.
+    // ---------------------------------------------------------------------------------
+    const SETUP_CHECKED_KEY = 'sp_setup_checked';
+    const SETUP_STEPS = [
+      { id: 'studio', label: 'Your studio', hint: 'Name, logo and colour' },
+      { id: 'signin', label: 'Who can sign in', hint: 'Your Roblox group' },
+      { id: 'payouts', label: 'Payouts', hint: 'Currencies and methods' },
+      { id: 'invite', label: 'Invite your team', hint: 'Your first invite link' },
+      { id: 'done', label: 'Done', hint: '' }
+    ];
+    const SETUP_SWATCHES = ['#5B5FEF', '#2563EB', '#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#8B5CF6', '#111216'];
+
+    // After sign-in: owners who haven't finished setup get sent to it, once per browser session.
+    async function maybeOfferSetup() {
+      if (!isHrAuthed || !hasPermission('roles.manage') || !hasPermission('settings.manage_branding')) return;
+      try { if (sessionStorage.getItem(SETUP_CHECKED_KEY)) return; sessionStorage.setItem(SETUP_CHECKED_KEY, '1'); } catch (e) { }
+      try {
+        const json = await callHrData('get_setup_state');
+        const d = json.data || {};
+        if (d.canRun && d.available !== false && !d.completed && ['#/home', '#/', ''].includes(currentPath())) window.location.hash = '#/setup';
+      } catch (e) { }
+    }
+
+    function lightenHex(hex, amount) {
+      const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+      if (!m) return '#8C8FFF';
+      const n = parseInt(m[1], 16);
+      const mix = (c) => Math.round(c + (255 - c) * amount);
+      const r = mix(n >> 16), g = mix((n >> 8) & 255), b = mix(n & 255);
+      return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+    }
+
+    function renderSetupWizard() {
+      const myGen = renderGen;
+      const W = { loading: true, error: null, state: null, step: 'studio', busy: false, msg: null, draft: null, invite: null, savedBranding: null };
+
+      function mergeDeep(base, extra) {
+        const out = { ...(base || {}) };
+        Object.keys(extra || {}).forEach(k => {
+          const v = extra[k];
+          out[k] = v && typeof v === 'object' && !Array.isArray(v) ? mergeDeep(out[k], v) : v;
+        });
+        return out;
+      }
+
+      async function saveBranding(patch) {
+        const current = await callHrData('get_branding');
+        const saved = (current.data && current.data.saved) || {};
+        const json = await callHrData('save_branding', { branding: mergeDeep(saved, patch) });
+        try { localStorage.removeItem(BOOTSTRAP_CACHE_KEY); } catch (e) { }
+        await ensureBootstrap(true).catch(() => { });
+        return json;
+      }
+
+      function stepIndex(id) { return SETUP_STEPS.findIndex(s => s.id === id); }
+      function initialsOf(name) {
+        const n = String(name || '').trim();
+        return n.split(/\s+/).filter(Boolean).map(w => w[0]).join('').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || n.slice(0, 2).toUpperCase() || 'S';
+      }
+
+      function railHtml() {
+        const checks = { ...((W.state && W.state.checks) || {}), ...(W.invite ? { invite: true } : {}) };
+        return SETUP_STEPS.map((s, i) => {
+          const done = s.id !== 'done' && checks[s.id];
+          const active = s.id === W.step;
+          return `<button type="button" class="setup-rail-item${active ? ' active' : ''}${done ? ' done' : ''}" data-setup-go="${s.id}">
+            <span class="setup-rail-num">${done ? '&#10003;' : i + 1}</span>
+            <span><strong>${esc(s.label)}</strong>${s.hint ? `<small>${esc(s.hint)}</small>` : ''}</span>
+          </button>`;
+        }).join('');
+      }
+
+      function navHtml(primaryLabel, opts) {
+        const o = opts || {};
+        const idx = stepIndex(W.step);
+        return `<div class="setup-actions">
+          ${idx > 0 ? '<button type="button" class="btn btn-ghost" data-setup-back>Back</button>' : '<span></span>'}
+          <div class="setup-actions-right">
+            ${o.skippable ? '<button type="button" class="btn btn-link-muted" data-setup-next-skip>Skip this step</button>' : ''}
+            <button type="button" class="btn btn-primary" data-setup-save ${W.busy ? 'disabled' : ''}>${W.busy ? 'Saving...' : esc(primaryLabel)}</button>
+          </div>
+        </div>`;
+      }
+
+      function stepHtml() {
+        const v = W.state.values;
+        const d = W.draft;
+        const msg = W.msg ? `<div class="${W.msg.kind === 'ok' ? 'confirm-box' : 'error-box'}" style="margin-bottom:16px;">${W.msg.kind === 'ok' ? '<div class="icon">&#10003;</div><div class="txt">' : '<span>'}${esc(W.msg.text)}${W.msg.kind === 'ok' ? '</div>' : '</span>'}</div>` : '';
+        if (W.step === 'studio') {
+          return `
+            <h2>Your studio</h2>
+            <p class="setup-lead">This is what your team sees on the sign-in page, in the sidebar and in every message the panel sends.</p>
+            ${msg}
+            <div class="field"><label for="setupName">Studio name</label><input type="text" id="setupName" maxlength="60" value="${esc(d.name)}" placeholder="e.g. Nova Games"></div>
+            <div class="field"><label for="setupSuffix">Shown after the name <span class="hint">(optional, e.g. "Panel" gives "Nova Games Panel")</span></label><input type="text" id="setupSuffix" maxlength="40" value="${esc(d.productName)}" placeholder="Panel"></div>
+            <div class="field"><label>Brand colour</label>
+              <div class="setup-swatches">${SETUP_SWATCHES.map(c => `<button type="button" class="setup-swatch${d.accent.toUpperCase() === c ? ' on' : ''}" data-swatch="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}
+                <label class="setup-swatch-custom" title="Pick any colour"><input type="color" id="setupColor" value="${esc(d.accent)}"><span>Custom</span></label>
+              </div>
+            </div>
+            <div class="field"><label>Logo <span class="hint">(square works best)</span></label>
+              <div class="setup-logo">
+                <div class="setup-logo-preview">${d.logoUrl ? `<img src="${esc(d.logoUrl)}" alt="">` : `<span>${esc(initialsOf(d.name))}</span>`}</div>
+                <div class="setup-logo-actions">
+                  <label class="btn btn-ghost btn-sm" for="setupLogoFile">Upload image</label>
+                  <input type="file" id="setupLogoFile" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+                  ${d.logoUrl ? '<button type="button" class="btn btn-link-muted btn-sm" id="setupLogoClear">Remove</button>' : ''}
+                </div>
+              </div>
+            </div>
+            <div class="setup-preview" style="--p:${esc(d.accent)}">
+              <div class="setup-preview-brand">${d.logoUrl ? `<img src="${esc(d.logoUrl)}" alt="">` : `<span>${esc(initialsOf(d.name))}</span>`}<strong>${esc([d.name || 'Your studio', d.productName].filter(Boolean).join(' '))}</strong></div>
+              <div class="setup-preview-btn">Sign in with Roblox</div>
+            </div>
+            ${navHtml('Save and continue')}`;
+        }
+        if (W.step === 'signin') {
+          const roblox = authProviders().includes('roblox');
+          const groups = v.groups || [];
+          return `
+            <h2>Who can sign in</h2>
+            <p class="setup-lead">${roblox ? 'Add your Roblox group. Members at or above the minimum rank can sign in. People outside it can still be invited with a link.' : 'Google sign-in is on. Allow your company email domain with GOOGLE_ALLOWED_DOMAINS on the server, or invite people with links in the next step.'}</p>
+            ${msg}
+            ${groups.length ? `<div class="setup-list">${groups.map(g => `<div><strong>${esc(g.name || 'Roblox group')}</strong><span>Group ${esc(g.robloxGroupId)}${g.minRank != null ? ` &middot; rank ${esc(g.minRank)}+` : ''}</span></div>`).join('')}</div>` : ''}
+            ${roblox ? `
+              <div class="row2">
+                <div class="field"><label for="setupGroupId">Roblox group ID</label><input type="number" id="setupGroupId" inputmode="numeric" placeholder="e.g. 34512877" value="${esc(d.groupId)}"></div>
+                <div class="field"><label for="setupMinRank">Minimum rank <span class="hint">(1-255, optional)</span></label><input type="number" id="setupMinRank" min="1" max="255" placeholder="e.g. 10" value="${esc(d.minRank)}"></div>
+              </div>
+              <p class="hint" style="margin:-6px 0 16px;">The ID is the number in your group's address: roblox.com/communities/<strong>34512877</strong>/your-group</p>` : ''}
+            ${navHtml(roblox ? (groups.length && !d.groupId ? 'Continue' : 'Add group and continue') : 'Continue', { skippable: roblox })}`;
+        }
+        if (W.step === 'payouts') {
+          const cashCurrencies = ['USD', 'EUR', 'GBP', 'CAD', 'AUD'];
+          const methodLabels = { DEVEX_ROBUX: 'Robux (group payouts)', PAYPAL: 'PayPal', VENMO: 'Venmo', BANK_TRANSFER: 'Bank transfer' };
+          return `
+            <h2>Payouts</h2>
+            <p class="setup-lead">How you pay people. You can change any of this later in Settings.</p>
+            ${msg}
+            <div class="field"><label>Pay in</label>
+              <div class="setup-checks">
+                <label><input type="checkbox" data-setup-cur="ROBUX" ${d.currencies.includes('ROBUX') ? 'checked' : ''}> Robux</label>
+                <label><input type="checkbox" data-setup-cur="USD" ${d.currencies.includes('USD') ? 'checked' : ''}> Cash</label>
+              </div>
+            </div>
+            ${v.multiCurrency ? `<div class="field"><label for="setupCash">Cash currency</label><select id="setupCash">${cashCurrencies.map(c => `<option value="${c}" ${d.cashCurrency === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>` : ''}
+            <div class="field"><label>Payout methods people can choose</label>
+              <div class="setup-checks">${Object.keys(methodLabels).map(m => `<label><input type="checkbox" data-setup-method="${m}" ${d.methods.includes(m) ? 'checked' : ''}> ${esc(methodLabels[m])}</label>`).join('')}</div>
+            </div>
+            <div class="field"><label for="setupDevex">DevEx rate <span class="hint">(USD per 10,000 Robux, used to show Robux in cash)</span></label><input type="number" id="setupDevex" step="0.01" min="0" value="${esc(d.devexPer10k)}"></div>
+            ${navHtml('Save and continue')}`;
+        }
+        if (W.step === 'invite') {
+          const roles = v.roles || [];
+          const teams = v.teams || [];
+          return `
+            <h2>Invite your team</h2>
+            <p class="setup-lead">Create a link and send it to the people you're bringing in. When they sign in through it they get the role you pick here.</p>
+            ${msg}
+            ${W.invite ? `
+              <div class="setup-invite">
+                <div class="preview-label">Your invite link</div>
+                <div class="setup-invite-row"><code>${esc(W.invite.url)}</code><button type="button" class="btn btn-ghost btn-sm" id="setupCopyInvite">Copy</button></div>
+                <p class="hint" style="margin:8px 0 0;">Anyone with this link can join with that role, so share it privately. Manage links later in Settings &gt; Invites.</p>
+              </div>` : `
+              <div class="row2">
+                <div class="field"><label for="setupInviteRole">Role</label><select id="setupInviteRole">${roles.map(r => `<option value="${esc(r.id)}" ${String(d.inviteRole) === String(r.id) ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></div>
+                <div class="field"><label for="setupInviteTeam">Team <span class="hint">(optional)</span></label><select id="setupInviteTeam"><option value="">No team</option>${teams.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></div>
+              </div>
+              <div class="field"><label for="setupInviteLabel">Label <span class="hint">(optional, only you see it)</span></label><input type="text" id="setupInviteLabel" maxlength="80" placeholder="e.g. Launch team"></div>`}
+            ${navHtml(W.invite ? 'Continue' : 'Create link', { skippable: !W.invite })}`;
+        }
+        const checks = { ...(W.state.checks || {}), ...(W.invite ? { invite: true } : {}) };
+        const row = (ok, text, href) => `<a class="setup-done-row${ok ? ' ok' : ''}" href="${href}"><span>${ok ? '&#10003;' : '&ndash;'}</span>${esc(text)}</a>`;
+        return `
+          <h2>You're set up</h2>
+          <p class="setup-lead">${esc(brandName())} is ready. Here's what's in place; anything you skipped is one click away in Settings.</p>
+          <div class="setup-done">
+            ${row(checks.studio, 'Studio name, logo and colour', '#/manage?tab=branding')}
+            ${row(checks.signin, 'Who can sign in', '#/manage?tab=access')}
+            ${row(checks.payouts, 'Payouts and DevEx rate', '#/manage?tab=games')}
+            ${row(checks.invite, 'Invite link for your team', '#/manage?tab=onboarding')}
+          </div>
+          <div class="setup-next">
+            <strong>Good next steps</strong>
+            <span>Link roles to group ranks in Settings &gt; Roles, add your games, and turn on two-factor sign-in under Account &amp; security.</span>
+          </div>
+          <div class="setup-actions"><span></span><div class="setup-actions-right"><button type="button" class="btn btn-primary" id="setupFinish" ${W.busy ? 'disabled' : ''}>Go to Home</button></div></div>`;
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        if (W.loading || !W.state) {
+          app.innerHTML = `<div class="setup-shell"><header class="setup-head">${shellBrand()}</header><div class="setup-body"><div class="panel">${W.error ? `<div class="error-box"><span>${esc(W.error)}</span></div>` : '<div class="dash-loading">Loading setup...</div>'}</div></div></div>`;
+          return;
+        }
+        const idx = stepIndex(W.step);
+        app.innerHTML = `
+          <div class="setup-shell">
+            <header class="setup-head">
+              ${shellBrand()}
+              <div class="setup-head-right"><span class="setup-progress-text">Step ${Math.min(idx + 1, SETUP_STEPS.length - 1)} of ${SETUP_STEPS.length - 1}</span><button type="button" class="btn btn-ghost btn-sm" id="setupSkipAll">Skip setup</button></div>
+            </header>
+            <div class="setup-progress"><span style="width:${Math.round((idx / (SETUP_STEPS.length - 1)) * 100)}%"></span></div>
+            <div class="setup-body">
+              <nav class="setup-rail" aria-label="Setup steps">${railHtml()}</nav>
+              <section class="panel setup-card">${stepHtml()}</section>
+            </div>
+          </div>`;
+        wire();
+      }
+
+      function go(step) { W.step = step; W.msg = null; paint(); window.scrollTo(0, 0); }
+      function next() { go(SETUP_STEPS[Math.min(stepIndex(W.step) + 1, SETUP_STEPS.length - 1)].id); }
+
+      function collect() {
+        const d = W.draft;
+        const val = (id) => { const el = document.getElementById(id); return el ? el.value : undefined; };
+        if (W.step === 'studio') {
+          if (val('setupName') !== undefined) d.name = val('setupName').trim();
+          if (val('setupSuffix') !== undefined) d.productName = val('setupSuffix').trim();
+        } else if (W.step === 'signin') {
+          if (val('setupGroupId') !== undefined) d.groupId = val('setupGroupId').trim();
+          if (val('setupMinRank') !== undefined) d.minRank = val('setupMinRank').trim();
+        } else if (W.step === 'payouts') {
+          d.currencies = Array.from(document.querySelectorAll('[data-setup-cur]:checked')).map(el => el.dataset.setupCur);
+          d.methods = Array.from(document.querySelectorAll('[data-setup-method]:checked')).map(el => el.dataset.setupMethod);
+          if (val('setupCash') !== undefined) d.cashCurrency = val('setupCash');
+          if (val('setupDevex') !== undefined) d.devexPer10k = val('setupDevex');
+        } else if (W.step === 'invite') {
+          if (val('setupInviteRole') !== undefined) d.inviteRole = val('setupInviteRole');
+          d.inviteTeam = val('setupInviteTeam') || '';
+          d.inviteLabel = (val('setupInviteLabel') || '').trim();
+        }
+      }
+
+      async function save() {
+        collect();
+        const d = W.draft;
+        W.msg = null;
+        try {
+          if (W.step === 'studio') {
+            if (!d.name) { W.msg = { kind: 'err', text: 'Give your studio a name.' }; paint(); return; }
+            W.busy = true; paint();
+            await saveBranding({ studio: { name: d.name, shortName: initialsOf(d.name), productName: d.productName, logoUrl: d.logoUrl || '' }, theme: { accent: d.accent, accentDark: lightenHex(d.accent, 0.3) } });
+          } else if (W.step === 'signin') {
+            if (d.groupId) {
+              const groupId = Number(d.groupId);
+              const minRank = d.minRank === '' ? null : Number(d.minRank);
+              if (!(groupId > 0)) { W.msg = { kind: 'err', text: "That group ID doesn't look right. It's the number in your group's address." }; paint(); return; }
+              if (minRank != null && !(minRank >= 1 && minRank <= 255)) { W.msg = { kind: 'err', text: 'Minimum rank is a number from 1 to 255.' }; paint(); return; }
+              W.busy = true; paint();
+              await callHrData('add_base_access_group', { robloxGroupId: groupId, minRank, name: `${d.name || 'Studio'} group` });
+              d.groupId = ''; d.minRank = '';
+            }
+          } else if (W.step === 'payouts') {
+            if (!d.currencies.length) { W.msg = { kind: 'err', text: 'Pick at least one way to pay: Robux or cash.' }; paint(); return; }
+            if (!d.methods.length) { W.msg = { kind: 'err', text: 'Pick at least one payout method.' }; paint(); return; }
+            const per10k = Number(d.devexPer10k);
+            if (!(per10k >= 0)) { W.msg = { kind: 'err', text: 'The DevEx rate should be a number like 35.' }; paint(); return; }
+            W.busy = true; paint();
+            const payments = { currencies: d.currencies, methods: d.methods };
+            if (W.state.values.multiCurrency) payments.cashCurrency = d.cashCurrency;
+            await saveBranding({ payments });
+            await callHrData('save_rate', { rate: per10k / 10000 });
+          } else if (W.step === 'invite') {
+            if (W.invite) { next(); return; }
+            W.busy = true; paint();
+            const json = await callHrData('create_onboarding_link', { roleId: d.inviteRole || null, teamId: d.inviteTeam || null, label: d.inviteLabel || 'Setup invite' });
+            W.invite = { url: json.url || (window.location.origin + window.location.pathname + '#/join/' + json.token) };
+            W.busy = false;
+            await refresh();
+            paint();
+            return;
+          }
+          W.busy = false;
+          await refresh();
+          next();
+        } catch (e) {
+          W.busy = false;
+          W.msg = { kind: 'err', text: e.message || 'That did not save. Try again.' };
+          paint();
+        }
+      }
+
+      async function refresh() {
+        try {
+          const json = await callHrData('get_setup_state');
+          W.state = { ...W.state, ...json.data };
+        } catch (e) { }
+      }
+
+      async function finish(skipped) {
+        W.busy = true; paint();
+        try {
+          await callHrData('finish_setup', { skipped: !!skipped });
+        } catch (e) {
+          if (e.code !== 'setup_columns_missing') { W.busy = false; W.msg = { kind: 'err', text: e.message }; paint(); return; }
+        }
+        window.location.hash = '#/home';
+      }
+
+      function wire() {
+        document.querySelectorAll('[data-setup-go]').forEach(b => b.addEventListener('click', () => { collect(); go(b.dataset.setupGo); }));
+        const back = document.querySelector('[data-setup-back]');
+        if (back) back.addEventListener('click', () => { collect(); go(SETUP_STEPS[Math.max(0, stepIndex(W.step) - 1)].id); });
+        const saveBtn = document.querySelector('[data-setup-save]');
+        if (saveBtn) saveBtn.addEventListener('click', save);
+        const skip = document.querySelector('[data-setup-next-skip]');
+        if (skip) skip.addEventListener('click', () => { collect(); next(); });
+        const skipAll = document.getElementById('setupSkipAll');
+        if (skipAll) skipAll.addEventListener('click', async () => {
+          if (await askConfirm('Skip setup?\n\nYou can do all of this later in Settings, or reopen this guide from Settings > Health.', { confirmLabel: 'Skip setup' })) finish(true);
+        });
+        const fin = document.getElementById('setupFinish');
+        if (fin) fin.addEventListener('click', () => finish(false));
+        document.querySelectorAll('[data-swatch]').forEach(b => b.addEventListener('click', () => { collect(); W.draft.accent = b.dataset.swatch; paint(); }));
+        const color = document.getElementById('setupColor');
+        if (color) color.addEventListener('change', () => { collect(); W.draft.accent = color.value.toUpperCase(); paint(); });
+        const nameInput = document.getElementById('setupName');
+        if (nameInput) nameInput.addEventListener('input', () => {
+          const p = document.querySelector('.setup-preview-brand strong');
+          if (p) p.textContent = [nameInput.value || 'Your studio', (document.getElementById('setupSuffix') || {}).value].filter(Boolean).join(' ');
+        });
+        const file = document.getElementById('setupLogoFile');
+        if (file) file.addEventListener('change', async () => {
+          const f = file.files && file.files[0];
+          if (!f) return;
+          collect();
+          try { W.draft.logoUrl = await brandingResizeImage(f, 256, 256, 'image/png'); W.msg = null; } catch (e) { W.msg = { kind: 'err', text: e.message }; }
+          paint();
+        });
+        const clear = document.getElementById('setupLogoClear');
+        if (clear) clear.addEventListener('click', () => { collect(); W.draft.logoUrl = ''; paint(); });
+        const copy = document.getElementById('setupCopyInvite');
+        if (copy && W.invite) copy.addEventListener('click', () => copyText(W.invite.url, copy, 'Copied'));
+      }
+
+      (async () => {
+        paint();
+        try {
+          const json = await callHrData('get_setup_state');
+          const d = json.data || {};
+          if (!d.canRun) { window.location.hash = '#/home'; return; }
+          if (d.available === false) { W.error = 'Setup needs a database update. Run sql/upgrade.sql in Supabase, then reload.'; W.loading = false; paint(); return; }
+          W.state = d;
+          const v = d.values;
+          const staff = (v.roles || []).find(r => r.name === 'Staff') || (v.roles || [])[(v.roles || []).length - 1];
+          W.draft = {
+            name: v.studio.name === 'Studio Panel' ? '' : v.studio.name,
+            productName: v.studio.productName || '',
+            logoUrl: /assets\/logo\.svg$/.test(v.studio.logoUrl || '') ? '' : (v.studio.logoUrl || ''),
+            accent: (v.theme.accent || '#5B5FEF').toUpperCase(),
+            groupId: '', minRank: '',
+            currencies: v.payments.currencies.slice(), methods: v.payments.methods.slice(), cashCurrency: v.payments.cashCurrency || 'USD',
+            devexPer10k: v.devexRate != null ? (Number(v.devexRate) * 10000).toFixed(2) : '35.00',
+            inviteRole: staff ? staff.id : '', inviteTeam: '', inviteLabel: ''
+          };
+          const firstOpen = SETUP_STEPS.find(s => s.id !== 'done' && !d.checks[s.id]);
+          W.step = firstOpen ? firstOpen.id : 'done';
+        } catch (e) {
+          W.error = e.message || 'Could not load setup.';
+        }
+        W.loading = false;
+        paint();
+      })();
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Public status page (#/status): works signed in or out.
+    // ---------------------------------------------------------------------------------
+    let statusPageTimer = null;
+    function renderStatusPage() {
+      const myGen = renderGen;
+      const labels = { operational: 'Operational', degraded: 'Degraded', down: 'Down', maintenance: 'Maintenance', pending: 'Waiting for first backup', unknown: 'Unknown' };
+      const headline = { operational: 'All systems operational', degraded: 'Some systems are slow', down: 'Service disruption', maintenance: 'Scheduled maintenance' };
+      let data = null;
+      let failed = false;
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        const overall = failed ? 'down' : data ? data.overall : 'pending';
+        app.innerHTML = `
+          ${topbar()}
+          <div class="shell status-shell">
+            <div class="status-hero status-${esc(overall)}">
+              <span class="status-dot"></span>
+              <div>
+                <h1>${failed ? "Can't reach the panel" : data ? esc(headline[data.overall] || 'Status') : 'Checking...'}</h1>
+                <p>${failed ? 'The server did not answer. It may be restarting; this page checks again every 30 seconds.' : data && data.message ? esc(data.message) : esc(brandName()) + ' status'}</p>
+              </div>
+            </div>
+            ${data ? `
+            <div class="panel status-list">
+              ${data.components.map(c => `<div class="status-row"><span>${esc(c.name)}</span><span class="status-pill status-${esc(c.status)}"><i></i>${esc(labels[c.status] || c.status)}</span></div>`).join('')}
+            </div>
+            <p class="hint status-meta">Last checked ${esc(new Date(data.checkedAt).toLocaleTimeString())}${data.lastBackupAt ? ` &middot; last backup ${esc(fmtDate(data.lastBackupAt))}` : ''}${data.eta ? ` &middot; expected back ${esc(new Date(data.eta).toLocaleString())}` : ''}</p>` : ''}
+          </div>`;
+        wireTopbarSignOut();
+      }
+
+      async function load() {
+        if (myGen !== renderGen) { clearInterval(statusPageTimer); return; }
+        try {
+          const res = await fetchWithTimeout(EDGE_BASE + '/public/status', { headers: { 'ngrok-skip-browser-warning': 'true' } }, 10000);
+          data = await res.json();
+          failed = !data || !data.components;
+        } catch (e) { failed = true; }
+        paint();
+      }
+
+      clearInterval(statusPageTimer);
+      paint();
+      load();
+      statusPageTimer = setInterval(load, 30000);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Settings > Health: errors, backups and alerts for whoever runs the panel.
+    // ---------------------------------------------------------------------------------
+    const healthState = { loaded: false, data: null, error: null, busy: false, showResolved: false };
+
+    function healthHtml() {
+      const H = healthState;
+      if (H.error) return `<div class="error-box"><span>${esc(H.error)}</span></div>`;
+      if (!H.data) return '<div class="dash-loading">Loading...</div>';
+      const d = H.data;
+      const errors = d.errors;
+      const open = (errors || []).filter(e => !e.resolvedAt);
+      const shown = H.showResolved ? (errors || []) : open;
+      const fmtSize = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round((b || 0) / 1024)) + ' KB';
+      return `
+        <div class="manage-section-head"><h2>Health</h2><p>Errors, backups and alerts. ${d.alerts.destination === 'operator' ? 'Alerts go to the webhook set in ALERT_WEBHOOK_URL.' : 'Alerts go to your studio webhook (Notifications) when "Something breaks" is ticked.'}</p></div>
+        <div class="health-grid">
+          <div class="strip-card"><div class="strip-label">Status</div><div class="strip-value health-${esc(d.status.overall)}">${esc({ operational: 'Operational', degraded: 'Degraded', down: 'Down', maintenance: 'Maintenance' }[d.status.overall] || d.status.overall)}</div></div>
+          <div class="strip-card"><div class="strip-label">Open errors</div><div class="strip-value">${errors ? open.length : '–'}</div></div>
+          <div class="strip-card"><div class="strip-label">Last backup</div><div class="strip-value" style="font-size:17px !important;">${d.backups[0] ? esc(fmtDate(d.backups[0].created_at)) : 'None yet'}</div></div>
+        </div>
+        <div class="panel" style="margin-top:16px;">
+          <div class="home-card-head" style="padding:0 0 12px;"><h2 style="font-size:15px;">Errors</h2>
+            <div style="display:flex;gap:8px;align-items:center;">
+              ${errors && errors.some(e => e.resolvedAt) ? `<button type="button" class="pp-linkbtn" id="healthToggleResolved">${H.showResolved ? 'Hide fixed' : 'Show fixed'}</button>` : ''}
+              ${open.length ? `<button type="button" class="btn btn-ghost btn-sm" id="healthResolveAll" ${H.busy ? 'disabled' : ''}>Mark all fixed</button>` : ''}
+            </div>
+          </div>
+          ${errors === null ? '<p class="hint">The error log needs a database update: run sql/upgrade.sql.</p>' : !shown.length ? '<div class="empty-note">No errors. Anything that breaks on the server or in someone\'s browser shows up here.</div>' : `
+          <div class="health-errors">${shown.map(e => `
+            <details class="health-error${e.resolvedAt ? ' resolved' : ''}">
+              <summary>
+                <span class="health-src">${esc(e.source)}</span>
+                <span class="health-msg">${esc(e.message)}</span>
+                <span class="health-count">${esc(e.count)}&times;</span>
+                <span class="health-when">${esc(fmtDate(e.lastSeenAt))}</span>
+              </summary>
+              <div class="health-detail">
+                ${Object.keys(e.context || {}).length ? `<div class="hint">${Object.entries(e.context).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(' &middot; ')}</div>` : ''}
+                ${e.stack ? `<pre>${esc(e.stack)}</pre>` : ''}
+                <div class="hint">First seen ${esc(fmtDate(e.firstSeenAt))}${e.resolvedAt ? ` &middot; marked fixed ${esc(fmtDate(e.resolvedAt))}` : ''}</div>
+                ${e.resolvedAt ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-resolve-error="${esc(e.id)}">Mark fixed</button>`}
+              </div>
+            </details>`).join('')}</div>`}
+        </div>
+        <div class="panel" style="margin-top:16px;">
+          <div class="home-card-head" style="padding:0 0 12px;"><h2 style="font-size:15px;">Backups</h2>${hasPermission('backups.manage') ? '<a class="pp-linkbtn" href="#/audit?tab=backups">Open backups</a>' : ''}</div>
+          <p class="hint" style="margin:0 0 12px;">Automatic every 6 hours. Kept for ${esc(d.retention.days)} days (at least the newest ${esc(d.retention.keepMin)}). You'll get an alert if none is taken for ${esc(d.retention.staleHours)} hours.</p>
+          ${d.backups.length ? `<div class="setup-list">${d.backups.slice(0, 5).map(b => `<div><strong>${esc(fmtDate(b.created_at))}</strong><span>${esc(b.trigger || 'manual')} &middot; ${esc(fmtSize(b.size_bytes))}</span></div>`).join('')}</div>` : '<div class="empty-note">No backups yet. The first one runs about a minute after the server starts.</div>'}
+        </div>
+        <div class="panel" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          ${hasPermission('security.manage') ? `<button type="button" class="btn btn-ghost btn-sm" id="healthTestAlert" ${H.busy ? 'disabled' : ''}>Send a test alert</button>` : ''}
+          ${hasPermission('roles.manage') ? '<button type="button" class="btn btn-ghost btn-sm" id="healthReopenSetup">Open the setup guide</button>' : ''}
+          <a class="btn btn-ghost btn-sm" href="#/status" target="_blank" rel="noopener">Public status page</a>
+        </div>`;
+    }
+
+    async function loadHealth(repaint) {
+      healthState.error = null;
+      try {
+        const json = await callHrData('get_health');
+        healthState.data = json.data;
+      } catch (e) { healthState.error = e.message; }
+      healthState.loaded = true;
+      repaint();
+    }
+
+    function wireHealth(repaint) {
+      const H = healthState;
+      if (!H.loaded) { H.loaded = true; loadHealth(repaint); }
+      const toggle = document.getElementById('healthToggleResolved');
+      if (toggle) toggle.addEventListener('click', () => { H.showResolved = !H.showResolved; repaint(); });
+      const resolveIds = async (ids) => {
+        H.busy = true; repaint();
+        try { await callHrData('resolve_error', { ids }); await loadHealth(() => { }); } catch (e) { toast(e.message, 'err'); }
+        H.busy = false; repaint();
+      };
+      document.querySelectorAll('[data-resolve-error]').forEach(b => b.addEventListener('click', () => resolveIds([b.dataset.resolveError])));
+      const all = document.getElementById('healthResolveAll');
+      if (all) all.addEventListener('click', () => resolveIds((H.data.errors || []).filter(e => !e.resolvedAt).map(e => e.id)));
+      const test = document.getElementById('healthTestAlert');
+      if (test) test.addEventListener('click', async () => {
+        H.busy = true; repaint();
+        try {
+          const json = await callHrData('send_test_alert');
+          toast(json.sent ? 'Test alert sent.' : 'No alert destination is set up. Add a webhook in Notifications or set ALERT_WEBHOOK_URL.', json.sent ? undefined : 'err');
+        } catch (e) { toast(e.message, 'err'); }
+        H.busy = false; repaint();
+      });
+      const reopen = document.getElementById('healthReopenSetup');
+      if (reopen) reopen.addEventListener('click', async () => {
+        try { await callHrData('reopen_setup'); } catch (e) { }
+        window.location.hash = '#/setup';
+      });
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Browser error reporting: uncaught errors go to the server's error log (scrubbed,
+    // deduplicated, at most a handful per page load).
+    // ---------------------------------------------------------------------------------
+    (function reportBrowserErrors() {
+      const sent = new Set();
+      let budget = 5;
+      const send = (message, stack, line) => {
+        if (!EDGE_BASE || budget <= 0) return;
+        const msg = String(message || '').slice(0, 500);
+        if (!msg || sent.has(msg) || /ResizeObserver loop|Script error\.?$/.test(msg)) return;
+        sent.add(msg);
+        budget -= 1;
+        try {
+          fetch(EDGE_BASE + '/public/client-error', {
+            method: 'POST',
+            keepalive: true,
+            headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+            body: JSON.stringify({ message: msg, stack: String(stack || '').slice(0, 3000), url: window.location.pathname, route: window.location.hash.split('?')[0], line })
+          }).catch(() => { });
+        } catch (e) { }
+      };
+      window.addEventListener('error', (e) => {
+        if (!e || !e.message) return;
+        const own = !e.filename || e.filename.indexOf(window.location.origin) === 0;
+        if (own) send(e.message, e.error && e.error.stack, e.lineno ? `${(e.filename || '').split('/').pop()}:${e.lineno}` : null);
+      });
+      window.addEventListener('unhandledrejection', (e) => {
+        const r = e && e.reason;
+        if (!r || r.code) return; // API errors with a code are handled by the page
+        send(r.message || String(r), r.stack, null);
+      });
+    })();
 
     function renderAccount() {
       const myGen = renderGen;

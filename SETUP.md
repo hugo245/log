@@ -22,10 +22,11 @@ If you only read one part, read **[What to change](#what-to-change)** and the
 10. [Step 8: Payments](#step-8-payments)
 11. [What to change](#what-to-change)
 12. [Go-live checklist](#go-live-checklist)
-13. [Updating an existing install](#updating-an-existing-install)
-14. [The Discord add-on](#the-discord-add-on)
-15. [Demo mode](#demo-mode)
-16. [Troubleshooting](#troubleshooting)
+13. [Keeping it healthy](#keeping-it-healthy)
+14. [Updating an existing install](#updating-an-existing-install)
+15. [The Discord add-on](#the-discord-add-on)
+16. [Demo mode](#demo-mode)
+17. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -126,13 +127,25 @@ build command is `npm install` and the start command is `npm start`.
    npm run stamp
    ```
 
-4. Upload `index.html`, `config.js`, `favicon.svg`, `sw.js`, `CNAME` (if used) and the `assets/`
-   folder to your static host. Nothing else needs to be public.
+4. Upload `index.html`, `config.js`, `favicon.svg`, `sw.js`, `manifest.webmanifest`, `CNAME` (if
+   used) and the `assets/` folder to your static host. Nothing else needs to be public.
+   (`npm run stamp` also rebuilds `manifest.webmanifest` with your studio's name and colour, so
+   people who install the panel as an app get your branding.)
 
 ## Step 5: First sign-in
 
 Open the website and sign in with the Roblox account (or Google email) you put in
 `OWNER_ROBLOX_IDS` / `OWNER_EMAILS`. You get the **Owner** role automatically.
+
+The first time an Owner signs in, a **setup guide** opens. It takes about three minutes:
+
+1. **Your studio**: name, logo and brand colour, with a live preview.
+2. **Who can sign in**: your Roblox group and minimum rank.
+3. **Payouts**: Robux and/or cash, which payout methods people can pick, and the DevEx rate.
+4. **Invite your team**: creates your first invite link, ready to copy.
+
+Every step can be skipped and changed later in Settings. To open the guide again, use
+Settings → Health → *Open the setup guide*.
 
 New people see a short welcome tour and accept the Terms of Service and Acceptable Use Policy
 the first time they sign in.
@@ -228,6 +241,32 @@ in Branding → Studio (it's used in the policies), and have your final text che
 - [ ] Settings → Roles: permissions are what you want (especially *Mark requests paid* and
       *View full bank transfer details*).
 - [ ] You signed in as a normal staff account once and checked what they see.
+- [ ] Settings → Health → *Send a test alert* reaches you (studio webhook, or `ALERT_WEBHOOK_URL`).
+- [ ] The public status page (`/#/status`) loads.
+
+---
+
+## Keeping it healthy
+
+Settings → **Health** is the operations page:
+
+- **Errors**: anything that breaks on the server or in someone's browser is logged, grouped
+  (one row per kind of error, with a count) and scrubbed of anything that looks like a token.
+  Mark them fixed once handled; if one comes back it reopens.
+- **Alerts**: a new error, or no backup for `BACKUP_STALE_HOURS` (default 14), sends an alert to
+  `ALERT_WEBHOOK_URL` (a Discord or Slack incoming webhook, for whoever runs the deployment).
+  Without it, alerts go to the studio webhook in Settings → Notifications when *Something
+  breaks* is ticked.
+- **Backups**: taken every 6 hours, kept for `BACKUP_RETENTION_DAYS` (default 30), and the newest
+  `BACKUP_KEEP_MIN` (default 10) are always kept.
+
+`/#/status` is a public status page (no sign-in needed) showing whether the panel, database and
+backups are working, plus any message you set in `app_settings.status_message`. Share it with
+your staff for "is it down or is it me?" moments.
+
+The panel can be **installed as an app** on phones and desktops (browser menu → *Install* or
+*Add to Home Screen*). Pages always load fresh from the server; with no connection people get
+a clear offline screen instead of a browser error.
 
 ---
 

@@ -34,6 +34,8 @@ if (studioLib.addon('discord')) {
     ok('Discord add-on: off (Discord linking, the bot and Recruitment are hidden)');
 }
 
+if (process.env.ALERT_WEBHOOK_URL && !/^https:\/\//.test(process.env.ALERT_WEBHOOK_URL)) bad('ALERT_WEBHOOK_URL must be an https:// webhook URL');
+
 console.log('\nSign-in');
 const providers = String(process.env.AUTH_PROVIDERS || 'roblox').split(',').map(x => x.trim()).filter(Boolean);
 ok(`providers: ${providers.join(', ')}`);

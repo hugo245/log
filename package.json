@@ -12,7 +12,7 @@
         "start:api": "node server.js",
         "start:bot": "node bot.js",
         "check": "node --check server.js && node --check bot.js && node scripts/check-config.js",
-        "stamp": "node scripts/stamp-assets.js",
+        "stamp": "node scripts/build-manifest.js && node scripts/stamp-assets.js",
         "test": "node --test test/*.test.js"
     },
     "dependencies": {

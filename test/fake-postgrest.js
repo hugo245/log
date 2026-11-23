@@ -33,7 +33,13 @@ function createFakePostgrest(seed) {
             const filters = parseFilters(url.searchParams);
             const hits = rows.filter(r => filters.every(f => match(r, f)));
             const wantsObject = String(req.headers.accept || '').includes('vnd.pgrst.object');
-            const send = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
+            const send = (status, data) => {
+                const headers = { 'Content-Type': 'application/json' };
+                // Like PostgREST: report the total when the client asks for a count.
+                if (/count=exact/.test(String(req.headers.prefer || ''))) headers['Content-Range'] = `${hits.length ? '0-' + (hits.length - 1) : '*'}/${hits.length}`;
+                res.writeHead(status, headers);
+                res.end(req.method === 'HEAD' ? undefined : JSON.stringify(data));
+            };
             const reply = (data) => {
                 if (wantsObject) {
                     if (data.length === 1) return send(200, data[0]);
@@ -45,6 +51,18 @@ function createFakePostgrest(seed) {
             if (req.method === 'POST') {
                 const input = JSON.parse(body || '[]');
                 const list = Array.isArray(input) ? input : [input];
+                // Upserts (Prefer: resolution=merge-duplicates) update the matching row, like Postgres.
+                if (/resolution=merge-duplicates/.test(String(req.headers.prefer || ''))) {
+                    const keys = (url.searchParams.get('on_conflict') || 'id').split(',');
+                    const merged = list.map(r => {
+                        const hit = rows.find(row => keys.every(k => r[k] != null && String(row[k]) === String(r[k])));
+                        if (hit) return Object.assign(hit, r);
+                        const row = { created_at: new Date().toISOString(), ...r };
+                        rows.push(row);
+                        return row;
+                    });
+                    return reply(merged);
+                }
                 const created = list.map(r => {
                     const row = { created_at: new Date().toISOString(), ...r };
                     if (row.id == null && !['payment_requests', 'hr_sessions'].includes(table)) {

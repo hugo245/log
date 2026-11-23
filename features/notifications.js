@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const mailer = require('../lib/mailer');
 
 const KINDS = ['payment', 'request', 'task', 'contract', 'revenue', 'security', 'account', 'general'];
-const WEBHOOK_EVENTS = ['request_submitted', 'request_approved', 'request_paid', 'run_closed', 'security_changed', 'budget_warning', 'contract_signed', 'revenue_recorded'];
+const WEBHOOK_EVENTS = ['request_submitted', 'request_approved', 'request_paid', 'run_closed', 'security_changed', 'budget_warning', 'contract_signed', 'revenue_recorded', 'system_alert'];
 
 module.exports = function notifications(ctx) {
     const { supabase, studio, requirePermission, logAudit, security } = ctx;

@@ -161,7 +161,7 @@ const PERMISSIONS = [
 const legalText = require('./lib/legal');
 const license = require('./lib/license');
 // Feature modules loaded from features/ (notifications is always loaded first).
-const FEATURE_MODULES = ['plan', 'people', 'revenue', 'contracts', 'tax', 'finance'];
+const FEATURE_MODULES = ['plan', 'people', 'revenue', 'contracts', 'tax', 'finance', 'setup'];
 const TOS_CONTENT = legalText.TERMS;
 const AUP_CONTENT = legalText.AUP;
 
@@ -4194,10 +4194,15 @@ const notifier = require('./features/notifications')(featureCtx);
 featureCtx.notify = notifier.notify;
 featureCtx.studioEvent = notifier.studioEvent;
 const mfaModule = require('./features/mfa')(featureCtx);
-const EXTRA_ACTIONS = { ...notifier.actions, ...mfaModule.actions };
+const monitorModule = require('./features/monitor')(featureCtx);
+featureCtx.captureError = monitorModule.capture;
+const EXTRA_ACTIONS = { ...notifier.actions, ...mfaModule.actions, ...monitorModule.actions };
+monitorModule.routes(app);
+monitorModule.start();
 for (const name of FEATURE_MODULES) {
     const mod = require('./features/' + name)(featureCtx);
     Object.assign(EXTRA_ACTIONS, mod.actions || {});
+    if (mod.routes) mod.routes(app);
     if (mod.start) mod.start();
 }
 for (const [name, def] of Object.entries(EXTRA_ACTIONS)) if (def.money) SECURITY_MONEY_ACTIONS.add(name);
@@ -4233,6 +4238,7 @@ app.post('/hr-data', async (req, res) => {
         if (!/^(get_|list_|load_)/.test(action)) invalidateAfterAction(action);
     } catch (err) {
         console.error('[hr-data] unhandled error on action', (req.body && req.body.action) || 'unknown', ':', err && err.stack ? err.stack : err);
+        monitorModule.capture(err, { source: 'server', action });
         if (!res.headersSent) res.status(500).json({ ok: false, error: 'server_error' });
     }
 });
@@ -9266,10 +9272,12 @@ async function handleHrData(req, res) {
 
 process.on('unhandledRejection', (reason) => {
     console.error('[server] unhandled promise rejection:', reason && reason.stack ? reason.stack : reason);
+    monitorModule.capture(reason instanceof Error ? reason : new Error(String(reason)), { source: 'server', action: 'background' });
 });
 
 process.on('uncaughtException', (err) => {
     console.error('[server] uncaught exception:', err && err.stack ? err.stack : err);
+    monitorModule.capture(err, { source: 'server', action: 'crash' });
 });
 
 app.listen(PORT, () => {

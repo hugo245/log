@@ -21,6 +21,7 @@ a go-live checklist and troubleshooting.
 | **Teams & games** | Teams, skills, game stats from Roblox, task boards, deadlines, reviews, reminders. |
 | **Staff** | Staff database, warnings, bans, payout holds, onboarding with Terms / Acceptable Use. |
 | **Admin** | Branding, roles and permissions with hierarchy, audit log with revert, backups, announcements, security levels, session management. |
+| **Operations** | First-run setup guide, error log with alerts, backup retention, public status page, installable app with an offline screen. |
 | **Legal** | Public Terms of Service, Privacy Policy and Acceptable Use pages, with built-in text you can replace. |
 
 ### Add-ons
