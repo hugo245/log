@@ -191,6 +191,15 @@ create table if not exists public.error_events (
     resolved_at     timestamptz
 );
 create index if not exists error_events_last_seen_idx on public.error_events (last_seen_at desc);
+-- Payment run periods are calendar dates, not timestamps.
+do $$ begin
+    if (select data_type from information_schema.columns where table_schema = 'public' and table_name = 'payment_runs' and column_name = 'period_start') <> 'date' then
+        alter table public.payment_runs
+            alter column period_start type date using period_start::date,
+            alter column period_end type date using period_end::date,
+            alter column pay_date type date using pay_date::date;
+    end if;
+end $$;
 -- <<< features schema
 
 -- 3. Keep the database closed to the public key -----------------------------------------------

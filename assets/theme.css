@@ -1590,3 +1590,38 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .health-error summary { grid-template-columns: minmax(0, 1fr) auto; }
   .health-src, .health-when { display: none; }
 }
+
+/* Sidebar header: brand on the left, theme toggle and notifications on the right. */
+.shell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 12px 12px 14px;
+}
+.shell-top .shell-brand { min-width: 0; padding: 2px 4px; }
+.shell-tools { flex-shrink: 0; gap: 4px; }
+.shell-tools .icon-btn,
+.shell-tools .notif-bell { width: 32px; height: 32px; border-radius: var(--radius-sm); }
+.shell-theme svg { width: 16px; height: 16px; }
+.mobile-header-tools { display: flex; gap: 6px; align-items: center; }
+
+/* Banners with an action: the button keeps its own size instead of taking the whole row
+   (the old global "primary buttons are full width" rule squashed the text into a sliver). */
+.warn-box, .error-box, .confirm-box { flex-wrap: wrap; gap: 12px; }
+.warn-box > div, .warn-box > span, .error-box > span, .confirm-box > .txt { flex: 1 1 260px; min-width: 0; }
+.warn-box .btn, .error-box .btn, .confirm-box .btn,
+.warn-box a.btn, .error-box a.btn { width: auto; flex: 0 0 auto; white-space: nowrap; }
+
+/* Phones: the Settings tab strip scrolls sideways inside itself, never the page. */
+@media (max-width: 900px) {
+  .manage-layout { min-width: 0; max-width: 100%; }
+  .manage-layout > * { min-width: 0; max-width: 100%; }
+  .manage-side { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .manage-side::-webkit-scrollbar { display: none; }
+}
+
+/* Long permission names wrap instead of pushing the page sideways on phones. */
+.perm-chip { white-space: normal; max-width: 100%; overflow-wrap: anywhere; line-height: 1.35; }
+.perm-chip-wrap { min-width: 0; max-width: 100%; }
+.task-game-icon.placeholder { display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--accent); }

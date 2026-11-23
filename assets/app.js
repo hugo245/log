@@ -128,7 +128,7 @@
     }
     function toggleTheme() {
       setTheme(getTheme() === 'dark' ? 'light' : 'dark');
-      document.querySelectorAll('#themeToggleBtn').forEach(btn => {
+      document.querySelectorAll('#themeToggleBtn, [data-theme-toggle]').forEach(btn => {
         const svg = btn.querySelector('svg');
         if (svg) svg.outerHTML = themeToggleIcon(); else btn.innerHTML = themeToggleIcon();
         btn.setAttribute('aria-label', getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
@@ -364,6 +364,12 @@
       }
     }
 
+    // Calendar dates (YYYY-MM-DD) shown without timezone shifting, e.g. "03 Nov 2026".
+    function fmtDay(v) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || ''));
+      if (!m) return v ? fmtDate(v) : '';
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+    }
     function fmtDate(ts) {
       const d = new Date(ts);
       return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1225,7 +1231,7 @@
     // Identical read requests fired at the same moment (common when several widgets render at
     // once) share one network call instead of hitting the API repeatedly.
     const inflightReads = new Map();
-    const READ_ACTION = /^(get_|list_|load_)/;
+    const READ_ACTION = /^(get_|list_|load_)|_get_|^rs_my_|^tax_get_|_overview$|_detail$/;
 
     async function callHrData(action, payload) {
       const body = JSON.stringify({ action, payload: payload || {} });
@@ -2234,14 +2240,7 @@
     function closeCmdk() { cmdkOpen = false; paintCmdk(); }
 
     document.addEventListener('keydown', (e) => {
-      const typing = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '') || (e.target && e.target.isContentEditable);
-      if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        cmdkOpen ? closeCmdk() : openCmdk();
-      } else if (e.key === '/' && !typing && !cmdkOpen && !umTarget) {
-        e.preventDefault();
-        openCmdk();
-      } else if (e.key === 'Escape') {
+      if (e.key === 'Escape') {
         if (cmdkOpen) closeCmdk();
         else if (umTarget) closeUserMenu();
       }
@@ -3609,7 +3608,7 @@
       <div class="shell-top">
         ${shellBrand()}
         <div class="shell-tools">
-          <button type="button" class="shell-search" id="shellSearchBtn">${navIcon('search', 16)}<span>Search</span><kbd>${/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'} K</kbd></button>
+          <button type="button" class="icon-btn shell-theme" data-theme-toggle title="Toggle dark mode" aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
           ${locked ? '' : bellButtonHtml('notifBellBtn')}
         </div>
       </div>
@@ -3622,7 +3621,6 @@
             ${navIcon('chevron', 16)}
           </summary>
           <div class="shell-menu">
-            <button type="button" id="themeToggleBtn">${themeToggleIcon()}<span>${getTheme() === 'dark' ? 'Light mode' : 'Dark mode'}</span></button>
             <a href="#/account"><span class="shell-menu-pad"></span><span>Account &amp; security</span></a>
             ${locked ? '' : `<button type="button" id="replayTourBtn"><span class="shell-menu-pad"></span><span>Take the tour</span></button>`}
             <a href="#/terms"><span class="shell-menu-pad"></span><span>Terms</span></a>
@@ -3639,8 +3637,8 @@
       <button type="button" class="icon-btn" id="shellMenuBtn" aria-label="Open menu" aria-controls="appSidebar" aria-expanded="false">${navIcon('menu', 20)}</button>
       ${shellBrand()}
       <div class="mobile-header-tools">
+        <button type="button" class="icon-btn" data-theme-toggle aria-label="${getTheme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}">${themeToggleIcon()}</button>
         ${locked ? '' : bellButtonHtml('notifBellBtnMobile')}
-        <button type="button" class="icon-btn" id="shellSearchBtnMobile" aria-label="Search">${navIcon('search', 18)}</button>
       </div>
     </header>
     <div class="shell-scrim" id="shellScrim"></div>${securityStrip()}`;
@@ -3808,10 +3806,7 @@
         const label = themeBtn.querySelector('span');
         if (label) label.textContent = getTheme() === 'dark' ? 'Light mode' : 'Dark mode';
       }));
-      ['shellSearchBtn', 'shellSearchBtnMobile'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener('click', () => openCmdk());
-      });
+      document.querySelectorAll('[data-theme-toggle]').forEach(b => b.addEventListener('click', toggleTheme));
       const sidebar = document.getElementById('appSidebar');
       const scrim = document.getElementById('shellScrim');
       const menuBtn = document.getElementById('shellMenuBtn');
@@ -5363,13 +5358,13 @@
         <div class="home-card">
           <div class="home-card-head"><h2>Payment runs</h2><a class="pp-linkbtn" href="#/runs">Open runs</a></div>
           ${openRun
-            ? `<div class="home-row"><div class="home-row-main"><div class="home-row-title">${esc(openRun.label)}</div><div class="home-row-meta"><span>${esc(openRun.period_start)} to ${esc(openRun.period_end)}</span><span>Open, collecting approved work</span></div></div><div class="home-row-actions"><a class="btn btn-ghost btn-sm" href="#/runs">Manage</a></div></div>`
+            ? `<div class="home-row"><div class="home-row-main"><div class="home-row-title">${esc(openRun.label)}</div><div class="home-row-meta"><span>${esc(fmtDay(openRun.period_start))} to ${esc(fmtDay(openRun.period_end))}</span><span>Open, collecting approved work</span></div></div><div class="home-row-actions"><a class="btn btn-ghost btn-sm" href="#/runs">Manage</a></div></div>`
             : '<div class="home-note">No run is open, so approved work is not being collected anywhere. Open one from the runs page.</div>'}
           ${runs.filter(r => r.status !== 'open').slice(0, 4).map(r => `
             <div class="home-row">
               <div class="home-row-main">
                 <div class="home-row-title">${esc(r.label)}</div>
-                <div class="home-row-meta"><span>${esc(r.period_start)} to ${esc(r.period_end)}</span><span>${esc(r.status)}</span></div>
+                <div class="home-row-meta"><span>${esc(fmtDay(r.period_start))} to ${esc(fmtDay(r.period_end))}</span><span>${esc(r.status)}</span></div>
               </div>
             </div>`).join('')}
         </div>
@@ -5608,7 +5603,7 @@
               <div class="home-row-main">
                 <div class="home-row-title">${esc(r.label)}</div>
                 <div class="home-row-meta">
-                  <span>${esc(r.period_start)} to ${esc(r.period_end)}</span>
+                  <span>${esc(fmtDay(r.period_start))} to ${esc(fmtDay(r.period_end))}</span>
                   <span>${esc(runStatusLabel(r.status))}</span>
                   <span>${r.totals.lines} ${r.totals.lines === 1 ? 'item' : 'items'}</span>
                   ${r.totals.lines ? `<span>${r.totals.paidLines} paid</span>` : ''}
@@ -6187,9 +6182,9 @@
           place: 'right'
         },
         {
-          find: () => document.querySelector('.shell-search'),
-          title: 'Search jumps anywhere',
-          body: 'Press Ctrl K (or Cmd K) to find any page, person or setting without hunting through the menu.',
+          find: () => document.querySelector('.shell-account summary'),
+          title: 'Your account lives here',
+          body: 'Two-factor sign-in, your devices, the policies and signing out are all in this menu.',
           place: 'right'
         }
       ];
@@ -7164,15 +7159,15 @@
       let chartRange = '56';
 
       const METRICS = {
-        paid_usd: { label: 'Paid amount (${esc(cashCode())} equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r) },
+        paid_usd: { label: `Paid amount (${cashCode()} equiv.)`, unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r) },
         paid_usd_only: { label: 'Paid amount ($ requests only)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid' && r.currency === 'USD', value: r => Number(r.payment) || 0 },
         paid_robux: { label: 'Paid amount (Robux requests only)', unit: 'robux', dateField: 'paidAt', match: r => r.status === 'paid' && r.currency === 'ROBUX', value: r => Number(r.payment) || 0 },
-        pending_usd: { label: 'Pending amount (${esc(cashCode())} equiv.)', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending', value: r => usdEquivalent(r) },
+        pending_usd: { label: `Pending amount (${cashCode()} equiv.)`, unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending', value: r => usdEquivalent(r) },
         pending_usd_only: { label: 'Pending amount ($ requests only)', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending' && r.currency === 'USD', value: r => Number(r.payment) || 0 },
         pending_robux: { label: 'Pending amount (Robux requests only)', unit: 'robux', dateField: 'createdAt', match: r => r.status === 'pending' && r.currency === 'ROBUX', value: r => Number(r.payment) || 0 },
         tasks_completed: { label: 'Tasks completed', unit: 'count', dateField: 'paidAt', match: r => r.status === 'paid', value: () => 1 },
         requests_submitted: { label: 'Requests submitted', unit: 'count', dateField: 'createdAt', match: () => true, value: () => 1 },
-        avg_payment: { label: 'Average payment (${esc(cashCode())} equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r), isAverage: true }
+        avg_payment: { label: `Average payment (${cashCode()} equiv.)`, unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r), isAverage: true }
       };
 
       const BREAKDOWN_DIMS = {
@@ -7681,7 +7676,7 @@
         <div class="table-scroll">
           ${breakdownRows.length ? `
           <table class="an-table">
-            <thead><tr><th>${esc(GROUP_LABELS[groupBy].charAt(0).toUpperCase() + GROUP_LABELS[groupBy].slice(1))}</th><th class="num-cell">Total (${esc(cashCode())} equiv.)</th><th class="num-cell">Robux</th><th class="num-cell">USD</th><th class="num-cell">Requests</th></tr></thead>
+            <thead><tr><th>${esc(GROUP_LABELS[groupBy].charAt(0).toUpperCase() + GROUP_LABELS[groupBy].slice(1))}</th><th class="num-cell">Total (${esc(cashCode())} equiv.)</th><th class="num-cell">Robux</th><th class="num-cell">${esc(cashCode())}</th><th class="num-cell">Requests</th></tr></thead>
             <tbody>
               ${breakdownRows.map(b => `<tr><td>${esc(b.label)}</td><td class="num-cell"><strong>${fmtUsd(b.amount)}</strong></td><td class="num-cell">${b.robux ? fmtRobux(b.robux) : '-'}</td><td class="num-cell">${b.usd ? fmtUsd(b.usd) : '-'}</td><td class="num-cell">${b.count}</td></tr>`).join('')}
             </tbody>
@@ -8014,6 +8009,7 @@
       let pendingNotifFocus = landingQuery.get('focus') === 'notifications';
       let pendingTaxFocus = landingQuery.get('focus') === 'tax';
       let myRevenueShares = null;
+      let myRevenueSharesLoad = null;
       if (pendingPayoutFocus || pendingNotifFocus || pendingTaxFocus) history.replaceState(null, '', '#/my');
 
       function focusPayout() {
@@ -8399,7 +8395,10 @@
             revHost.innerHTML = `<div class="preview-label">Your revenue shares</div><ul class="rs-shares">${list.map(x => `<li><span>${esc(x.game)}</span><b>${esc(x.percent)}%</b><span class="hint" style="margin:0;">since ${esc(fmtDate(x.since))}</span></li>`).join('')}</ul><p class="hint" style="margin:10px 0 0;">Each month's share shows up in your requests once revenue is recorded.</p>`;
           };
           if (myRevenueShares) paintRev(myRevenueShares);
-          else callHrData('rs_my_shares').then(j => { myRevenueShares = j.data || []; paintRev(myRevenueShares); }).catch(() => { });
+          else {
+            myRevenueSharesLoad = myRevenueSharesLoad || callHrData('rs_my_shares').then(j => { myRevenueShares = j.data || []; }).catch(() => { myRevenueShares = []; });
+            myRevenueSharesLoad.then(() => { const host = document.getElementById('myRevenuePanel'); if (host) paintRev(myRevenueShares); });
+          }
         }
         if (pendingNotifFocus && npHost) { pendingNotifFocus = false; setTimeout(() => { npHost.scrollIntoView({ behavior: 'smooth', block: 'start' }); npHost.classList.add('flash-focus'); }, 80); }
         if (pendingPayoutFocus && !methodLoading) { pendingPayoutFocus = false; setTimeout(focusPayout, 60); }
@@ -8858,6 +8857,34 @@
       let addingBroadcast = false;
       let addBroadcastError = null;
       let newBroadcastType = 'global';
+
+      // Each Settings tab loads only the data it shows, the first time it's opened.
+      const loadedForTab = new Set();
+      function loadOnce(key, fn) { if (loadedForTab.has(key)) return Promise.resolve(); loadedForTab.add(key); return Promise.resolve(fn()).catch(() => { }); }
+      function loadForTab(tab) {
+        if (tab === 'access') {
+          if (canManageGroups) { loadOnce('groups', loadGroups); loadOnce('ignore', loadIgnoreEligibility); }
+          if (canManageBaseAccess) { loadOnce('baseGroups', loadBaseAccessGroups); if (discordOn()) loadOnce('baseServers', loadBaseAccessDiscordServers); }
+        } else if (tab === 'roles') {
+          if (canManageRoles) loadOnce('roles', loadRoles).then(() => loadOnce('assignments', loadAssignments));
+        } else if (tab === 'games') {
+          if (canManageRate) loadOnce('usdMin', loadUsdMinimum);
+        } else if (tab === 'rates') {
+          if (canManageRate) loadOnce('rateBands', loadRateBands);
+          if (canManageOnboarding) loadOnce('teams', loadTeamsData);
+        } else if (tab === 'teams' || tab === 'onboarding') {
+          if (canManageOnboarding) { loadOnce('teams', loadTeamsData); loadOnce('roles', loadRoles); }
+          if (tab === 'onboarding') { loadOnce('apiKey', loadRobloxGroupApiKeyStatus); if (discordOn()) loadOnce('obGroup', loadOnboardingGroupConfig); }
+        } else if (tab === 'recruitment') {
+          if (canManageOnboarding && featureOn('recruitment')) {
+            loadOnce('roles', loadRoles); loadOnce('positions', loadPositions);
+            loadOnce('recruitCfg', loadRecruitmentConfig); loadOnce('approvalCfg', loadApprovalConfig);
+          }
+        } else if (tab === 'broadcasts') {
+          if (canManageBroadcasts) loadOnce('broadcasts', loadBroadcastsData);
+          if (canManageOnboarding) loadOnce('teams', loadTeamsData);
+        }
+      }
 
       function paint() {
         const subsectionsByTab = {
@@ -9586,7 +9613,7 @@
           const repaintHealth = () => { const host = document.getElementById('healthMount'); if (host) { host.innerHTML = healthHtml(); wireHealth(repaintHealth); } };
           wireHealth(repaintHealth);
         }
-        document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', async () => { if (manageTab === 'branding' && b.dataset.manageTab !== 'branding' && brandingState.dirty && !(await askConfirm('You have unsaved branding changes. Leave without saving?'))) return; manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); if (manageTab === 'rates' && !rateBandsLoaded) loadRateBands(); }));
+        document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', async () => { if (manageTab === 'branding' && b.dataset.manageTab !== 'branding' && brandingState.dirty && !(await askConfirm('You have unsaved branding changes. Leave without saving?'))) return; manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); loadForTab(manageTab); }));
 
         const bandSaveBtn = document.getElementById('bandSaveBtn');
         if (bandSaveBtn) bandSaveBtn.addEventListener('click', async () => {
@@ -10357,21 +10384,7 @@
       }
 
       paint();
-      if (canManageGroups) { loadGroups(); loadIgnoreEligibility(); }
-      if (canManageBaseAccess) { loadBaseAccessGroups(); if (discordOn()) loadBaseAccessDiscordServers(); }
-      if (canManageRoles) {
-        loadRoles().then(loadAssignments);
-      } else if (canManageOnboarding) {
-        loadRoles();
-      }
-      if (canManageOnboarding) {
-        loadTeamsData();
-        loadRobloxGroupApiKeyStatus();
-        if (featureOn('recruitment')) { loadPositions(); loadRecruitmentConfig(); loadApprovalConfig(); }
-        if (discordOn()) loadOnboardingGroupConfig();
-      }
-      if (canManageRate) { loadUsdMinimum(); loadRateBands(); }
-      if (canManageBroadcasts) loadBroadcastsData();
+      loadForTab(manageTab);
     }
 
     // ---------------------------------------------------------------------------------
@@ -11615,7 +11628,8 @@ Either side can end the contract in writing. Milestones already approved are sti
       }
       el.innerHTML = taxPanelHtml();
       wire(el);
-      if (!S.loaded) load();
+      // Only one load at a time, however often the page repaints while it's in flight.
+      if (!S.loaded && !S.loading) { S.loading = true; load().finally(() => { S.loading = false; }); }
     }
 
     function csvCell(v) {
@@ -13276,7 +13290,7 @@ Either side can end the contract in writing. Milestones already approved are sti
       let loadError = null;
       let busy = false;
 
-      function money(task) {
+      function taskAmount(task) {
         if (!task.payment) return null;
         return task.currency === 'USD'
           ? money(task.payment, 'USD')
@@ -13299,7 +13313,7 @@ Either side can end the contract in writing. Milestones already approved are sti
         <div class="task-page-head">
           ${data.game && data.game.icon_url
               ? `<img src="${esc(data.game.icon_url)}" alt="" class="task-game-icon">`
-              : `<div class="task-game-icon placeholder" aria-hidden="true"></div>`}
+              : `<div class="task-game-icon placeholder" aria-hidden="true">${esc(String((data.game && data.game.name) || (data.team && data.team.name) || t.title || '?').split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase())}</div>`}
           <div style="flex:1;min-width:0;">
             <div class="hint">${data.team ? `<span class="pp-dot" style="background:${safeColor(data.team.color, 'var(--muted)')};display:inline-block;margin-right:6px;"></span>${esc(data.team.name)}` : 'Task'}${data.game ? ` &middot; ${esc(data.game.name)}` : ''}</div>
             <h1 style="margin:4px 0 8px;">${esc(t.title)}</h1>
@@ -13313,7 +13327,7 @@ Either side can end the contract in writing. Milestones already approved are sti
 
         <div class="task-facts">
           <div><span class="hint">Deadline</span><b>${t.due_at ? esc(fmtDateTime(t.due_at)) : 'No deadline'}</b></div>
-          <div><span class="hint">Pays</span><b>${money(t) ? esc(money(t)) : 'Nothing set'}</b></div>
+          <div><span class="hint">Pays</span><b>${taskAmount(t) ? esc(taskAmount(t)) : 'Nothing set'}</b></div>
           <div><span class="hint">Assigned to</span><b>${t.assigned_to_user_id ? userLink(t.assigned_to_user_id, t.assigned_to_username) : 'Nobody'}</b></div>
           <div><span class="hint">${done ? 'Finished' : 'Set by'}</span><b>${done ? `${esc(t.completed_by || 'someone')}, ${esc(relTime(t.completed_at))}` : esc(t.created_by || 'unknown')}</b></div>
         </div>
@@ -13324,18 +13338,18 @@ Either side can end the contract in writing. Milestones already approved are sti
         ${t.status === 'open' && t.review_note ? `<div class="pp-banner neutral" style="margin-bottom:18px;"><strong>Sent back:</strong> ${esc(t.review_note)}</div>` : ''}
         ${t.status === 'done' && t.approved_by ? `<div class="confirm-box" style="margin-bottom:18px;"><div class="icon">&#10003;</div><div class="txt"><strong>Approved by ${esc(t.approved_by)}</strong><span>${t.review_note ? esc(t.review_note) : 'Signed off, so it can be paid.'}</span></div></div>` : ''}
 
-        ${money(t) ? (t.payment_request_id
-              ? `<div class="confirm-box" style="margin-bottom:18px;"><div class="icon">&#10003;</div><div class="txt"><strong>Payment logged</strong><span>${esc(money(t))} for ${esc(t.assigned_to_username || 'them')}. Follow it on the payments dashboard.</span></div></div>`
+        ${taskAmount(t) ? (t.payment_request_id
+              ? `<div class="confirm-box" style="margin-bottom:18px;"><div class="icon">&#10003;</div><div class="txt"><strong>Payment logged</strong><span>${esc(taskAmount(t))} for ${esc(t.assigned_to_username || 'them')}. Follow it on the payments dashboard.</span></div></div>`
               : done
-                ? `<div class="filter-notice" style="margin-bottom:18px;">Finished and worth ${esc(money(t))}.${data.canManage && canSubmitRequests() ? '' : ' A lead can log the payment from here.'}</div>`
-                : `<div class="filter-notice" style="margin-bottom:18px;">Pays ${esc(money(t))} once it's finished and a lead logs it.</div>`) : ''}
+                ? `<div class="filter-notice" style="margin-bottom:18px;">Finished and worth ${esc(taskAmount(t))}.${data.canManage && canSubmitRequests() ? '' : ' A lead can log the payment from here.'}</div>`
+                : `<div class="filter-notice" style="margin-bottom:18px;">Pays ${esc(taskAmount(t))} once it's finished and a lead logs it.</div>`) : ''}
 
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           ${data.isMine && !done && t.status !== 'review' && t.status !== 'cancelled' ? `<button type="button" class="btn btn-primary btn-sm" id="taskSubmitBtn" ${busy ? 'disabled' : ''}>${busy ? 'Sending...' : 'Mark it done'}</button>` : ''}
           ${t.status === 'review' && data.canManage && !data.isMine ? `<button type="button" class="btn btn-ok btn-sm" id="taskApproveBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : 'Approve it'}</button><button type="button" class="btn btn-ghost btn-sm" id="taskSendBackBtn" ${busy ? 'disabled' : ''}>Send it back</button>` : ''}
           ${done && data.canManage ? `<button type="button" class="btn btn-ghost btn-sm" id="taskToggleBtn" ${busy ? 'disabled' : ''}>${busy ? 'Saving...' : 'Reopen this task'}</button>` : ''}
           ${done && t.payment && !t.payment_request_id && data.canManage && canSubmitRequests()
-              ? `<button type="button" class="btn btn-ok btn-sm" id="taskPayBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : `Pay ${esc(money(t))}`}</button>` : ''}
+              ? `<button type="button" class="btn btn-ok btn-sm" id="taskPayBtn" ${busy ? 'disabled' : ''}>${busy ? 'Working...' : `Pay ${esc(taskAmount(t))}`}</button>` : ''}
           ${data.team ? `<a class="btn btn-ghost btn-sm" href="#/teams?team=${encodeURIComponent(data.team.id)}&tab=deadlines">All ${esc(data.team.name)} deadlines</a>` : ''}
           ${data.game && data.game.roblox_place_id ? `<a class="btn btn-ghost btn-sm" href="https://www.roblox.com/games/${esc(data.game.roblox_place_id)}" target="_blank" rel="noopener">Open the game</a>` : ''}
         </div>
@@ -13359,7 +13373,7 @@ Either side can end the contract in writing. Milestones already approved are sti
         const payBtn = document.getElementById('taskPayBtn');
         if (payBtn) payBtn.addEventListener('click', async () => {
           const t = data.task;
-          if (!(await askConfirm(`Log ${money(t)} for ${t.assigned_to_username} as a pending payment?\n\nIt'll show up on the payments dashboard to be paid out from there.`))) return;
+          if (!(await askConfirm(`Log ${taskAmount(t)} for ${t.assigned_to_username} as a pending payment?\n\nIt'll show up on the payments dashboard to be paid out from there.`))) return;
           busy = true; paint();
           try {
             const r = await callHrData('pay_team_task', { id: t.id });
@@ -13473,8 +13487,8 @@ Either side can end the contract in writing. Milestones already approved are sti
       let busy = false;
       let formOpen = false;
 
-      function money(r) {
-        return r.currency === 'USD' ? `${money(r.payment, 'USD')}` : `R$ ${Number(r.payment).toLocaleString()}`;
+      function claimAmount(r) {
+        return r.currency === 'USD' ? money(r.payment, 'USD') : `R$ ${Number(r.payment).toLocaleString()}`;
       }
 
       function stateChip(r) {
@@ -13530,7 +13544,7 @@ Either side can end the contract in writing. Milestones already approved are sti
             <div class="task-title">${esc(r.taskName || r.task_name || 'Work')}</div>
             <div class="task-meta">
               ${stateChip(r)}
-              <span class="pp-tag">${esc(money(r))}</span>
+              <span class="pp-tag">${esc(claimAmount(r))}</span>
               ${r.game ? `<span>${esc(r.game)}</span>` : ''}
               <span>${esc(relTime(r.created_at || r.createdAt))}</span>
             </div>
@@ -13549,7 +13563,7 @@ Either side can end the contract in writing. Milestones already approved are sti
             <div class="task-title">${esc(r.taskName || r.task_name || 'Work')}</div>
             <div class="task-meta">
               ${stateChip(r)}
-              <span class="pp-tag">${esc(money(r))}</span>
+              <span class="pp-tag">${esc(claimAmount(r))}</span>
               ${r.statusNote || r.status_note ? `<span>${esc(r.statusNote || r.status_note)}</span>` : ''}
               <span>${esc(relTime(r.created_at || r.createdAt))}</span>
             </div>
