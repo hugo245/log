@@ -1625,3 +1625,33 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .perm-chip { white-space: normal; max-width: 100%; overflow-wrap: anywhere; line-height: 1.35; }
 .perm-chip-wrap { min-width: 0; max-width: 100%; }
 .task-game-icon.placeholder { display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--accent); }
+
+/* =========================================================================================
+   Version mismatch (deploy in progress)
+   ========================================================================================= */
+.version-card { max-width: 480px; text-align: center; }
+.version-card h2 { margin: 6px 0 8px; }
+.version-card p { color: var(--ink-soft); margin: 0 auto 18px; max-width: 40ch; }
+.sc-art { width: 240px; max-width: 80%; height: auto; display: block; margin: 0 auto 6px; }
+.sc-cable { stroke: var(--line-strong); stroke-width: 7; stroke-linecap: round; }
+.sc-body { fill: var(--surface-3); stroke: var(--ink); stroke-width: 2.5; }
+.sc-pin, .sc-socket { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+.sc-spark path { stroke: #E9A23B; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.sc-spark { animation: sc-flicker 1.6s steps(1) infinite; transform-origin: 180px 75px; }
+@keyframes sc-flicker {
+  0%, 100% { opacity: 1; }
+  8% { opacity: .2; }
+  12% { opacity: 1; }
+  46% { opacity: .5; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .sc-spark { animation: none; } }
+.version-meta {
+  display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 12px;
+  padding: 8px 14px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); font-size: 12.5px;
+}
+.version-meta b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.version-sep { width: 4px; height: 4px; border-radius: 50%; background: var(--line-strong); }
+.version-status { display: flex; justify-content: center; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+.version-status .boot-mark { width: 16px; height: 16px; border-width: 2px; }

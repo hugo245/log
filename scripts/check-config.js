@@ -62,6 +62,16 @@ try {
     bad('could not read studio.config.json: ' + e.message);
 }
 
+console.log('\nVersion');
+try {
+    const version = require('../package.json').version;
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    const m = /<meta name="app-version" content="([^"]*)">/.exec(html);
+    if (!m) bad('index.html has no app-version tag: run npm run stamp');
+    else if (m[1] !== version) bad(`index.html is stamped ${m[1]} but package.json is ${version}: run npm run stamp`);
+    else ok(`website and API both on ${version}`);
+} catch (e) { bad('could not read the version: ' + e.message); }
+
 console.log('\nconfig.js (frontend)');
 try {
     const src = fs.readFileSync(path.join(root, 'config.js'), 'utf8');

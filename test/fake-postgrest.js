@@ -28,6 +28,12 @@ function createFakePostgrest(seed) {
         req.on('end', () => {
             const url = new URL(req.url, 'http://x');
             const table = url.pathname.replace('/rest/v1/', '');
+            // Simulate a database that hasn't had sql/upgrade.sql applied yet.
+            if ((tables.__missing || []).includes(table)) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ code: 'PGRST205', message: `Could not find the table 'public.${table}' in the schema cache` }));
+                return;
+            }
             log.push(`${req.method} ${table} ${url.search}`);
             const rows = tables[table] || (tables[table] = []);
             const filters = parseFilters(url.searchParams);

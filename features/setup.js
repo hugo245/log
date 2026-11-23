@@ -12,19 +12,28 @@ module.exports = function setup(ctx) {
     const canRunSetup = (session) => hasPermission(session, 'roles.manage') && hasPermission(session, 'settings.manage_branding');
 
     async function state() {
-        const [settingsRes, groupsRes, serversRes, linksRes, rolesRes, teamsRes, roleAssignRes] = await Promise.all([
+        const [settingsRes, groupsRes, serversRes, linksRes, rolesRes, teamsRes, roleAssignRes, requestsRes] = await Promise.all([
             supabase.from('app_settings').select('devex_rate, setup_completed_at, setup_completed_by, setup_skipped, branding').eq('id', 1).maybeSingle(),
             supabase.from('base_access_groups').select('id, roblox_group_id, min_rank, name'),
             supabase.from('base_access_discord_servers').select('id'),
             supabase.from('onboarding_links').select('token', { count: 'exact', head: true }),
             supabase.from('roles').select('id, name, hierarchy').order('hierarchy', { ascending: false }),
             supabase.from('teams').select('id, name').order('name', { ascending: true }),
-            supabase.from('user_role_assignments').select('id', { count: 'exact', head: true })
+            supabase.from('user_role_assignments').select('id', { count: 'exact', head: true }),
+            supabase.from('payment_requests').select('id', { count: 'exact', head: true })
         ]);
         const s = settingsRes.data || {};
         const cfg = studio.get();
         const saved = (s.branding && typeof s.branding === 'object') ? s.branding : {};
         const groups = groupsRes.data || [];
+        // A studio that is clearly already running (people paid, roles handed out, or a sign-in
+        // group in place) never needs the first-run guide: mark it done once, for good.
+        const established = (requestsRes.count || 0) > 0 || (roleAssignRes.count || 0) > 1 || groups.length > 0;
+        if (!settingsRes.error && !s.setup_completed_at && established) {
+            const at = new Date().toISOString();
+            const { error } = await supabase.from('app_settings').update({ setup_completed_at: at, setup_completed_by: 'Existing studio', setup_skipped: true }).eq('id', 1);
+            if (!error) { s.setup_completed_at = at; s.setup_completed_by = 'Existing studio'; s.setup_skipped = true; }
+        }
         return {
             available: !settingsRes.error || !/setup_/.test(settingsRes.error.message || ''),
             completed: !!s.setup_completed_at,

@@ -76,14 +76,37 @@
 
     // Fetches branding, site status, games and the DevEx rate in one round trip.
     async function fetchBootstrap() {
-      const res = await fetchWithTimeout(EDGE_BASE + '/public/bootstrap', { headers: { 'ngrok-skip-browser-warning': 'true' } }, 12000);
+      const res = await fetchWithTimeout(EDGE_BASE + '/public/bootstrap', { headers: { 'ngrok-skip-browser-warning': 'true' }, cache: 'no-store' }, 12000);
       const json = await res.json().catch(() => null);
+      // The server answered but doesn't speak this version's language (an older build).
+      if (res.status === 404 || (res.ok && (!json || !json.config))) { const e = new Error('server_outdated'); e.code = 'server_outdated'; throw e; }
       if (!json || !json.config) throw new Error('bootstrap_failed');
+      noteServerVersion(json.version || null, json.schema);
       BOOTSTRAP = json;
       STUDIO = mergeBranding(mergeBranding(DEFAULT_BRANDING, DEPLOY.branding), json.config);
       try { localStorage.setItem(BOOTSTRAP_CACHE_KEY, JSON.stringify({ config: json.config, games: json.games, devexRate: json.devexRate, savedAt: Date.now() })); } catch (e) { }
       applyBranding();
       return json;
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Release versions. The website (index.html <meta name="app-version">, written by
+    // `npm run stamp`) and the API (X-App-Version header, /public/bootstrap) must be on the
+    // same version. During a deploy, or if the server reports no version at all (an older
+    // build), the panel shows a maintenance screen and reloads itself once both match.
+    // ---------------------------------------------------------------------------------
+    const FRONTEND_VERSION = (document.querySelector('meta[name="app-version"]') || {}).content || '';
+    const versionState = { server: undefined, schemaOk: true, schemaPending: 0, showing: false, timer: null };
+
+    function versionMismatch() {
+      if (!FRONTEND_VERSION || FRONTEND_VERSION === 'dev') return false; // local development
+      return versionState.server !== FRONTEND_VERSION || versionState.schemaOk === false;
+    }
+
+    function noteServerVersion(version, schema) {
+      versionState.server = version;
+      if (schema) { versionState.schemaOk = schema.ok !== false; versionState.schemaPending = schema.pending || 0; }
+      if (authReady && versionMismatch() && !versionState.showing) renderVersionScreen();
     }
 
     function fetchWithTimeout(url, options, ms) {
@@ -713,6 +736,7 @@
           services: stParseList(d.services)
         };
       } catch (e) {
+        if (e && e.code === 'server_outdated') return { ...failed, unreachable: false, outdated: true };
         return failed;
       }
     }
@@ -1263,6 +1287,8 @@
         err.code = 'network_error';
         throw err;
       }
+      const serverVersion = res.headers.get('X-App-Version');
+      if (FRONTEND_VERSION && FRONTEND_VERSION !== 'dev' && serverVersion !== FRONTEND_VERSION) noteServerVersion(serverVersion || null);
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) {
         if (res.status === 401) { clearToken(); isHrAuthed = false; hrUsername = ''; hrRoles = []; hrPermissions = []; hrMaxHierarchy = 0; }
@@ -3169,6 +3195,7 @@
     // returning user waits for exactly one network round trip before seeing their page.
     async function initAuth() {
       const [siteState] = await Promise.all([checkSiteState(), verifySession(), loadAppData()]);
+      if (siteState.outdated || (!siteState.unreachable && versionMismatch())) { authReady = true; renderVersionScreen(); return; }
       if (siteState.unreachable && !configError) { renderUnreachableScreen(); return; }
       if (siteState.closed) { renderClosedScreen(); return; }
       const blocking = siteState.servicesDown || siteState.indev;
@@ -3195,6 +3222,76 @@
       idle(() => {
         if (hasPermission('dashboard.view') || hasPermission('recruitment.analytics') || hasPermission('teams.view')) ensureChartJs().catch(() => { });
       });
+    }
+
+    // Unplugged cable with a spark: the "short circuit" shown while versions don't match.
+    const SHORT_CIRCUIT_SVG = `
+      <svg class="sc-art" viewBox="0 0 320 150" fill="none" aria-hidden="true">
+        <path class="sc-cable" d="M4 104c34 0 40-30 74-30h34"/>
+        <rect class="sc-body" x="110" y="58" width="44" height="32" rx="7"/>
+        <path class="sc-pin" d="M154 66h14M154 82h14"/>
+        <path class="sc-cable" d="M316 46c-34 0-40 30-74 30h-24"/>
+        <rect class="sc-body" x="196" y="58" width="22" height="32" rx="6"/>
+        <path class="sc-socket" d="M196 66h-6M196 82h-6"/>
+        <g class="sc-spark">
+          <path d="M178 44l-6 14h8l-7 15"/>
+          <path d="M183 96l4 9M172 99l-3 9M190 54l7-6M166 52l-6-6"/>
+        </g>
+      </svg>`;
+
+    // Maintenance screen for a release in progress. Polls the API and the site's own
+    // index.html; reloads as soon as the website and server are on the same version.
+    function renderVersionScreen() {
+      versionState.showing = true;
+      clearInterval(versionState.timer);
+      const serverLabel = versionState.server ? 'v' + versionState.server : 'not reporting a version';
+      const dbPending = versionState.server === FRONTEND_VERSION && versionState.schemaOk === false;
+      app.innerHTML = `
+    <div class="closed-shell version-shell">
+      <div class="lock-card version-card">
+        ${SHORT_CIRCUIT_SVG}
+        <h2>${dbPending ? 'Finishing an update' : 'Updating ' + esc(brandName())}</h2>
+        <p>${dbPending
+          ? 'The new version is live but its database update hasn\'t been applied yet. This page comes back by itself once it has.'
+          : 'A new version is being rolled out and the website and server are briefly out of step. This page reloads by itself in a moment.'}</p>
+        <div class="version-meta">
+          <span>Website <b>v${esc(FRONTEND_VERSION)}</b></span>
+          <span class="version-sep"></span>
+          <span>Server <b>${esc(serverLabel)}</b></span>
+          ${dbPending ? `<span class="version-sep"></span><span>Database <b>update pending</b></span>` : ''}
+        </div>
+        <div class="version-status" id="versionStatus"><span class="boot-mark"></span><span>Checking again every 10 seconds</span></div>
+        <button type="button" class="btn btn-ghost btn-sm" id="versionRetry">Check now</button>
+      </div>
+    </div>`;
+      const retry = document.getElementById('versionRetry');
+      if (retry) retry.addEventListener('click', () => checkVersionsAgain(true));
+      versionState.timer = setInterval(() => checkVersionsAgain(false), 10000);
+    }
+
+    async function checkVersionsAgain(manual) {
+      const status = document.getElementById('versionStatus');
+      if (manual && status) status.lastChild.textContent = 'Checking...';
+      let server = null, schemaOk = true, siteVersion = null;
+      try {
+        const res = await fetchWithTimeout(EDGE_BASE + '/public/bootstrap', { headers: { 'ngrok-skip-browser-warning': 'true' }, cache: 'no-store' }, 10000);
+        const j = await res.json().catch(() => null);
+        server = (j && j.version) || res.headers.get('X-App-Version') || null;
+        schemaOk = !(j && j.schema && j.schema.ok === false);
+      } catch (e) { }
+      try {
+        // The newest published website, bypassing every cache.
+        const res = await fetch(window.location.pathname + '?v=' + Date.now(), { cache: 'no-store' });
+        const html = await res.text();
+        const m = /<meta name="app-version" content="([^"]*)"/.exec(html);
+        siteVersion = m ? m[1] : null;
+      } catch (e) { }
+      if (server && server === FRONTEND_VERSION && schemaOk) { window.location.reload(); return; }
+      // A newer website has been published that matches the server: load it.
+      if (server && siteVersion && siteVersion === server && siteVersion !== FRONTEND_VERSION) { window.location.reload(); return; }
+      versionState.server = server;
+      versionState.schemaOk = schemaOk;
+      if (status) status.lastChild.textContent = manual ? 'Still updating. Checking again every 10 seconds' : 'Checking again every 10 seconds';
     }
 
     function renderUnreachableScreen() {
@@ -3276,6 +3373,7 @@
 
     function route() {
       if (!authReady) return;
+      if (versionState.showing) return; // the maintenance screen stays until versions match
       renderGen++;
       if (cmdkOpen) closeCmdk();
       if (umTarget) closeUserMenu();
@@ -12031,11 +12129,20 @@ Either side can end the contract in writing. Milestones already approved are sti
     // After sign-in: owners who haven't finished setup get sent to it, once per browser session.
     async function maybeOfferSetup() {
       if (!isHrAuthed || !hasPermission('roles.manage') || !hasPermission('settings.manage_branding')) return;
-      try { if (sessionStorage.getItem(SETUP_CHECKED_KEY)) return; sessionStorage.setItem(SETUP_CHECKED_KEY, '1'); } catch (e) { }
+      // Opened automatically at most once per owner per browser (and once per session as a
+      // fallback): after that it lives in Settings > Health, so redeploys never bring it back.
+      const offeredKey = 'sp_setup_offered_' + (hrUserId || 'me');
+      try {
+        if (sessionStorage.getItem(SETUP_CHECKED_KEY) || localStorage.getItem(offeredKey)) return;
+        sessionStorage.setItem(SETUP_CHECKED_KEY, '1');
+      } catch (e) { }
       try {
         const json = await callHrData('get_setup_state');
         const d = json.data || {};
-        if (d.canRun && d.available !== false && !d.completed && ['#/home', '#/', ''].includes(currentPath())) window.location.hash = '#/setup';
+        if (d.canRun && d.available !== false && !d.completed && ['#/home', '#/', ''].includes(currentPath())) {
+          try { localStorage.setItem(offeredKey, String(Date.now())); } catch (e) { }
+          window.location.hash = '#/setup';
+        }
       } catch (e) { }
     }
 

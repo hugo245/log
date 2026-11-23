@@ -279,6 +279,30 @@ a clear offline screen instead of a browser error.
    Owner and Admin roles the new **Edit branding** permission.
 3. Restart the API, run `npm run stamp`, and upload the website files.
 
+### What people see during an update
+
+The website and the API each know their release version (the `version` in `package.json`;
+`npm run stamp` writes it into `index.html`). While they differ, for example when the website
+has been published but the API is still deploying, or the API is an older build that doesn't
+report a version at all, everyone sees a short **"Updating"** maintenance screen instead of a
+half-working panel. The same screen says **"Finishing an update"** if the new API is live but
+`sql/upgrade.sql` hasn't been run yet. It checks every 10 seconds and reloads by itself once
+everything matches. People already signed in keep their session.
+
+To ship your own change, bump the version so both sides move together:
+
+```bash
+npm run release
+```
+
+That bumps the patch version (use `npm run release -- minor` for bigger releases), rebuilds the
+app manifest and re-stamps `index.html`. Then deploy the API and the website. `npm run check`
+warns if the website and the API are stamped with different versions.
+
+The first-run setup guide is stored in the database, so redeploying never brings it back. It
+opens on its own at most once per owner, and never for a studio that already has people paid,
+roles handed out or a sign-in group. Reopen it any time from Settings → Health.
+
 Other SQL files:
 
 | File | What it does |

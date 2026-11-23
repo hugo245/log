@@ -128,3 +128,32 @@ test('scrubbing removes credentials from error text', () => {
     assert.ok(!/abc|zzz|eyJhbGci/.test(out), out);
     assert.strictEqual(_internals.fingerprintOf('server', 'id 12 missing', 'at a (/x/server.js:1:2)'), _internals.fingerprintOf('server', 'id 99 missing', 'at a (/x/server.js:5:9)'));
 });
+
+test('every response carries the release version, and bootstrap reports version and database state', async () => {
+    const pkg = require('../package.json');
+    const r = await fetch(`${base}/public/bootstrap`, { headers: { Origin: 'http://localhost:5500' } });
+    assert.strictEqual(r.headers.get('x-app-version'), pkg.version);
+    assert.match(String(r.headers.get('access-control-expose-headers')), /X-App-Version/i);
+    const b = await r.json();
+    assert.strictEqual(b.version, pkg.version);
+    assert.strictEqual(b.schema.ok, true);
+    assert.ok(!JSON.stringify(b.schema).includes('error_events'), 'table names are not public');
+    const ping = await fetch(`${base}/ping`).then(x => x.json());
+    assert.strictEqual(ping.version, pkg.version);
+});
+
+test('the website and package.json agree on the version', () => {
+    const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
+    const m = /<meta name="app-version" content="([^"]*)">/.exec(html);
+    assert.ok(m, 'index.html has an app-version meta tag (run npm run stamp)');
+    assert.strictEqual(m[1], require('../package.json').version);
+});
+
+test('an established studio never gets the first-run guide', async () => {
+    db.tables.app_settings[0].setup_completed_at = null;
+    db.tables.app_settings[0].setup_skipped = false;
+    db.tables.payment_requests = [{ id: 'REQ_1', roblox_user_id: 9, payment: 10, currency: 'USD', status: 'paid' }];
+    const r = await call('get_setup_state', {}, OWNER);
+    assert.strictEqual(r.body.data.completed, true);
+    assert.strictEqual(db.tables.app_settings[0].setup_completed_by, 'Existing studio');
+});

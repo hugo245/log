@@ -1,6 +1,6 @@
 {
     "name": "studio-panel",
-    "version": "1.0.0",
+    "version": "2.1.0",
     "private": true,
     "description": "White-label staff panel for Roblox studios: sign-in with Roblox or Google, roles, work logging, approvals, payouts, teams and recruitment.",
     "main": "server.js",
@@ -13,7 +13,8 @@
         "start:bot": "node bot.js",
         "check": "node --check server.js && node --check bot.js && node scripts/check-config.js",
         "stamp": "node scripts/build-manifest.js && node scripts/stamp-assets.js",
-        "test": "node --test test/*.test.js"
+        "test": "node --test test/*.test.js",
+        "release": "node scripts/release.js"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.45.0",

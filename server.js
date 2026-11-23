@@ -545,12 +545,18 @@ app.set('trust proxy', process.env.TRUST_PROXY != null ? (Number(process.env.TRU
 
 const ALLOWED_ORIGINS = [APP_ORIGIN, ...String(process.env.EXTRA_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean)];
 
+// The release version. The website compares it with its own and shows a maintenance
+// screen until both sides of a deploy are on the same version.
+const APP_VERSION = require('./package.json').version;
+app.use((req, res, next) => { res.setHeader('X-App-Version', APP_VERSION); next(); });
+
 app.use(security.securityHeaders);
 app.use(compression({ threshold: 1024 }));
 app.use(cors({
     origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin) ? (origin || false) : false),
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning'],
+    exposedHeaders: ['X-App-Version'],
     maxAge: 600
 }));
 
@@ -580,8 +586,40 @@ if (!DISCORD_ADDON) {
 }
 
 app.get('/ping', (req, res) => {
-    res.status(200).json({ ok: true, time: new Date().toISOString() });
+    res.status(200).json({ ok: true, version: APP_VERSION, time: new Date().toISOString() });
 });
+
+// ---------------------------------------------------------------------------
+// Database readiness. Every column and table that sql/upgrade.sql adds is read from that
+// file and checked against the database. Until they all exist the website shows its
+// maintenance screen, so nobody uses a half-updated panel after a deploy.
+// ---------------------------------------------------------------------------
+const SCHEMA_REQUIREMENTS = (() => {
+    const need = {};
+    try {
+        const sql = require('fs').readFileSync(require('path').join(__dirname, 'sql', 'upgrade.sql'), 'utf8');
+        for (const m of sql.matchAll(/alter table public\.(\w+)\s+add column if not exists (\w+)/gi)) (need[m[1]] = need[m[1]] || new Set()).add(m[2]);
+        for (const m of sql.matchAll(/create table if not exists public\.(\w+)/gi)) need[m[1]] = need[m[1]] || new Set();
+    } catch (e) { console.warn('[schema] could not read sql/upgrade.sql:', e.message); }
+    return Object.entries(need).map(([table, cols]) => ({ table, columns: [...cols] }));
+})();
+let schemaState = { ok: true, missing: [], checkedAt: 0 };
+async function checkSchema(force) {
+    const fresh = Date.now() - schemaState.checkedAt < (schemaState.ok ? 10 * 60 * 1000 : 30 * 1000);
+    if (!force && fresh) return schemaState;
+    const missing = [];
+    await Promise.all(SCHEMA_REQUIREMENTS.map(async ({ table, columns }) => {
+        const { error } = await supabase.from(table).select(columns.length ? columns.join(',') : '*').limit(1);
+        // A network blip isn't a missing table: only count definite "doesn't exist" answers.
+        if (error && /does not exist|schema cache|Could not find|42P01|42703|PGRST20[45]/i.test(`${error.message} ${error.code}`)) missing.push(columns.length ? `${table} (${columns.join(', ')})` : table);
+    }));
+    const wasOk = schemaState.ok;
+    schemaState = { ok: missing.length === 0, missing: missing.sort(), checkedAt: Date.now() };
+    if (!schemaState.ok && (wasOk || force)) console.warn(`[schema] database needs sql/upgrade.sql - missing: ${schemaState.missing.join('; ')}`);
+    if (schemaState.ok && !wasOk) console.log('[schema] database is up to date');
+    return schemaState;
+}
+checkSchema(true).catch(() => { });
 
 const AVATAR_TTL_MS = 60 * 60 * 1000;
 const avatarCache = new Map();
@@ -3981,6 +4019,7 @@ const publicBootstrapCache = new TtlCache({ ttlMs: 10 * 1000, max: 2 });
 const PUBLIC_SITE_FIELDS = ['closed', 'indev', 'services_down', 'status_message', 'status_started_at', 'status_eta', 'status_timeline', 'services', 'devex_rate'];
 
 async function buildPublicBootstrap() {
+    await checkSchema().catch(() => { });
     const [settingsRes, gamesRes] = await Promise.all([
         supabase.from('app_settings').select('*').eq('id', 1).maybeSingle(),
         supabase.from('games').select('id, name').order('name', { ascending: true })
@@ -4007,6 +4046,8 @@ async function buildPublicBootstrap() {
         games: (gamesRes.data || []).map(g => ({ id: g.id, name: g.name })),
         push: { publicKey: PUSH_CONFIGURED ? VAPID_PUBLIC_KEY : null },
         auth: { providers: AUTH_PROVIDERS.slice(), testRoles: providerEnabled('test') ? TEST_ROLES.slice() : [] },
+        version: APP_VERSION,
+        schema: { ok: schemaState.ok, pending: schemaState.missing.length },
         serverTime: new Date().toISOString()
     };
 }
