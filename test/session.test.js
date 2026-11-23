@@ -28,9 +28,11 @@ test.before(async () => {
     await new Promise(r => db.server.listen(0, r));
     const port = 4100 + Math.floor(Math.random() * 500);
     base = `http://127.0.0.1:${port}`;
-    api = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    // Discord is a licensed add-on: run with a real (test-signed) Pro + Discord licence.
+    const lic = require('./helpers/test-license').licensedServer({ tier: 'pro', addons: ['discord'] });
+    api = spawn(process.execPath, [...lic.execArgv, path.join(__dirname, '..', 'server.js')], {
         env: {
-            ...process.env, PORT: String(port), APP_ORIGIN: 'http://localhost:5500',
+            ...process.env, ...lic.env, PORT: String(port), APP_ORIGIN: 'http://localhost:5500',
             SUPABASE_URL: `http://127.0.0.1:${db.server.address().port}`, SUPABASE_SERVICE_ROLE_KEY: 'test',
             ROBLOX_CLIENT_ID: '1', ROBLOX_CLIENT_SECRET: 'x', ROBLOX_REDIRECT_URI: 'http://localhost/cb', SESSION_SECRET: 'x'.repeat(40),
             DISCORD_CLIENT_ID: '1', DISCORD_CLIENT_SECRET: 'x', DISCORD_REDIRECT_URI: 'http://localhost/dcb',

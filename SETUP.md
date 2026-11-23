@@ -25,8 +25,9 @@ If you only read one part, read **[What to change](#what-to-change)** and the
 13. [Keeping it healthy](#keeping-it-healthy)
 14. [Updating an existing install](#updating-an-existing-install)
 15. [The Discord add-on](#the-discord-add-on)
-16. [Demo mode](#demo-mode)
-17. [Troubleshooting](#troubleshooting)
+16. [Licences](#licences)
+17. [Demo mode](#demo-mode)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -333,6 +334,47 @@ bot doesn't start. Nobody is ever asked to link Discord.
 starts the bot when the add-on is on. Add-ons can't be switched on from inside the panel.
 
 ---
+
+## Licences
+
+Licence keys decide which plan a deployment runs: **Core**, or **Pro** (analytics, payment runs,
+revenue share, contracts, tax forms, accounting exports, budgets, own cash currency), plus add-ons
+(**Discord**: linking, the bot and Recruitment). Keys are checked by the API when it starts, offline:
+nothing calls home.
+
+**Making keys (seller only, on your own computer).** Signing needs `license-private.pem`, which
+must never be shared or committed (it's git-ignored).
+
+```bash
+npm run license:demo
+```
+One command: creates the signing key the first time, issues a **Pro key with every add-on** for
+30 days on any domain, and commits + pushes `lib/license.js` if it changed. Options:
+`-- --to "Acme Games" --days 14 --domain panel.acme.gg --no-push`.
+
+```bash
+node scripts/license.js issue --to "Acme Games" --domain panel.acme.gg --tier pro --addon discord --months 12
+```
+A normal key for a buyer: `--tier core|pro`, repeat `--domain` for several hosts (`*.acme.gg` for
+subdomains), `--months` or `--expires 2027-12-31`. Every key you issue is also written to
+`issued-licenses.log` (git-ignored) so you have a record.
+
+```bash
+node scripts/license.js inspect <key>
+```
+Shows what a key contains and whether it's valid.
+
+**Using a key (buyer).** Set `LICENSE_KEY` on the API (e.g. Render → Environment) and restart.
+Settings → Plan shows the plan, add-ons and expiry. Discord also needs `ADDON_DISCORD=true`.
+
+**Good to know:**
+- Without a key, a licensed build runs as Core. Set your own `LICENSE_KEY` before deploying the
+  commit that adds your public key.
+- The domain is checked against `APP_ORIGIN`; `localhost` always passes for testing.
+- Expiry is checked when the API starts, so an expired key takes effect at the next restart.
+- Back up `license-private.pem`. If it's lost, every key has to be re-issued with a new one.
+- This deters casual sharing. Anyone with the source can remove the check, so pair it with a licence
+  agreement, or host the panel for buyers yourself.
 
 ## Demo mode
 

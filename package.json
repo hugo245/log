@@ -14,7 +14,8 @@
         "check": "node --check server.js && node --check bot.js && node scripts/check-config.js",
         "stamp": "node scripts/build-manifest.js && node scripts/stamp-assets.js",
         "test": "node --test test/*.test.js",
-        "release": "node scripts/release.js"
+        "release": "node scripts/release.js",
+        "license:demo": "node scripts/license.js demo"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.45.0",
