@@ -33,14 +33,14 @@ insert into public.roles (name, hierarchy, link_only, permissions) values
   "settings.manage_onboarding","settings.manage_branding","roles.manage","staff.view_database","staff.moderate","broadcasts.manage",
   "audit.view","audit.revert","backups.manage","recruitment.view","recruitment.respond","recruitment.manage",
   "recruitment.signoff","recruitment.finalise","recruitment.analytics","payouts.view_bank_details",
-  "security.manage","teams.view","teams.manage"]'::jsonb),
+  "security.manage","teams.view","teams.manage","revenue.manage","contracts.manage","tax.view"]'::jsonb),
 ('Admin', 90, true, '["dashboard.view","dashboard.mark_paid","dashboard.export","dashboard.submit_request",
   "settings.manage_games","settings.manage_rate","settings.manage_groups","settings.manage_base_access",
   "settings.manage_onboarding","settings.manage_branding","roles.manage","staff.view_database","staff.moderate","broadcasts.manage",
   "audit.view","backups.manage","recruitment.view","recruitment.manage","recruitment.signoff",
-  "recruitment.finalise","recruitment.analytics","security.manage","teams.view","teams.manage"]'::jsonb),
+  "recruitment.finalise","recruitment.analytics","security.manage","teams.view","teams.manage","revenue.manage","contracts.manage"]'::jsonb),
 ('Manager', 50, true, '["dashboard.view","dashboard.mark_paid","dashboard.export","dashboard.submit_request",
-  "staff.view_database","staff.moderate","teams.view","teams.manage","recruitment.view","audit.view"]'::jsonb),
+  "staff.view_database","staff.moderate","teams.view","teams.manage","recruitment.view","audit.view","contracts.manage"]'::jsonb),
 ('Lead', 30, true, '["dashboard.view","dashboard.submit_request","staff.view_database","teams.view","teams.manage"]'::jsonb),
 ('Staff', 10, true, '["teams.view"]'::jsonb);
 

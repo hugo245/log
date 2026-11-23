@@ -4,3 +4,7 @@
 node_modules/
 .DS_Store
 *.log
+
+# Licence signing key (seller only, never commit)
+license-private.pem
+*.pem

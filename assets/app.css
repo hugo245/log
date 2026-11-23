@@ -375,6 +375,8 @@ input[type=url],
 input[type=search],
 input[type=date],
 input[type=datetime-local],
+input[type=month],
+input[type=tel],
 textarea,
 select {
   width: 100%;

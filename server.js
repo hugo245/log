@@ -152,10 +152,16 @@ const PERMISSIONS = [
     'payouts.view_bank_details',
     'security.manage',
     'teams.view',
-    'teams.manage'
+    'teams.manage',
+    'revenue.manage',
+    'contracts.manage',
+    'tax.view'
 ];
 
 const legalText = require('./lib/legal');
+const license = require('./lib/license');
+// Feature modules loaded from features/ (notifications is always loaded first).
+const FEATURE_MODULES = ['plan', 'people', 'revenue', 'contracts'];
 const TOS_CONTENT = legalText.TERMS;
 const AUP_CONTENT = legalText.AUP;
 
@@ -259,6 +265,15 @@ function blockedAsOwnMoney(res, session, row, what) {
     });
     res.status(403).json({ ok: false, error: 'own_payment' });
     return true;
+}
+
+// Human-readable amount in the studio's currencies. Stored "USD" means the cash currency.
+const CASH_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$' };
+function cashCurrency() { return (studio.get().payments && studio.get().payments.cashCurrency) || 'USD'; }
+function money(amount, currency) {
+    const n = Number(amount) || 0;
+    if (currency === 'ROBUX') return `R$ ${Math.round(n).toLocaleString('en-US')}`;
+    return `${CASH_SYMBOLS[cashCurrency()] || '$'}${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // Amounts must be finite, positive and below the studio's per-request ceiling.
@@ -1615,14 +1630,16 @@ async function legacyNotifyTaskAssigned(task, teamId) {
 
 async function notifyPaymentOutcome(request, outcome, note) {
     if (!request || !request.roblox_user_id) return false;
-    const amount = request.currency === 'ROBUX'
-        ? `R$ ${Number(request.payment || 0).toLocaleString()}`
-        : `$${Number(request.payment || 0).toFixed(2)}`;
+    const amount = money(request.payment, request.currency);
     const text = outcome === 'paid'
-        ? `Your ${studioName()} payment for "${request.task_name}" (${amount}) has been marked as paid.`
-        : `Your ${studioName()} payment request for "${request.task_name}" (${amount}) was rejected.${note ? `\nReason: ${note}` : ''}`;
+        ? `Your payment for "${request.task_name}" (${amount}) has been sent.`
+        : `Your payment request for "${request.task_name}" (${amount}) was turned down.${note ? `\nReason: ${note}` : ''}`;
     try {
-        return await notifyModeratedUser(request.roblox_user_id, text);
+        return await notifyModeratedUser(request.roblox_user_id, text, {
+            kind: 'payment',
+            title: outcome === 'paid' ? `Paid: ${amount}` : 'Payment request turned down',
+            link: '#/my'
+        });
     } catch (e) {
         return false;
     }
@@ -2817,11 +2834,14 @@ async function writeBan({ robloxUserId, robloxUsername, reason, bannedBy, durati
     return { expiresAt: temporaryUnsupported ? null : (row.expires_at || null), temporaryUnsupported };
 }
 
-async function notifyModeratedUser(robloxUserId, text) {
-    const discordUserId = await getLinkedDiscordUserId(robloxUserId);
-    if (!discordUserId) return false;
-    await sendDiscordDM(discordUserId, text);
-    return true;
+// Tells one person something: in-app notification, email if they have one, and a Discord
+// DM when the Discord add-on is on. See features/notifications.js.
+async function notifyModeratedUser(robloxUserId, text, opts) {
+    try {
+        return await notifier.notify(robloxUserId, { body: text, ...(opts || {}) });
+    } catch (e) {
+        return false;
+    }
 }
 
 async function getWarnCount(robloxUserId) {
@@ -4145,6 +4165,32 @@ function invalidateAfterAction(action) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Feature modules (features/*.js). Each one gets the helpers below and returns its own
+// actions, so new areas of the product don't keep growing this file.
+//   actions[name] = { run({ req, res, session, payload }), feature?: 'name', money?: true }
+// ---------------------------------------------------------------------------
+const featureCtx = {
+    supabase, studio, security, license, APP_ORIGIN,
+    hasPermission, requirePermission, logAudit, logSecurityEvent, publicError,
+    generateRequestId, isOwnMoney, blockedAsOwnMoney, blockedByAccountHold, amountOk, pickCurrency,
+    resolveGameId, getDevexRate, runBackup, BACKUP_TABLES, money, cashCurrency,
+    discordDM: DISCORD_ADDON ? async (userId, text) => {
+        const discordUserId = await getLinkedDiscordUserId(userId);
+        if (discordUserId) await sendDiscordDM(discordUserId, text);
+    } : null
+};
+const notifier = require('./features/notifications')(featureCtx);
+featureCtx.notify = notifier.notify;
+featureCtx.studioEvent = notifier.studioEvent;
+const EXTRA_ACTIONS = { ...notifier.actions };
+for (const name of FEATURE_MODULES) {
+    const mod = require('./features/' + name)(featureCtx);
+    Object.assign(EXTRA_ACTIONS, mod.actions || {});
+    if (mod.start) mod.start();
+}
+for (const [name, def] of Object.entries(EXTRA_ACTIONS)) if (def.money) SECURITY_MONEY_ACTIONS.add(name);
+
 app.post('/hr-data', async (req, res) => {
     const action = req.body && req.body.action;
     if (typeof action !== 'string' || !/^[a-z_]{2,64}$/.test(action)) {
@@ -4160,7 +4206,7 @@ app.post('/hr-data', async (req, res) => {
         delete req.body.payload.discordRoleId;
         delete req.body.payload.discordUrl;
     }
-    const feature = featureForAction(action);
+    const feature = (EXTRA_ACTIONS[action] && EXTRA_ACTIONS[action].feature) || featureForAction(action);
     if (action === 'list_my_broadcasts' && !studio.feature('broadcasts')) { res.json({ ok: true, data: [] }); return; }
     if (feature && !studio.feature(feature)) {
         res.status(404).json({ ok: false, error: 'feature_disabled' });
@@ -4189,6 +4235,9 @@ async function handleHrData(req, res) {
     const payload = (req.body && req.body.payload) || {};
 
     if (!(await securityGate(res, session, action))) return;
+
+    const extra = Object.prototype.hasOwnProperty.call(EXTRA_ACTIONS, action) ? EXTRA_ACTIONS[action] : null;
+    if (extra) { await extra.run({ req, res, session, payload }); return; }
 
     if (action === 'submit_request') {
         if (!requirePermission(res, session, 'dashboard.submit_request')) return;
@@ -4266,6 +4315,11 @@ async function handleHrData(req, res) {
             revert: { type: 'delete_payment_request', id }
         });
         runPaymentMethodConversionSweep({ robloxUserId: recipientUserId });
+        notifier.notify(recipientUserId, {
+            kind: 'payment', title: 'Work logged for you',
+            body: `${session.roblox_username} logged "${taskName}" (${money(payment, currency)}) for you. It's waiting for approval.`,
+            link: '#/my'
+        });
         res.json({ ok: true, id });
         return;
     }
@@ -4314,6 +4368,7 @@ async function handleHrData(req, res) {
             targetUserId: session.roblox_user_id, targetUsername: session.roblox_username,
             details: { id, taskName, payment: amount, currency }
         });
+        notifier.studioEvent('request_submitted', `New payment request from ${session.roblox_username}: "${taskName}" for ${money(amount, currency)}.`, '#/dashboard');
         res.json({ ok: true, id });
         return;
     }
@@ -4409,7 +4464,8 @@ async function handleHrData(req, res) {
             });
             try {
                 await notifyModeratedUser(row.roblox_user_id,
-                    `Your payment request for "${row.task_name}" was turned down.${note ? `\nReason: ${note}` : ''}`);
+                    `Your payment request for "${row.task_name}" was turned down.${note ? `\nReason: ${note}` : ''}`,
+                    { kind: 'request', title: 'Payment request turned down', link: '#/request' });
             } catch (e) {
                 console.error('[decide_claim] could not send the turn down notice:', e.message);
             }
@@ -4461,7 +4517,9 @@ async function handleHrData(req, res) {
         try {
             await notifyModeratedUser(row.roblox_user_id, changed
                 ? `Your payment request for "${row.task_name}" was approved at ${amountText} (you asked for ${askedText}). It's now waiting to be paid out.${payload.note ? `\n${String(payload.note).trim()}` : ''}`
-                : `Your payment request for "${row.task_name}" (${amountText}) was approved and is waiting to be paid out.`);
+                : `Your payment request for "${row.task_name}" (${amountText}) was approved and is waiting to be paid out.`,
+                { kind: 'request', title: changed ? `Approved at ${amountText}` : 'Payment request approved', link: '#/my' });
+            notifier.studioEvent('request_approved', `${session.roblox_username} approved "${row.task_name}" for ${row.roblox_username} (${amountText}).`, '#/dashboard');
         } catch (e) {
             console.error('[decide_claim] could not send the approval notice:', e.message);
         }
@@ -4565,6 +4623,7 @@ async function handleHrData(req, res) {
             category: 'security', action: 'set_security_level',
             details: { from: before.level, to: level, note, sessionsRevoked: revoked }
         });
+        notifier.studioEvent('security_changed', `Security level set to ${level} by ${session.roblox_username}.`, '#/security');
         res.json({ ok: true, level, revoked });
         return;
     }
@@ -5127,6 +5186,7 @@ async function handleHrData(req, res) {
             .eq('id', id);
         if (error) { res.status(500).json({ ok: false, error: 'update_failed' }); return; }
         await logAudit(session, { category: 'payments', action: 'close_payment_run', details: { id, label: run.label, forced: payload.force === true } });
+        notifier.studioEvent('run_closed', `Payment run "${run.label || id}" was closed by ${session.roblox_username}.`, '#/runs');
         res.json({ ok: true });
         return;
     }
@@ -5408,6 +5468,7 @@ async function handleHrData(req, res) {
             details: { count: ids.length, ids },
             revert: { type: 'unmark_paid_bulk', ids }
         });
+        if (robloxUserId != null) notifier.notify(robloxUserId, { kind: 'payment', title: `${ids.length} payment${ids.length === 1 ? '' : 's'} sent`, body: `${ids.length} of your pending payment${ids.length === 1 ? ' was' : 's were'} marked as paid.`, link: '#/my' });
         res.json({ ok: true, count: ids.length });
         return;
     }

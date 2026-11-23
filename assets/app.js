@@ -181,7 +181,10 @@
       'payouts.view_bank_details': 'View full bank transfer details (name, address, SWIFT and IBAN)',
       'security.manage': 'Manage security (raise the protocol, hold accounts, sign people out)',
       'teams.view': 'View teams, their games and deadlines',
-      'teams.manage': 'Assign games to teams and manage team deadlines'
+      'teams.manage': 'Assign games to teams and manage team deadlines',
+      'revenue.manage': 'Manage revenue shares and record game revenue',
+      'contracts.manage': 'Create and manage contracts and milestones',
+      'tax.view': 'View tax details (legal names, addresses, tax IDs) and year-end totals'
     };
     const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS);
 
@@ -3013,7 +3016,7 @@
         });
         let msg = { note: 'Note added', warn: res.banned ? 'Warning issued. They reached 3 and were banned' : `Warning ${res.warnCount} of 3 issued`, ban: 'Banned', unban: 'Ban lifted' }[type];
         if (res.temporaryUnsupported) msg = 'Banned, but permanently: the database needs the expires_at column for timed bans (see MIGRATION.sql)';
-        if (res.notified) msg += '. They were messaged on Discord';
+        if (res.notified) msg += '. They were notified';
         toast(msg + '.', res.temporaryUnsupported ? 'err' : undefined);
         umReason = ''; umNotify = false; umMode = 'note';
         await afterModeration();
@@ -3277,6 +3280,16 @@
       const routeQuery = new URLSearchParams(window.location.hash.split('?')[1] || '');
       if (routeQuery.get('discordLinked') === '1') needsDiscordLink = false;
 
+      if (path.indexOf('#/contract/') === 0) {
+        if (isHrAuthed) renderContractPage(decodeURIComponent(path.slice('#/contract/'.length))); else renderHrGate();
+        return;
+      }
+      if (path.indexOf('#/receipt/') === 0) {
+        if (isHrAuthed) renderReceipt(decodeURIComponent(path.slice('#/receipt/'.length))); else renderHrGate();
+        return;
+      }
+      if (path === '#/status') { renderStatusPage(); return; }
+
       if (path.indexOf('#/task/') === 0) {
         renderTaskPage(decodeURIComponent(path.slice('#/task/'.length)));
         return;
@@ -3330,6 +3343,16 @@
         else renderHrGate();
       } else if (path === '#/home') {
         if (isHrAuthed) renderHome(); else renderHrGate();
+      } else if (path === '#/revenue') {
+        if (isHrAuthed) renderRevenue(); else renderHrGate();
+      } else if (path === '#/contracts') {
+        if (isHrAuthed) renderContracts(); else renderHrGate();
+      } else if (path === '#/exports') {
+        if (isHrAuthed) renderExports(); else renderHrGate();
+      } else if (path === '#/tax') {
+        if (isHrAuthed) renderTaxAdmin(); else renderHrGate();
+      } else if (path === '#/setup') {
+        if (isHrAuthed) renderSetupWizard(); else renderHrGate();
       } else if (path === '#/runs') {
         if (isHrAuthed && hasPermission('dashboard.view')) renderPaymentRuns();
         else if (isHrAuthed) window.location.hash = '#/home';
@@ -3432,6 +3455,11 @@
         { group: 'admin', label: 'Manage: Onboarding', href: '#/manage?tab=onboarding', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'onboarding invite links roblox group' },
         { group: 'admin', label: 'Manage: Recruitment', href: '#/manage?tab=recruitment', navHidden: true, show: hasPermission('settings.manage_onboarding'), keywords: 'positions auto-hire sign-off finalise' },
         { group: 'admin', label: 'Manage: Broadcasts', href: '#/manage?tab=broadcasts', navHidden: true, show: hasPermission('broadcasts.manage'), keywords: 'announcements message' },
+        { group: 'you', label: 'Contracts', href: '#/contracts', keywords: 'contract milestone commission agreement' },
+        { group: 'team', label: 'Revenue share', href: '#/revenue', show: hasPermission('revenue.manage'), keywords: 'revenue percent share royalties' },
+        { group: 'team', label: 'Exports', href: '#/exports', show: hasPermission('dashboard.export'), keywords: 'quickbooks xero csv paypal wise accounting' },
+        { group: 'admin', label: 'Tax & receipts', href: '#/tax', show: hasPermission('tax.view'), keywords: 'tax w9 w-8ben 1099 year end receipts' },
+        { group: 'you', label: 'Tax details', href: '#/my?focus=tax', navHidden: true, keywords: 'tax w9 w-8ben' },
         { group: 'you', label: 'My teams & skillsets', href: '#/my', navHidden: true },
         { group: 'you', label: 'Terms of Service', href: '#/terms', navHidden: true },
         { group: 'you', label: 'Privacy Policy', href: '#/privacy', navHidden: true },
@@ -3445,8 +3473,9 @@
       return ({
         '#/request': 'claims', '#/runs': 'paymentRuns', '#/teams': 'teams', '#/analytics': 'analytics',
         '#/staff': 'staffDatabase', '#/recruitment': 'recruitment', '#/recruitment-analytics': 'recruitment',
-        '#/security': 'security', '#/audit': 'audit'
-      })[path] || null;
+        '#/security': 'security', '#/audit': 'audit',
+        '#/revenue': 'revenueShare', '#/contracts': 'contracts', '#/exports': 'accountingExport', '#/tax': 'taxForms'
+      })[path] || (path.indexOf('#/contract/') === 0 ? 'contracts' : path.indexOf('#/receipt/') === 0 ? 'taxForms' : null);
     }
 
     function currentPath() {
@@ -3473,7 +3502,11 @@
       list: '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>',
       search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
       menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
-      chevron: '<path d="m7 10 5 5 5-5"/>'
+      chevron: '<path d="m7 10 5 5 5-5"/>',
+      contract: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h4"/>',
+      pie: '<path d="M12 3v9h9"/><path d="M21 12a9 9 0 1 1-9-9"/>',
+      download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+      receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>'
     };
     function navIcon(name, size) {
       return `<svg width="${size || 18}" height="${size || 18}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[name] || ''}</svg>`;
@@ -3489,7 +3522,10 @@
             featureOn('claims') ? { href: '#/request', label: 'Request payment', icon: 'send', paths: ['#/request'] } : null,
             canSubmitRequests() ? { href: '#/new', label: 'Log work', icon: 'pen', paths: ['#/new'] } : null,
             canSeeDashboard ? { href: '#/dashboard', label: 'Review & pay', icon: 'inbox', paths: ['#/dashboard', '#/hr'] } : null,
-            canSeeDashboard && featureOn('paymentRuns') ? { href: '#/runs', label: 'Payment runs', icon: 'calendar', paths: ['#/runs'] } : null
+            canSeeDashboard && featureOn('paymentRuns') ? { href: '#/runs', label: 'Payment runs', icon: 'calendar', paths: ['#/runs'] } : null,
+            featureOn('contracts') ? { href: '#/contracts', label: 'Contracts', icon: 'contract', paths: ['#/contracts', '#/contract'] } : null,
+            hasPermission('revenue.manage') && featureOn('revenueShare') ? { href: '#/revenue', label: 'Revenue share', icon: 'pie', paths: ['#/revenue'] } : null,
+            hasPermission('dashboard.export') && featureOn('accountingExport') ? { href: '#/exports', label: 'Exports', icon: 'download', paths: ['#/exports'] } : null
           ]
         },
         {
@@ -3504,6 +3540,7 @@
           label: 'Admin', items: [
             canSeeManage() ? { href: '#/manage', label: 'Settings', icon: 'settings', paths: ['#/manage'] } : null,
             canSeeSecurity() && featureOn('security') ? { href: '#/security', label: 'Security', icon: 'shield', paths: ['#/security'] } : null,
+            hasPermission('tax.view') && featureOn('taxForms') ? { href: '#/tax', label: 'Tax & receipts', icon: 'receipt', paths: ['#/tax'] } : null,
             hasPermission('audit.view') && featureOn('audit') ? { href: '#/audit', label: 'Audit log', icon: 'list', paths: ['#/audit'] } : null
           ]
         }
@@ -3544,7 +3581,10 @@
     <aside class="app-sidebar" id="appSidebar" aria-label="Main">
       <div class="shell-top">
         ${shellBrand()}
-        <button type="button" class="shell-search" id="shellSearchBtn">${navIcon('search', 16)}<span>Search</span><kbd>${/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'} K</kbd></button>
+        <div class="shell-tools">
+          <button type="button" class="shell-search" id="shellSearchBtn">${navIcon('search', 16)}<span>Search</span><kbd>${/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'} K</kbd></button>
+          ${locked ? '' : bellButtonHtml('notifBellBtn')}
+        </div>
       </div>
       <nav class="shell-nav">${nav}</nav>
       <div class="shell-foot">
@@ -3570,14 +3610,164 @@
     <header class="mobile-header">
       <button type="button" class="icon-btn" id="shellMenuBtn" aria-label="Open menu" aria-controls="appSidebar" aria-expanded="false">${navIcon('menu', 20)}</button>
       ${shellBrand()}
-      <button type="button" class="icon-btn" id="shellSearchBtnMobile" aria-label="Search">${navIcon('search', 18)}</button>
+      <div class="mobile-header-tools">
+        ${locked ? '' : bellButtonHtml('notifBellBtnMobile')}
+        <button type="button" class="icon-btn" id="shellSearchBtnMobile" aria-label="Search">${navIcon('search', 18)}</button>
+      </div>
     </header>
     <div class="shell-scrim" id="shellScrim"></div>${securityStrip()}`;
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Notification bell. The unread count is polled once a minute while signed in; the
+    // list loads when the panel opens. Everything else about notifications (email, the
+    // studio webhook) lives on the server.
+    // ---------------------------------------------------------------------------------
+    const notifState = { unread: 0, items: [], loaded: false, loading: false, open: false, timer: null };
+    const BELL_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+    const NOTIF_KIND_ICON = {
+      payment: '<path d="M3 7h18v10H3z"/><path d="M3 11h18"/>',
+      request: '<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>',
+      task: '<path d="M4 13l4 4L19 6"/>',
+      contract: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h4"/>',
+      revenue: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
+      security: '<path d="M12 3l7.5 3v5.2c0 4.9-3.2 8.9-7.5 10.3-4.3-1.4-7.5-5.4-7.5-10.3V6z"/>',
+      account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+      general: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'
+    };
+
+    function bellButtonHtml(id) {
+      const n = notifState.unread;
+      return `<button type="button" class="icon-btn notif-bell" id="${id}" aria-label="Notifications${n ? `, ${n} unread` : ''}" aria-haspopup="dialog">${BELL_ICON}<span class="notif-badge" data-notif-badge${n ? '' : ' hidden'}>${n > 9 ? '9+' : n}</span></button>`;
+    }
+
+    function paintNotifBadges() {
+      document.querySelectorAll('[data-notif-badge]').forEach(el => {
+        const n = notifState.unread;
+        el.textContent = n > 9 ? '9+' : String(n);
+        el.hidden = !n;
+        const btn = el.closest('button');
+        if (btn) btn.setAttribute('aria-label', `Notifications${n ? `, ${n} unread` : ''}`);
+      });
+    }
+
+    async function refreshUnread() {
+      if (!isHrAuthed || document.hidden) return;
+      try {
+        const json = await callHrData('count_unread_notifications');
+        notifState.unread = Number(json.unread) || 0;
+        paintNotifBadges();
+      } catch (e) { }
+    }
+
+    function startNotifPolling() {
+      if (notifState.timer) return;
+      refreshUnread();
+      notifState.timer = setInterval(refreshUnread, 60 * 1000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshUnread(); });
+    }
+
+    function notifPanelHtml() {
+      const items = notifState.items;
+      return `
+        <div class="notif-panel" role="dialog" aria-label="Notifications">
+          <div class="notif-head">
+            <strong>Notifications</strong>
+            ${notifState.unread ? `<button type="button" class="pp-linkbtn" id="notifReadAll">Mark all read</button>` : ''}
+          </div>
+          <div class="notif-list">
+            ${notifState.loading && !notifState.loaded ? `<div class="notif-empty">Loading...</div>`
+              : !items.length ? `<div class="notif-empty"><b>You're all caught up</b><span>Payments, approvals and anything else that needs you will show up here.</span></div>`
+                : items.map(n => `
+              <button type="button" class="notif-item${n.read_at ? '' : ' unread'}" data-notif-id="${esc(n.id)}" data-notif-link="${esc(n.link || '')}">
+                <span class="notif-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTIF_KIND_ICON[n.kind] || NOTIF_KIND_ICON.general}</svg></span>
+                <span class="notif-txt"><b>${esc(n.title)}</b>${n.body && n.body !== n.title ? `<span>${esc(n.body)}</span>` : ''}<small>${esc(relTime(n.created_at))}</small></span>
+              </button>`).join('')}
+          </div>
+          <div class="notif-foot"><a href="#/my?focus=notifications">Email settings</a></div>
+        </div>`;
+    }
+
+    function closeNotifPanel() {
+      const el = document.getElementById('notifPanelRoot');
+      if (el) el.remove();
+      notifState.open = false;
+      document.removeEventListener('mousedown', onNotifOutside, true);
+      document.removeEventListener('keydown', onNotifKey, true);
+    }
+    function onNotifOutside(e) {
+      const root = document.getElementById('notifPanelRoot');
+      if (root && !root.contains(e.target) && !e.target.closest('.notif-bell')) closeNotifPanel();
+    }
+    function onNotifKey(e) { if (e.key === 'Escape') closeNotifPanel(); }
+
+    function paintNotifPanel(anchor) {
+      let root = document.getElementById('notifPanelRoot');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'notifPanelRoot';
+        document.body.appendChild(root);
+      }
+      const r = anchor ? anchor.getBoundingClientRect() : null;
+      root.className = 'notif-root';
+      if (r) {
+        const left = Math.min(Math.max(8, r.left), window.innerWidth - 368);
+        root.style.left = left + 'px';
+        root.style.top = (r.bottom + 8) + 'px';
+      }
+      root.innerHTML = notifPanelHtml();
+      const readAll = root.querySelector('#notifReadAll');
+      if (readAll) readAll.addEventListener('click', async () => {
+        notifState.items.forEach(n => { if (!n.read_at) n.read_at = new Date().toISOString(); });
+        notifState.unread = 0; paintNotifBadges(); paintNotifPanel(anchor);
+        try { await callHrData('mark_notifications_read', {}); } catch (e) { }
+      });
+      root.querySelectorAll('[data-notif-id]').forEach(btn => btn.addEventListener('click', async () => {
+        const id = Number(btn.dataset.notifId);
+        const n = notifState.items.find(x => Number(x.id) === id);
+        if (n && !n.read_at) {
+          n.read_at = new Date().toISOString();
+          notifState.unread = Math.max(0, notifState.unread - 1);
+          paintNotifBadges();
+          callHrData('mark_notifications_read', { ids: [id] }).catch(() => { });
+        }
+        closeNotifPanel();
+        if (btn.dataset.notifLink) window.location.hash = btn.dataset.notifLink;
+      }));
+    }
+
+    async function openNotifPanel(anchor) {
+      if (notifState.open) { closeNotifPanel(); return; }
+      notifState.open = true;
+      notifState.loading = true;
+      paintNotifPanel(anchor);
+      document.addEventListener('mousedown', onNotifOutside, true);
+      document.addEventListener('keydown', onNotifKey, true);
+      try {
+        const json = await callHrData('list_notifications', { limit: 30 });
+        notifState.items = json.data || [];
+        notifState.unread = Number(json.unread) || 0;
+        notifState.loaded = true;
+      } catch (e) { }
+      notifState.loading = false;
+      paintNotifBadges();
+      if (notifState.open) paintNotifPanel(anchor);
+    }
+
+    function wireNotifBell() {
+      if (!isHrAuthed) return;
+      ['notifBellBtn', 'notifBellBtnMobile'].forEach(id => {
+        const b = document.getElementById(id);
+        if (b) b.addEventListener('click', () => openNotifPanel(b));
+      });
+      if (notifState.open) closeNotifPanel();
+      startNotifPolling();
     }
 
     function wireTopbarSignOut() {
       const btn = document.getElementById('signOutBtn');
       if (btn) btn.addEventListener('click', hrSignOut);
+      wireNotifBell();
       const tourBtn = document.getElementById('replayTourBtn');
       if (tourBtn) tourBtn.addEventListener('click', () => {
         const onHome = currentPath() === '#/home' || currentPath() === '#/' || currentPath() === '';
@@ -7790,7 +7980,8 @@
       const discordLinkError = landingQuery.get('discordLinkError');
       // Links like "Add payout method" land here with ?focus=payout: scroll to the form once it's loaded.
       let pendingPayoutFocus = landingQuery.get('focus') === 'payout';
-      if (pendingPayoutFocus) history.replaceState(null, '', '#/my');
+      let pendingNotifFocus = landingQuery.get('focus') === 'notifications';
+      if (pendingPayoutFocus || pendingNotifFocus) history.replaceState(null, '', '#/my');
 
       function focusPayout() {
         const panel = document.getElementById('payoutPanel');
@@ -8096,6 +8287,8 @@
         </div>
       </div>
 
+      <div class="panel np-panel" id="notifPrefsPanel"></div>
+
       <div class="heading-block section-head">
         <h2 class="sec-title">My teams &amp; skillsets</h2>
       </div>
@@ -8156,6 +8349,9 @@
         wireTopbarSignOut();
         paintMethodFields();
         document.querySelectorAll('[data-focus-payout]').forEach(b => b.addEventListener('click', focusPayout));
+        const npHost = document.getElementById('notifPrefsPanel');
+        if (npHost) mountNotifPrefs(npHost);
+        if (pendingNotifFocus && npHost) { pendingNotifFocus = false; setTimeout(() => { npHost.scrollIntoView({ behavior: 'smooth', block: 'start' }); npHost.classList.add('flash-focus'); }, 80); }
         if (pendingPayoutFocus && !methodLoading) { pendingPayoutFocus = false; setTimeout(focusPayout, 60); }
         document.querySelectorAll('[data-convert]').forEach(el => el.addEventListener('click', async () => {
           const id = el.dataset.convert;
@@ -8495,6 +8691,8 @@
 
       const manageTabDefs = [
         { id: 'branding', group: 'Studio', label: 'Branding', desc: 'Name, logo, colours, sign-in', enabled: canManageBranding },
+        { id: 'notifications', group: 'Studio', label: 'Notifications', desc: 'Email and channel alerts', enabled: canManageBranding },
+        { id: 'plan', group: 'Studio', label: 'Plan', desc: 'Licence and features', enabled: canManageBranding || canManageRoles },
         { id: 'access', group: 'Access', label: 'Sign-in', desc: 'Who can get in', enabled: canManageBaseAccess || canManageGroups },
         { id: 'roles', group: 'Access', label: 'Roles', desc: 'Permissions and rank', enabled: canManageRoles },
         { id: 'games', group: 'Payments', label: 'Games & DevEx', desc: 'Games, DevEx rate, minimums', enabled: canManageGames || canManageRate },
@@ -8653,6 +8851,8 @@
         <div style="flex:1;min-width:0;">
 
       ${manageTab === 'branding' && canManageBranding ? '<div id="brandingMount"></div>' : ''}
+      ${manageTab === 'notifications' && canManageBranding ? '<div id="webhookMount"></div>' : ''}
+      ${manageTab === 'plan' ? '<div id="planMount"></div>' : ''}
 
       ${manageTab === 'access' ? `
       ${canManageBaseAccess ? `
@@ -9326,6 +9526,10 @@
 
         const brandingMount = document.getElementById('brandingMount');
         if (brandingMount) mountBrandingEditor(brandingMount);
+        const webhookMount = document.getElementById('webhookMount');
+        if (webhookMount) mountWebhookSettings(webhookMount);
+        const planMount = document.getElementById('planMount');
+        if (planMount) mountPlan(planMount);
         document.querySelectorAll('[data-manage-tab]').forEach(b => b.addEventListener('click', async () => { if (manageTab === 'branding' && b.dataset.manageTab !== 'branding' && brandingState.dirty && !(await askConfirm('You have unsaved branding changes. Leave without saving?'))) return; manageTab = b.dataset.manageTab; history.replaceState(null, '', '#/manage?tab=' + manageTab); paint(); window.scrollTo(0, 0); if (manageTab === 'rates' && !rateBandsLoaded) loadRateBands(); }));
 
         const bandSaveBtn = document.getElementById('bandSaveBtn');
@@ -10528,6 +10732,722 @@
       if (!S.loaded && !S.loading) { load(); return; }
       root.innerHTML = brandingEditorHtml();
       wire(root);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // My payments > Email notifications, and Settings > Notifications (studio webhook).
+    // Both are small self-contained widgets that keep their state here, so the page around
+    // them can re-paint without losing what someone typed.
+    // ---------------------------------------------------------------------------------
+    const notifPrefsState = { loaded: false, loading: false, data: null, stage: 'idle', email: '', code: '', busy: false, msg: null };
+
+    function notifPrefsHtml() {
+      const S = notifPrefsState;
+      const d = S.data;
+      const head = `<div class="preview-label">Email notifications</div>`;
+      if (!d) return `${head}<div class="dash-loading">Loading...</div>`;
+      const msg = S.msg ? `<div class="${S.msg.ok ? 'confirm-box' : 'error-box'}" role="status">${S.msg.ok ? `<div class="icon">&#10003;</div><div class="txt"><strong>${esc(S.msg.text)}</strong></div>` : `<span>${esc(S.msg.text)}</span>`}</div>` : '';
+      if (!d.emailAvailable) return `${head}<p class="sub" style="margin:0;">You'll see notifications under the bell at the top of the menu. Email isn't set up for this panel yet.</p>`;
+      const current = d.verified ? d.email : d.googleEmail;
+      if (S.stage === 'code') {
+        return `${head}${msg}
+          <p class="sub" style="margin:0 0 12px;">We sent a 6-digit code to <strong>${esc(S.email)}</strong>. It expires in 20 minutes.</p>
+          <div class="inline-form"><input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" id="npCode" placeholder="123456" value="${esc(S.code)}" aria-label="Code"><button type="button" class="btn btn-primary btn-sm" id="npVerify" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Checking...' : 'Confirm'}</button></div>
+          <button type="button" class="pp-linkbtn" id="npCancel" style="margin-top:10px;">Use a different address</button>`;
+      }
+      if (S.stage === 'edit' || !current) {
+        return `${head}${msg}
+          <p class="sub" style="margin:0 0 12px;">Get an email when you're paid, when a request is approved or turned down, and when something needs you.</p>
+          <div class="inline-form"><input type="email" id="npEmail" placeholder="you@example.com" value="${esc(S.email)}" aria-label="Email address" autocomplete="email"><button type="button" class="btn btn-primary btn-sm" id="npSend" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Sending...' : 'Send code'}</button></div>
+          ${current ? `<button type="button" class="pp-linkbtn" id="npCancel" style="margin-top:10px;">Cancel</button>` : ''}`;
+      }
+      return `${head}${msg}
+        <div class="np-row">
+          <div><strong>${esc(current)}</strong><span class="hint" style="margin:0;display:block;">${d.verified ? 'Confirmed' : 'From your Google account'}</span></div>
+          <label class="bk-toggle np-toggle"><input type="checkbox" id="npEnabled" ${d.enabled ? 'checked' : ''}><span class="bk-switch" aria-hidden="true"></span><span><b>${d.enabled ? 'On' : 'Off'}</b></span></label>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:10px;">
+          <button type="button" class="pp-linkbtn" id="npChange">Change address</button>
+          ${d.verified ? `<button type="button" class="pp-linkbtn" id="npRemove">Remove</button>` : ''}
+        </div>`;
+    }
+
+    function mountNotifPrefs(el) {
+      const S = notifPrefsState;
+      const repaint = () => { const host = document.getElementById('notifPrefsPanel'); if (host) { host.innerHTML = notifPrefsHtml(); wire(host); } };
+      async function load() {
+        S.loading = true;
+        try { const json = await callHrData('get_notify_prefs'); S.data = json.data; S.loaded = true; } catch (e) { S.data = { emailAvailable: false }; }
+        S.loading = false; repaint();
+      }
+      function wire(host) {
+        const q = (id) => host.querySelector('#' + id);
+        if (q('npEmail')) q('npEmail').addEventListener('input', e => { S.email = e.target.value; });
+        if (q('npCode')) q('npCode').addEventListener('input', e => { S.code = e.target.value.replace(/\D/g, ''); });
+        if (q('npSend')) q('npSend').addEventListener('click', async () => {
+          S.busy = true; S.msg = null; repaint();
+          try { await callHrData('set_notify_email', { email: S.email }); S.stage = 'code'; S.code = ''; }
+          catch (e) { S.msg = { ok: false, text: e.code === 'invalid_email' ? "That email address doesn't look right." : e.code === 'email_send_failed' ? "Couldn't send the email. Check the address and try again." : e.message }; }
+          S.busy = false; repaint();
+          const c = document.getElementById('npCode'); if (c) c.focus();
+        });
+        if (q('npVerify')) q('npVerify').addEventListener('click', async () => {
+          S.busy = true; S.msg = null; repaint();
+          try { await callHrData('verify_notify_email', { code: S.code }); S.stage = 'idle'; S.msg = { ok: true, text: 'Email confirmed. You\'ll get notifications there from now on.' }; await load(); }
+          catch (e) { S.msg = { ok: false, text: e.code === 'code_wrong' ? "That code isn't right." : e.code === 'code_expired' ? 'That code expired. Send a new one.' : e.message }; }
+          S.busy = false; repaint();
+        });
+        if (q('npCancel')) q('npCancel').addEventListener('click', () => { S.stage = 'idle'; S.msg = null; repaint(); });
+        if (q('npChange')) q('npChange').addEventListener('click', () => { S.stage = 'edit'; S.email = ''; S.msg = null; repaint(); });
+        if (q('npRemove')) q('npRemove').addEventListener('click', async () => {
+          if (!(await askConfirm('Stop emailing this address?'))) return;
+          try { await callHrData('set_notify_prefs', { removeEmail: true }); S.msg = null; await load(); } catch (e) { toast(e.message, 'err'); }
+        });
+        if (q('npEnabled')) q('npEnabled').addEventListener('change', async (e) => {
+          try { await callHrData('set_notify_prefs', { enabled: e.target.checked }); S.data.enabled = e.target.checked; repaint(); }
+          catch (err) { toast(err.message, 'err'); }
+        });
+      }
+      el.innerHTML = notifPrefsHtml();
+      wire(el);
+      if (!S.loaded && !S.loading) load();
+    }
+
+    const webhookState = { loaded: false, data: null, url: '', events: [], busy: false, msg: null };
+    const WEBHOOK_EVENT_LABELS = {
+      request_submitted: 'Someone sends a payment request',
+      request_approved: 'A payment request is approved',
+      request_paid: 'Someone is paid',
+      run_closed: 'A payment run is closed',
+      security_changed: 'The security level changes',
+      budget_warning: 'A game nears its budget',
+      contract_signed: 'A contract is signed',
+      revenue_recorded: 'Monthly revenue is recorded'
+    };
+
+    function webhookHtml() {
+      const S = webhookState;
+      if (!S.data) return `<div class="dash-loading">Loading...</div>`;
+      const d = S.data;
+      return `
+      <div class="heading-block">
+        <h2 class="sec-title">Notifications</h2>
+        <p class="sub">People get their own notifications under the bell${d.emailConfigured ? ' and by email' : ''}. Here you can also send studio-wide events to a channel.</p>
+      </div>
+      ${S.msg ? `<div class="${S.msg.ok ? 'confirm-box' : 'error-box'}" role="status">${S.msg.ok ? `<div class="icon">&#10003;</div><div class="txt"><strong>${esc(S.msg.text)}</strong></div>` : `<span>${esc(S.msg.text)}</span>`}</div>` : ''}
+      <div class="panel" style="max-width:720px;margin-bottom:18px;">
+        <h3 style="font-size:15px;margin:0 0 6px;">Email</h3>
+        ${d.emailConfigured
+          ? `<p class="sub" style="margin:0;">Sending through ${esc(d.emailProvider === 'resend' ? 'Resend' : d.emailProvider === 'postmark' ? 'Postmark' : 'SMTP')}. Each person confirms their own address in My payments; Google sign-ins use their Google email.</p>`
+          : `<p class="sub" style="margin:0;">Not set up. Add <code>RESEND_API_KEY</code> (or <code>POSTMARK_SERVER_TOKEN</code>, or <code>SMTP_HOST</code>) and <code>EMAIL_FROM</code> to the API's environment to turn on email.</p>`}
+      </div>
+      <div class="panel" style="max-width:720px;">
+        <h3 style="font-size:15px;margin:0 0 6px;">Channel webhook</h3>
+        <p class="sub" style="margin:0 0 14px;">Paste a Discord or Slack webhook URL (or any https endpoint) to post these events to a channel. No bot needed.</p>
+        <div class="field"><label for="whUrl">Webhook URL</label><input type="url" id="whUrl" placeholder="https://discord.com/api/webhooks/..." value="${esc(S.url)}" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label>Send these events</label>
+          <div class="bk-toggles">${(d.allEvents || []).filter(e => featureOn(e === 'budget_warning' ? 'budgets' : e === 'contract_signed' ? 'contracts' : e === 'revenue_recorded' ? 'revenueShare' : e === 'run_closed' ? 'paymentRuns' : '')).map(e => `<label class="bk-toggle"><input type="checkbox" data-wh-event="${esc(e)}" ${S.events.includes(e) ? 'checked' : ''}><span class="bk-switch" aria-hidden="true"></span><span><b>${esc(WEBHOOK_EVENT_LABELS[e] || e)}</b></span></label>`).join('')}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary btn-sm" id="whSave" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Saving...' : 'Save'}</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="whTest" ${S.busy || !S.url ? 'disabled' : ''}>Send a test</button>
+        </div>
+      </div>`;
+    }
+
+    function mountWebhookSettings(el) {
+      const S = webhookState;
+      const repaint = () => { const host = document.getElementById('webhookMount'); if (host) { host.innerHTML = webhookHtml(); wire(host); } };
+      async function load() {
+        try { const json = await callHrData('get_notify_webhook'); S.data = json.data; S.url = json.data.url || ''; S.events = json.data.events || []; S.loaded = true; }
+        catch (e) { S.data = { allEvents: [], emailConfigured: false }; S.msg = { ok: false, text: e.message }; }
+        repaint();
+      }
+      function wire(host) {
+        const url = host.querySelector('#whUrl');
+        if (url) url.addEventListener('input', () => { S.url = url.value.trim(); const t = host.querySelector('#whTest'); if (t) t.disabled = !S.url; });
+        host.querySelectorAll('[data-wh-event]').forEach(cb => cb.addEventListener('change', () => {
+          S.events = Array.from(host.querySelectorAll('[data-wh-event]:checked')).map(x => x.dataset.whEvent);
+        }));
+        const save = host.querySelector('#whSave');
+        if (save) save.addEventListener('click', async () => {
+          S.busy = true; S.msg = null; repaint();
+          try { await callHrData('save_notify_webhook', { url: S.url, events: S.events }); S.msg = { ok: true, text: S.url ? 'Saved. Events will post to that channel.' : 'Saved. The webhook is off.' }; }
+          catch (e) { S.msg = { ok: false, text: e.code === 'invalid_webhook' ? 'That has to be an https:// URL.' : e.code === 'database_update_needed' ? 'Run sql/upgrade.sql in Supabase first.' : e.message }; }
+          S.busy = false; repaint();
+        });
+        const test = host.querySelector('#whTest');
+        if (test) test.addEventListener('click', async () => {
+          S.busy = true; repaint();
+          try { const r = await callHrData('test_notify_webhook', { url: S.url }); S.msg = r.delivered ? { ok: true, text: 'Test message sent. Check the channel.' } : { ok: false, text: "The webhook didn't accept the message. Check the URL." }; }
+          catch (e) { S.msg = { ok: false, text: e.message }; }
+          S.busy = false; repaint();
+        });
+      }
+      el.innerHTML = webhookHtml();
+      wire(el);
+      if (!S.loaded) load();
+    }
+
+    // Settings > Plan: what this deployment's licence includes.
+    const planState = { data: null, error: null };
+    const PLAN_REASONS = {
+        missing: 'No licence key is set. Add LICENSE_KEY to the API environment.',
+        bad_signature: "The licence key isn't valid.",
+        malformed: "The licence key isn't valid.",
+        expired: 'The licence has expired.',
+        wrong_domain: "The licence is for a different website address than this one."
+    };
+
+    function planHtml() {
+      const S = planState;
+      if (S.error) return `<div class="error-box"><span>${esc(S.error)}</span></div>`;
+      if (!S.data) return `<div class="dash-loading">Loading...</div>`;
+      const d = S.data;
+      const tierName = d.tier === 'pro' ? 'Pro' : 'Core';
+      const groups = ['Pro', 'Add-on'];
+      return `
+      <div class="heading-block">
+        <h2 class="sec-title">Plan</h2>
+        <p class="sub">What this panel's licence includes.</p>
+      </div>
+      <div class="panel plan-card" style="max-width:720px;margin-bottom:18px;">
+        <div class="plan-top">
+          <div>
+            <span class="plan-tier">${esc(tierName)}</span>
+            <div class="plan-meta">${d.managed ? (d.valid ? `Licensed to <strong>${esc(d.licensee || 'this studio')}</strong>${d.expires ? ` &middot; renews ${esc(fmtDate(d.expires))}` : ' &middot; no expiry'}` : `<span style="color:var(--err-text);">${esc(PLAN_REASONS[d.reason] || 'The licence key could not be checked.')}</span> Running as Core.`) : 'Licensing is not set up on this panel, so everything is unlocked.'}</div>
+          </div>
+          ${d.addons && d.addons.length ? `<div class="plan-addons">${d.addons.map(a => `<span class="chip-tag">${esc(a === 'discord' ? 'Discord add-on' : a)}</span>`).join('')}</div>` : ''}
+        </div>
+      </div>
+      ${groups.map(g => `
+      <div class="panel" style="max-width:720px;margin-bottom:18px;">
+        <h3 style="font-size:15px;margin:0 0 12px;">${g === 'Pro' ? 'Pro features' : 'Add-ons'}</h3>
+        <ul class="plan-list">
+          ${d.features.filter(f => f.group === g).map(f => `<li class="${f.included ? 'yes' : 'no'}"><span class="plan-mark" aria-hidden="true">${f.included ? '&#10003;' : '&ndash;'}</span><span>${esc(f.label)}</span><small>${f.included ? (f.on ? 'Included' : 'Included, switched off in Branding') : 'Not included'}</small></li>`).join('')}
+        </ul>
+      </div>`).join('')}
+      <p class="hint" style="max-width:720px;">To change your plan, contact whoever supplied this panel for a new licence key, then set it as <code>LICENSE_KEY</code> on the API and restart it.</p>`;
+    }
+
+    function mountPlan(el) {
+      el.innerHTML = planHtml();
+      if (planState.data) return;
+      callHrData('get_plan').then(j => { planState.data = j.data; }).catch(e => { planState.error = e.message; }).finally(() => {
+        const host = document.getElementById('planMount'); if (host) host.innerHTML = planHtml();
+      });
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Shared bits for the newer money pages (revenue share, contracts, exports, tax).
+    // ---------------------------------------------------------------------------------
+    let knownPeopleCache = null;
+    function loadKnownPeople() {
+      if (knownPeopleCache) return Promise.resolve(knownPeopleCache);
+      return callHrData('list_known_people').then(j => { knownPeopleCache = j.data || []; return knownPeopleCache; }).catch(() => []);
+    }
+    // A text box with suggestions from everyone the panel knows; resolves to { id, name }.
+    function personPickerHtml(id, placeholder) {
+      return `<input type="text" id="${id}" list="${id}List" placeholder="${esc(placeholder || 'Start typing a name')}" autocomplete="off" spellcheck="false"><datalist id="${id}List">${(knownPeopleCache || []).map(p => `<option value="${esc(p.name)}"></option>`).join('')}</datalist>`;
+    }
+    function pickedPerson(id) {
+      const el = document.getElementById(id);
+      const name = el ? el.value.trim() : '';
+      if (!name) return null;
+      const hit = (knownPeopleCache || []).find(p => p.name.toLowerCase() === name.toLowerCase());
+      return hit ? { id: hit.id, name: hit.name } : { id: null, name };
+    }
+    const CASH_SYMBOL = { USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$' };
+    function cashCode() { return (STUDIO.payments && STUDIO.payments.cashCurrency) || 'USD'; }
+    function cashSymbol() { return CASH_SYMBOL[cashCode()] || '$'; }
+    function money(amount, currency) {
+      const n = Number(amount) || 0;
+      if (currency === 'ROBUX') return 'R$ ' + Math.round(n).toLocaleString();
+      return cashSymbol() + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function currencyOptionsHtml(selected) {
+      return `${currencyEnabled('ROBUX') ? `<option value="ROBUX" ${selected === 'ROBUX' ? 'selected' : ''}>Robux</option>` : ''}${currencyEnabled('USD') ? `<option value="USD" ${selected === 'USD' ? 'selected' : ''}>${esc(cashCode())}</option>` : ''}`;
+    }
+    function pageHeadHtml(title, sub, actions) {
+      return `<div class="dash-head"><div><h1>${esc(title)}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${actions ? `<div class="dash-toolbar">${actions}</div>` : ''}</div>`;
+    }
+    function monthLabel(period) {
+      const m = /^(\d{4})-(\d{2})$/.exec(String(period || ''));
+      if (!m) return period || '';
+      return new Date(Date.UTC(+m[1], +m[2] - 1, 1)).toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Revenue share (#/revenue)
+    // ---------------------------------------------------------------------------------
+    function renderRevenue() {
+      if (!hasPermission('revenue.manage')) { window.location.hash = '#/home'; return; }
+      const myGen = renderGen;
+      let data = null;
+      let error = null;
+      let busy = false;
+      let formError = null;
+      let recordOpen = false;
+      let preview = { gameId: '', revenue: '', currency: currencyEnabled('ROBUX') ? 'ROBUX' : 'USD' };
+
+      const gameName = (id) => { const g = (data.games || []).find(x => String(x.id) === String(id)); return g ? g.name : 'Game'; };
+      const sharesFor = (gameId) => (data.shares || []).filter(s => String(s.game_id) === String(gameId));
+
+      function previewHtml() {
+        const shares = sharesFor(preview.gameId);
+        const amount = Number(preview.revenue);
+        if (!preview.gameId || !shares.length) return `<p class="hint" style="margin:0;">${preview.gameId ? 'This game has no shares yet.' : 'Pick a game to see the split.'}</p>`;
+        const total = shares.reduce((t, s) => t + Number(s.percent), 0);
+        return `<table class="mini-table"><tbody>${shares.map(s => `<tr><td>${esc(s.roblox_username)}</td><td class="num">${esc(Number(s.percent))}%</td><td class="num">${amount > 0 ? esc(money(amount * Number(s.percent) / 100, preview.currency)) : '-'}</td></tr>`).join('')}
+          <tr class="muted"><td>Studio keeps</td><td class="num">${esc(Math.max(0, 100 - total).toFixed(2).replace(/\.00$/, ''))}%</td><td class="num">${amount > 0 ? esc(money(amount * Math.max(0, 100 - total) / 100, preview.currency)) : '-'}</td></tr></tbody></table>`;
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        const now = new Date();
+        const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const defaultPeriod = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}`;
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      ${pageHeadHtml('Revenue share', 'People paid a percentage of what a game earns. Record a month\'s revenue and everyone\'s share becomes a payment waiting for approval.', data ? `<button type="button" class="btn ${recordOpen ? 'btn-ghost' : 'btn-primary'} btn-sm" id="rsRecordToggle">${recordOpen ? 'Cancel' : 'Record revenue'}</button>` : '')}
+      ${error ? `<div class="error-box"><span>${esc(error)}</span></div>` : ''}
+      ${!data && !error ? `<div class="dash-loading">Loading...</div>` : ''}
+      ${data && recordOpen ? `
+      <div class="panel rs-record">
+        <h3 class="panel-title">Record revenue</h3>
+        ${formError ? `<div class="error-box"><span>${esc(formError)}</span></div>` : ''}
+        <div class="row3">
+          <div class="field"><label for="rsGame">Game</label><select id="rsGame"><option value="">Pick a game</option>${data.games.filter(g => sharesFor(g.id).length).map(g => `<option value="${esc(g.id)}" ${String(preview.gameId) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
+          <div class="field"><label for="rsPeriod">Month</label><input type="month" id="rsPeriod" value="${esc(defaultPeriod)}" max="${esc(now.toISOString().slice(0, 7))}"></div>
+          <div class="field"><label for="rsAmount">Revenue</label><div class="amount-input"><input type="number" id="rsAmount" min="0" step="any" placeholder="e.g. 250000" value="${esc(preview.revenue)}"><select id="rsCurrency" aria-label="Currency">${currencyOptionsHtml(preview.currency)}</select></div></div>
+        </div>
+        <div class="field"><label for="rsNote">Note <span class="hint">(optional)</span></label><input type="text" id="rsNote" maxlength="300" placeholder="e.g. From the Creator Hub payout report"></div>
+        <div class="rs-preview" id="rsPreview">${previewHtml()}</div>
+        <button type="button" class="btn btn-primary btn-sm" id="rsRecord" ${busy ? 'disabled' : ''}>${busy ? 'Recording...' : 'Record and create payments'}</button>
+      </div>` : ''}
+      ${data ? `
+      <div class="rs-grid">
+        ${data.games.length ? data.games.map(g => {
+          const shares = sharesFor(g.id);
+          const total = shares.reduce((t, s) => t + Number(s.percent), 0);
+          return `
+          <section class="panel rs-game">
+            <div class="rs-game-head">
+              <div class="rs-game-name">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : `<span class="rs-game-dot" style="background:${gameColor(g.name)}"></span>`}<strong>${esc(g.name)}</strong></div>
+              <span class="hint" style="margin:0;">${esc(total.toFixed(2).replace(/\.00$/, ''))}% shared</span>
+            </div>
+            <div class="rs-bar" aria-hidden="true"><span style="width:${Math.min(100, total)}%"></span></div>
+            ${shares.length ? `<ul class="rs-shares">${shares.map(s => `<li><span>${esc(s.roblox_username)}</span><b>${esc(Number(s.percent))}%</b><button type="button" class="pp-linkbtn" data-rs-remove="${esc(s.id)}" aria-label="Remove ${esc(s.roblox_username)}'s share">Remove</button></li>`).join('')}</ul>` : `<p class="hint" style="margin:8px 0 0;">No shares yet.</p>`}
+            <div class="rs-add">
+              ${personPickerHtml('rsPerson_' + g.id, 'Person')}
+              <input type="number" id="rsPct_${esc(g.id)}" min="0.01" max="100" step="0.01" placeholder="%" aria-label="Percent">
+              <button type="button" class="btn btn-ghost btn-sm" data-rs-add="${esc(g.id)}">Add</button>
+            </div>
+          </section>`;
+        }).join('') : `<div class="dash-empty"><h3>No games yet</h3><p>Add your games in Settings &rsaquo; Games &amp; DevEx first.</p></div>`}
+      </div>
+
+      <div class="heading-block section-head"><h2 class="sec-title">Recorded months</h2></div>
+      <div class="table-wrap">
+        ${data.periods.length ? `<div class="table-scroll"><table class="req-table"><thead><tr><th>Month</th><th>Game</th><th>Revenue</th><th>Payments</th><th>Recorded by</th><th></th></tr></thead><tbody>
+          ${data.periods.map(p => `<tr><td>${esc(monthLabel(p.period))}</td><td>${esc(gameName(p.game_id))}</td><td>${esc(money(p.revenue, p.currency))}</td><td>${esc((p.request_ids || []).length)}</td><td>${esc(p.recorded_by || '-')}<div class="hint" style="margin:0;">${esc(fmtDate(p.created_at))}</div></td><td style="text-align:right;"><button type="button" class="btn btn-danger-ghost btn-xs" data-rs-delete="${esc(p.id)}">Undo</button></td></tr>`).join('')}
+        </tbody></table></div>` : `<div class="dash-empty"><h3>Nothing recorded yet</h3><p>When a game's monthly payout comes in, press Record revenue.</p></div>`}
+      </div>` : ''}
+    </div>`;
+        wireTopbarSignOut();
+        wire();
+      }
+
+      function wire() {
+        const toggle = document.getElementById('rsRecordToggle');
+        if (toggle) toggle.addEventListener('click', () => { recordOpen = !recordOpen; formError = null; paint(); });
+        const game = document.getElementById('rsGame');
+        const amount = document.getElementById('rsAmount');
+        const cur = document.getElementById('rsCurrency');
+        const repaintPreview = () => { const el = document.getElementById('rsPreview'); if (el) el.innerHTML = previewHtml(); };
+        if (game) game.addEventListener('change', () => { preview.gameId = game.value; repaintPreview(); });
+        if (amount) amount.addEventListener('input', () => { preview.revenue = amount.value; repaintPreview(); });
+        if (cur) cur.addEventListener('change', () => { preview.currency = cur.value; repaintPreview(); });
+        const rec = document.getElementById('rsRecord');
+        if (rec) rec.addEventListener('click', async () => {
+          const period = document.getElementById('rsPeriod').value;
+          const note = document.getElementById('rsNote').value.trim();
+          if (!preview.gameId) { formError = 'Pick a game.'; paint(); return; }
+          if (!(Number(preview.revenue) > 0)) { formError = 'Enter the revenue for that month.'; paint(); return; }
+          if (!/^\d{4}-\d{2}$/.test(period)) { formError = 'Pick the month.'; paint(); return; }
+          if (!(await askConfirm(`Record ${money(preview.revenue, preview.currency)} for ${gameName(preview.gameId)}, ${monthLabel(period)}?\n\nEveryone with a share gets a payment waiting for approval.`, { okLabel: 'Record' }))) return;
+          busy = true; formError = null; paint();
+          try {
+            const r = await callHrData('rs_record_period', { gameId: preview.gameId, period, revenue: Number(preview.revenue), currency: preview.currency, note });
+            toast(`Created ${r.created} payment${r.created === 1 ? '' : 's'} for approval.`);
+            recordOpen = false; preview.revenue = '';
+            await load();
+          } catch (e) {
+            formError = e.code === 'period_exists' ? 'That month is already recorded for this game. Undo it below first if it was wrong.' : e.code === 'no_shares' ? 'This game has no shares.' : e.message;
+          }
+          busy = false; paint();
+        });
+        document.querySelectorAll('[data-rs-add]').forEach(btn => btn.addEventListener('click', async () => {
+          const gameId = btn.dataset.rsAdd;
+          const person = pickedPerson('rsPerson_' + gameId);
+          const pct = Number(document.getElementById('rsPct_' + gameId).value);
+          if (!person) { toast('Pick a person.', 'err'); return; }
+          if (!person.id) { toast(`${person.name} isn't someone the panel knows yet. They need to sign in once first.`, 'err'); return; }
+          if (!(pct > 0 && pct <= 100)) { toast('Enter a percentage between 0 and 100.', 'err'); return; }
+          btn.disabled = true;
+          try { await callHrData('rs_save_share', { gameId, robloxUserId: person.id, robloxUsername: person.name, percent: pct }); toast(`${person.name} now gets ${pct}%.`); await load(); }
+          catch (e) { btn.disabled = false; toast(e.code === 'share_over_100' ? `That would take the total over 100% (${Number(e.allocated || 0)}% is already shared).` : e.message, 'err'); }
+        }));
+        document.querySelectorAll('[data-rs-remove]').forEach(btn => btn.addEventListener('click', async () => {
+          if (!(await askConfirm('Remove this share?\n\nMonths already recorded keep their payments. Future months won\'t include them.'))) return;
+          try { await callHrData('rs_remove_share', { id: btn.dataset.rsRemove }); await load(); } catch (e) { toast(e.message, 'err'); }
+        }));
+        document.querySelectorAll('[data-rs-delete]').forEach(btn => btn.addEventListener('click', async () => {
+          if (!(await askConfirm('Undo this month?\n\nIts payments are removed. This only works if none of them has been paid yet.', { okLabel: 'Undo month', danger: true }))) return;
+          try { await callHrData('rs_delete_period', { id: btn.dataset.rsDelete }); toast('Month removed.'); await load(); }
+          catch (e) { toast(e.code === 'already_paid' ? "Some of those payments are already paid, so it can't be undone. Reject the unpaid ones instead." : e.message, 'err'); }
+        }));
+      }
+
+      async function load() {
+        try {
+          const [json] = await Promise.all([callHrData('rs_overview'), loadKnownPeople()]);
+          data = json.data; error = null;
+        } catch (e) { error = e.code === 'database_update_needed' ? 'Your database needs an update. Run sql/upgrade.sql in Supabase.' : e.message; }
+        paint();
+      }
+
+      paint();
+      load();
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Contracts (#/contracts, #/contract/<id>)
+    // ---------------------------------------------------------------------------------
+    const CONTRACT_STATUS = {
+      draft: ['Draft', 'neutral'], sent: ['Waiting for signature', 'warn'], active: ['Active', 'info'],
+      completed: ['Completed', 'ok'], cancelled: ['Cancelled', 'muted']
+    };
+    function contractChip(status) {
+      const [label, tone] = CONTRACT_STATUS[status] || [status, 'neutral'];
+      return `<span class="tone-chip ${tone}">${esc(label)}</span>`;
+    }
+    function contractTermsTemplate(d) {
+      const who = d.robloxUsername || 'the contractor';
+      return `1. The work
+${who} ("you") will deliver the milestones listed in this contract for ${studioName()} ("we").
+
+2. Payment
+Each milestone is paid at the amount shown once we approve it. Approved milestones are paid through the panel using your saved payout method.
+
+3. Changes and approval
+If a milestone needs changes we'll send it back with a note. You can resubmit it once it's fixed.
+
+4. Ownership
+Once a milestone is paid, everything you made for it belongs to ${studioName()}, and you won't reuse or resell it without our written permission.
+
+5. Confidentiality
+Keep anything you learn about our unreleased games, code and plans to yourself.
+
+6. Ending the contract
+Either side can end the contract in writing. Milestones already approved are still paid.`;
+    }
+
+    function renderContracts() {
+      const myGen = renderGen;
+      let list = null;
+      let manage = false;
+      let error = null;
+      let tab = 'open';
+      let editor = null;
+      let games = [];
+
+      function blankEditor() {
+        return { id: null, title: '', person: '', gameId: '', currency: currencyEnabled('ROBUX') ? 'ROBUX' : 'USD', dueAt: '', terms: '', milestones: [{ title: '', amount: '', dueAt: '' }], busy: false, error: null };
+      }
+
+      function editorHtml() {
+        const e = editor;
+        const total = e.milestones.reduce((t, m) => t + (Number(m.amount) || 0), 0);
+        return `
+        <div class="panel ct-editor">
+          <h3 class="panel-title">${e.id ? 'Edit draft' : 'New contract'}</h3>
+          ${e.error ? `<div class="error-box"><span>${esc(e.error)}</span></div>` : ''}
+          <div class="row2">
+            <div class="field"><label for="ctTitle">Title</label><input type="text" id="ctTitle" maxlength="160" placeholder="e.g. Winter map commission" value="${esc(e.title)}"></div>
+            <div class="field"><label for="ctPerson">Contractor</label>${personPickerHtml('ctPerson', 'Who is doing the work')}</div>
+          </div>
+          <div class="row3">
+            <div class="field"><label for="ctGame">Game <span class="hint">(optional)</span></label><select id="ctGame"><option value="">None</option>${games.map(g => `<option value="${esc(g.id)}" ${String(e.gameId) === String(g.id) ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
+            <div class="field"><label for="ctCurrency">Paid in</label><select id="ctCurrency">${currencyOptionsHtml(e.currency)}</select></div>
+            <div class="field"><label for="ctDue">Final deadline <span class="hint">(optional)</span></label><input type="date" id="ctDue" value="${esc(e.dueAt)}"></div>
+          </div>
+          <div class="field"><label>Milestones</label>
+            <div class="ct-ms-edit">
+              ${e.milestones.map((m, i) => `
+                <div class="ct-ms-row">
+                  <span class="ct-ms-num">${i + 1}</span>
+                  <input type="text" data-ms-title="${i}" maxlength="160" placeholder="What gets delivered" value="${esc(m.title)}" aria-label="Milestone ${i + 1}">
+                  <input type="number" data-ms-amount="${i}" min="0" step="any" placeholder="Amount" value="${esc(m.amount)}" aria-label="Amount">
+                  <input type="date" data-ms-due="${i}" value="${esc(m.dueAt)}" aria-label="Due date">
+                  <button type="button" class="icon-btn" data-ms-remove="${i}" aria-label="Remove milestone" ${e.milestones.length === 1 ? 'disabled' : ''}>&times;</button>
+                </div>`).join('')}
+            </div>
+            <div class="ct-ms-foot"><button type="button" class="pp-linkbtn" id="ctAddMs">Add a milestone</button><span>Total <b id="ctTotal">${esc(money(total, e.currency))}</b></span></div>
+          </div>
+          <div class="field"><label for="ctTerms">Terms <span class="hint">(the contractor signs these)</span></label><textarea id="ctTerms" rows="8" maxlength="20000" placeholder="What both sides agree to.">${esc(e.terms)}</textarea>
+            <button type="button" class="pp-linkbtn" id="ctTemplate" style="margin-top:6px;">${e.terms ? 'Replace with the starter template' : 'Use the starter template'}</button></div>
+          <p class="hint">The starter template is a plain-English starting point, not legal advice.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" data-ct-save="send" ${e.busy ? 'disabled' : ''}>${e.busy ? 'Saving...' : 'Save and send'}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-ct-save="draft" ${e.busy ? 'disabled' : ''}>Save as draft</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="ctCancelEdit">Cancel</button>
+          </div>
+        </div>`;
+      }
+
+      function filtered() {
+        if (!list) return [];
+        if (tab === 'open') return list.filter(c => ['sent', 'active'].includes(c.status));
+        if (tab === 'drafts') return list.filter(c => c.status === 'draft');
+        return list.filter(c => ['completed', 'cancelled'].includes(c.status));
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        const rows = filtered();
+        const counts = list ? { open: list.filter(c => ['sent', 'active'].includes(c.status)).length, drafts: list.filter(c => c.status === 'draft').length, done: list.filter(c => ['completed', 'cancelled'].includes(c.status)).length } : {};
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      ${pageHeadHtml('Contracts', manage ? 'Commissioned work with agreed terms and paid milestones. The contractor signs, marks milestones done, and each approval becomes a payment.' : 'Work you\'ve agreed to do. Sign new contracts and mark milestones done here.', manage && !editor ? `<button type="button" class="btn btn-primary btn-sm" id="ctNew">New contract</button>` : '')}
+      ${error ? `<div class="error-box"><span>${esc(error)}</span></div>` : ''}
+      ${editor ? editorHtml() : ''}
+      ${list ? `
+      <div class="tabs ct-tabs" role="tablist">
+        ${[['open', 'Open'], ...(manage ? [['drafts', 'Drafts']] : []), ['done', 'Finished']].map(([k, l]) => `<button type="button" role="tab" class="tab-btn${tab === k ? ' on active' : ''}" data-ct-tab="${k}" aria-selected="${tab === k}">${l} <span class="hint" style="margin:0;">${counts[k] || 0}</span></button>`).join('')}
+      </div>
+      ${rows.length ? `<div class="ct-list">${rows.map(c => `
+        <a class="ct-row" href="#/contract/${esc(c.id)}">
+          <div class="ct-row-main"><strong>${esc(c.title)}</strong><span>${manage ? esc(c.roblox_username) + ' &middot; ' : ''}${esc(c.count)} milestone${c.count === 1 ? '' : 's'}${c.submitted ? ` &middot; <b class="ct-attn">${esc(c.submitted)} to review</b>` : ''}</span></div>
+          <div class="ct-row-progress" aria-label="${esc(c.approved)} of ${esc(c.count)} approved"><span style="width:${c.count ? Math.round(c.approved / c.count * 100) : 0}%"></span></div>
+          <div class="ct-row-amt">${esc(money(c.total, c.currency))}</div>
+          <div>${contractChip(c.status)}</div>
+        </a>`).join('')}</div>`
+        : `<div class="dash-empty"><h3>${tab === 'open' ? 'No open contracts' : tab === 'drafts' ? 'No drafts' : 'Nothing finished yet'}</h3><p>${manage && tab !== 'done' ? 'Press New contract to commission some work.' : 'Contracts you\'re sent will show up here.'}</p></div>`}` : (error ? '' : `<div class="dash-loading">Loading...</div>`)}
+    </div>`;
+        wireTopbarSignOut();
+        wire();
+        if (editor) {
+          const pick = document.getElementById('ctPerson');
+          if (pick && editor.person) pick.value = editor.person;
+        }
+      }
+
+      function syncEditor() {
+        if (!editor) return;
+        const v = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
+        editor.title = v('ctTitle'); editor.person = v('ctPerson'); editor.gameId = v('ctGame');
+        editor.currency = v('ctCurrency') || editor.currency; editor.dueAt = v('ctDue'); editor.terms = v('ctTerms');
+        editor.milestones = editor.milestones.map((m, i) => ({
+          title: (document.querySelector(`[data-ms-title="${i}"]`) || {}).value || '',
+          amount: (document.querySelector(`[data-ms-amount="${i}"]`) || {}).value || '',
+          dueAt: (document.querySelector(`[data-ms-due="${i}"]`) || {}).value || ''
+        }));
+      }
+
+      function wire() {
+        const q = (id) => document.getElementById(id);
+        if (q('ctNew')) q('ctNew').addEventListener('click', async () => { await loadKnownPeople(); editor = blankEditor(); paint(); q('ctTitle') && q('ctTitle').focus(); });
+        document.querySelectorAll('[data-ct-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.ctTab; paint(); }));
+        if (!editor) return;
+        if (q('ctCancelEdit')) q('ctCancelEdit').addEventListener('click', () => { editor = null; paint(); });
+        if (q('ctAddMs')) q('ctAddMs').addEventListener('click', () => { syncEditor(); editor.milestones.push({ title: '', amount: '', dueAt: '' }); paint(); });
+        document.querySelectorAll('[data-ms-remove]').forEach(b => b.addEventListener('click', () => { syncEditor(); editor.milestones.splice(Number(b.dataset.msRemove), 1); paint(); }));
+        // Keep the total live without re-drawing the form (a re-draw mid-click would swallow it).
+        const refreshTotal = () => {
+          syncEditor();
+          const t = editor.milestones.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+          const el = document.getElementById('ctTotal');
+          if (el) el.textContent = money(t, editor.currency);
+        };
+        document.querySelectorAll('[data-ms-amount]').forEach(el => el.addEventListener('input', refreshTotal));
+        if (q('ctCurrency')) q('ctCurrency').addEventListener('change', refreshTotal);
+        if (q('ctTemplate')) q('ctTemplate').addEventListener('click', async () => {
+          syncEditor();
+          if (editor.terms && !(await askConfirm('Replace your terms with the starter template?'))) return;
+          const p = pickedPerson('ctPerson');
+          editor.terms = contractTermsTemplate({ robloxUsername: p ? p.name : '' });
+          paint();
+        });
+        document.querySelectorAll('[data-ct-save]').forEach(b => b.addEventListener('click', async () => {
+          syncEditor();
+          const p = pickedPerson('ctPerson');
+          const ms = editor.milestones.map(m => ({ title: m.title.trim(), amount: Number(m.amount), dueAt: m.dueAt || null })).filter(m => m.title || m.amount);
+          if (!editor.title.trim()) { editor.error = 'Give the contract a title.'; paint(); return; }
+          if (!p) { editor.error = 'Pick the contractor.'; paint(); return; }
+          if (!p.id) { editor.error = `${p.name} isn't someone the panel knows yet. They need to sign in once first.`; paint(); return; }
+          if (!ms.length || ms.some(m => !m.title || !(m.amount > 0))) { editor.error = 'Every milestone needs a description and an amount.'; paint(); return; }
+          const send = b.dataset.ctSave === 'send';
+          if (send && !editor.terms.trim()) { editor.error = 'Add the terms before sending, or use the starter template.'; paint(); return; }
+          editor.busy = true; editor.error = null; paint();
+          try {
+            const r = await callHrData('ct_save', { id: editor.id, title: editor.title, robloxUserId: p.id, robloxUsername: p.name, gameId: editor.gameId || null, currency: editor.currency, dueAt: editor.dueAt || null, terms: editor.terms, milestones: ms, send });
+            toast(send ? `Sent to ${p.name} to sign.` : 'Draft saved.');
+            editor = null;
+            window.location.hash = '#/contract/' + r.id;
+          } catch (e) {
+            editor.busy = false;
+            editor.error = e.code === 'own_payment' ? "You can't make a contract with yourself." : e.code === 'invalid_fields' ? 'Check the milestones: each needs a description and an amount within the per-request limit.' : e.message;
+            paint();
+          }
+        }));
+      }
+
+      async function load() {
+        try {
+          const [json, boot] = await Promise.all([callHrData('ct_list'), ensureBootstrap().catch(() => null)]);
+          list = json.data || []; manage = !!json.canManage; error = null;
+          games = (BOOTSTRAP && BOOTSTRAP.games) || [];
+          const q = parseHashQuery();
+          if (manage && q.get('new') === '1' && !editor) { await loadKnownPeople(); editor = blankEditor(); }
+        } catch (e) { error = e.code === 'database_update_needed' ? 'Your database needs an update. Run sql/upgrade.sql in Supabase.' : e.message; }
+        paint();
+      }
+      paint();
+      load();
+    }
+
+    function renderContractPage(id) {
+      const myGen = renderGen;
+      let c = null;
+      let error = null;
+      let busy = false;
+      let signError = null;
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        if (!c) {
+          app.innerHTML = `${topbar()}<div class="shell">${error ? `<div class="dash-empty"><h3>Couldn't open this contract</h3><p>${esc(error)}</p><a class="btn btn-ghost btn-sm" href="#/contracts">Back to contracts</a></div>` : '<div class="dash-loading">Loading...</div>'}</div>`;
+          wireTopbarSignOut();
+          return;
+        }
+        const total = c.total;
+        const approvedTotal = c.milestones.filter(m => m.status === 'approved').reduce((t, m) => t + Number(m.amount), 0);
+        const mine = c.isContractor;
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell ct-page">
+      <a class="back-link" href="#/contracts">&larr; Contracts</a>
+      <div class="dash-head">
+        <div><h1>${esc(c.title)}</h1><p class="sub">${mine ? `From ${esc(studioName())}` : `With ${esc(c.roblox_username)}`}${c.due_at ? ` &middot; due ${esc(fmtDate(c.due_at))}` : ''}</p></div>
+        <div class="dash-toolbar">${contractChip(c.status)}</div>
+      </div>
+      <div class="ct-stats">
+        <div><small>Total</small><strong>${esc(money(total, c.currency))}</strong></div>
+        <div><small>Approved</small><strong>${esc(money(approvedTotal, c.currency))}</strong></div>
+        <div><small>Paid out</small><strong>${esc(money(c.paidTotal, c.currency))}</strong></div>
+        <div><small>Milestones</small><strong>${esc(c.milestones.filter(m => m.status === 'approved').length)} / ${esc(c.milestones.length)}</strong></div>
+      </div>
+
+      ${c.status === 'sent' && mine ? `
+      <div class="panel ct-sign">
+        <h3 class="panel-title">Read and sign</h3>
+        <p class="sub" style="margin:0 0 14px;">Read the terms and milestones below. Signing means you agree to them. You'll be paid for each milestone once it's approved.</p>
+        ${signError ? `<div class="error-box"><span>${esc(signError)}</span></div>` : ''}
+        <div class="field"><label for="ctSignName">Type your full name to sign</label><input type="text" id="ctSignName" maxlength="120" autocomplete="name"></div>
+        <label class="pp-check"><input type="checkbox" id="ctAgree"> I've read this contract and agree to its terms.</label>
+        <button type="button" class="btn btn-primary btn-sm" id="ctSign" ${busy ? 'disabled' : ''}>${busy ? 'Signing...' : 'Sign contract'}</button>
+      </div>` : ''}
+      ${c.status === 'sent' && !mine ? `<div class="warn-box"><span>Waiting for ${esc(c.roblox_username)} to sign.</span></div>` : ''}
+      ${c.status === 'draft' ? `<div class="warn-box"><span>This is a draft. ${esc(c.roblox_username)} can't see it until you send it.</span><button type="button" class="btn btn-primary btn-sm" id="ctSend">Send to sign</button></div>` : ''}
+      ${c.status === 'cancelled' ? `<div class="warn-box"><span>Cancelled${c.cancel_reason ? `: ${esc(c.cancel_reason)}` : '.'} Milestones already approved are still paid.</span></div>` : ''}
+
+      <div class="heading-block section-head"><h2 class="sec-title">Milestones</h2></div>
+      <div class="ct-ms-list">
+        ${c.milestones.map((m, i) => {
+          const state = m.status === 'approved' ? (m.paymentStatus === 'paid' ? ['Paid', 'ok'] : ['Approved', 'info']) : m.status === 'submitted' ? ['Waiting for review', 'warn'] : ['To do', 'neutral'];
+          return `
+          <div class="ct-ms">
+            <span class="ct-ms-num ${m.status === 'approved' ? 'done' : ''}">${m.status === 'approved' ? '&#10003;' : i + 1}</span>
+            <div class="ct-ms-body">
+              <div class="ct-ms-top"><strong>${esc(m.title)}</strong><span class="ct-ms-amt">${esc(money(m.amount, c.currency))}</span></div>
+              <div class="ct-ms-meta"><span class="tone-chip ${state[1]}">${state[0]}</span>${m.due_at ? `<span>Due ${esc(fmtDate(m.due_at))}</span>` : ''}${m.decided_by && m.status === 'approved' ? `<span>Approved by ${esc(m.decided_by)}</span>` : ''}</div>
+              ${m.details ? `<p class="ct-ms-text">${esc(m.details)}</p>` : ''}
+              ${m.submitted_note && m.status !== 'open' ? `<p class="ct-ms-note"><b>${esc(c.roblox_username)}:</b> ${esc(m.submitted_note)}</p>` : ''}
+              ${m.decision_note && m.status === 'open' ? `<p class="ct-ms-note warn"><b>Sent back:</b> ${esc(m.decision_note)}</p>` : ''}
+              ${c.status === 'active' && mine && m.status === 'open' ? `<div class="ct-ms-actions"><button type="button" class="btn btn-ghost btn-sm" data-ms-submit="${esc(m.id)}">Mark as done</button></div>` : ''}
+              ${c.status === 'active' && c.canManage && !mine && ['open', 'submitted'].includes(m.status) ? `<div class="ct-ms-actions">
+                <button type="button" class="btn btn-primary btn-sm" data-ms-approve="${esc(m.id)}">Approve ${esc(money(m.amount, c.currency))}</button>
+                ${m.status === 'submitted' ? `<button type="button" class="btn btn-ghost btn-sm" data-ms-reject="${esc(m.id)}">Send back</button>` : ''}
+              </div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div class="heading-block section-head"><h2 class="sec-title">Terms</h2></div>
+      <div class="panel"><div class="legal-doc ct-terms">${c.terms ? legalBodyHtml(c.terms) : '<p class="hint">No terms were written for this contract.</p>'}</div>
+        ${c.signed_at ? `<div class="ct-signature"><span>Signed by</span><strong>${esc(c.signed_name)}</strong><small>${esc(fmtDateTime(c.signed_at))}</small></div>` : ''}
+      </div>
+
+      ${c.canManage && !mine && ['draft', 'sent', 'active'].includes(c.status) ? `<div class="ct-danger"><button type="button" class="btn btn-danger-ghost btn-sm" id="ctCancel">${c.status === 'draft' ? 'Delete draft' : 'Cancel contract'}</button></div>` : ''}
+    </div>`;
+        wireTopbarSignOut();
+        wire();
+      }
+
+      function wire() {
+        const q = (x) => document.getElementById(x);
+        if (q('ctSign')) q('ctSign').addEventListener('click', async () => {
+          const name = q('ctSignName').value.trim();
+          if (name.length < 2) { signError = 'Type your full name.'; paint(); return; }
+          if (!q('ctAgree').checked) { signError = 'Tick the box to agree to the terms.'; paint(); return; }
+          busy = true; signError = null; paint();
+          try { await callHrData('ct_sign', { id: c.id, name, agree: true }); toast('Signed. The contract is active.'); await load(); }
+          catch (e) { signError = e.message; }
+          busy = false; paint();
+        });
+        if (q('ctSend')) q('ctSend').addEventListener('click', async () => {
+          if (!c.terms && !(await askConfirm('Send without any terms?\n\nThe contractor will sign a contract with only the milestones.'))) return;
+          try { await callHrData('ct_send', { id: c.id }); toast(`Sent to ${c.roblox_username}.`); await load(); } catch (e) { toast(e.message, 'err'); }
+        });
+        if (q('ctCancel')) q('ctCancel').addEventListener('click', async () => {
+          if (c.status === 'draft') {
+            if (!(await askConfirm('Delete this draft?'))) return;
+            try { await callHrData('ct_cancel', { id: c.id }); toast('Draft deleted.'); window.location.hash = '#/contracts'; } catch (e) { toast(e.message, 'err'); }
+            return;
+          }
+          const reason = await askForText({ title: 'Cancel this contract', hint: `${c.roblox_username} sees this reason. Milestones already approved are still paid.`, placeholder: 'For example: the project was paused.', confirmLabel: 'Cancel contract', required: false });
+          if (reason === null) return;
+          try { await callHrData('ct_cancel', { id: c.id, reason }); toast('Contract cancelled.'); await load(); } catch (e) { toast(e.message, 'err'); }
+        });
+        document.querySelectorAll('[data-ms-submit]').forEach(b => b.addEventListener('click', async () => {
+          const note = await askForText({ title: 'Mark this milestone as done', hint: 'Add a link or a short note so it can be checked. Optional.', placeholder: 'e.g. Uploaded to the team place, see the Winter folder.', confirmLabel: 'Send for review', required: false });
+          if (note === null) return;
+          try { await callHrData('ct_submit_milestone', { milestoneId: b.dataset.msSubmit, note }); toast('Sent for review.'); await load(); } catch (e) { toast(e.message, 'err'); }
+        }));
+        document.querySelectorAll('[data-ms-approve]').forEach(b => b.addEventListener('click', async () => {
+          if (!(await askConfirm(`Approve this milestone?\n\nIt becomes a payment for ${c.roblox_username} waiting to be paid out.`, { okLabel: 'Approve' }))) return;
+          b.disabled = true;
+          try { const r = await callHrData('ct_decide_milestone', { milestoneId: b.dataset.msApprove, decision: 'approve' }); toast(r.completed ? 'Approved. Every milestone is done, so the contract is complete.' : 'Approved and added to Review & pay.'); await load(); }
+          catch (e) { b.disabled = false; toast(e.code === 'own_payment' ? "You can't approve your own milestone." : e.message, 'err'); }
+        }));
+        document.querySelectorAll('[data-ms-reject]').forEach(b => b.addEventListener('click', async () => {
+          const note = await askForText({ title: 'Send this milestone back', hint: `${c.roblox_username} sees this note.`, placeholder: 'What needs to change?', confirmLabel: 'Send back', required: true, requiredMessage: 'Say what needs to change.' });
+          if (note === null) return;
+          try { await callHrData('ct_decide_milestone', { milestoneId: b.dataset.msReject, decision: 'reject', note }); toast('Sent back.'); await load(); } catch (e) { toast(e.message, 'err'); }
+        }));
+      }
+
+      async function load() {
+        try { const json = await callHrData('ct_get', { id }); c = json.data; error = null; }
+        catch (e) { error = e.code === 'not_found' ? "It doesn't exist, or it isn't yours to see." : e.message; }
+        paint();
+      }
+      paint();
+      load();
     }
 
     function renderTeamRemovedPage() {
@@ -12438,7 +13358,7 @@
             payment: paymentVal,
             currency: currencyVal
           }), taskDraft.id || taskDraft.batch_id ? 'Task updated' : (everyone ? `Task given to ${source.members.length} people` : 'Task added'), () => { taskDraft = null; });
-          if (saved && saved.created > 1) toast(saved.notified ? `${saved.notified} of ${saved.created} got a Discord message.` : 'Nobody had Discord linked, so no messages were sent.', saved.notified ? undefined : 'err');
+          if (saved && saved.created > 1) toast(saved.notified ? `${saved.notified} of ${saved.created} were notified.` : 'Nobody could be notified.', saved.notified ? undefined : 'err');
         });
         document.querySelectorAll('[data-batch-toggle]').forEach(el => el.addEventListener('click', () => {
           const key = el.dataset.batchToggle;
