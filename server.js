@@ -161,7 +161,7 @@ const PERMISSIONS = [
 const legalText = require('./lib/legal');
 const license = require('./lib/license');
 // Feature modules loaded from features/ (notifications is always loaded first).
-const FEATURE_MODULES = ['plan', 'people', 'revenue', 'contracts'];
+const FEATURE_MODULES = ['plan', 'people', 'revenue', 'contracts', 'tax', 'finance'];
 const TOS_CONTENT = legalText.TERMS;
 const AUP_CONTENT = legalText.AUP;
 
@@ -1533,7 +1533,7 @@ function taskMoneyLine(task) {
     if (!task || !task.payment) return '';
     const amount = task.currency === 'ROBUX'
         ? `R$ ${Number(task.payment).toLocaleString()}`
-        : `$${Number(task.payment).toFixed(2)}`;
+        : `${money(Number(task.payment), 'USD')}`;
     return `\nPays ${amount} once it's approved.`;
 }
 
@@ -2283,7 +2283,7 @@ async function enforceUsdMinimumThreshold(filter) {
 
             const discordUserId = await getLinkedDiscordUserId(m.roblox_user_id);
             if (discordUserId) {
-                sendDiscordDM(discordUserId, `Your payment method has been changed to DevEx Robux because your pending balance ($${pendingUsdEquivalent.toFixed(2)}) is below the $${threshold} minimum required for USD payouts. Your pending payment requests have been converted to Robux.`);
+                sendDiscordDM(discordUserId, `Your payment method has been changed to DevEx Robux because your pending balance (${money(pendingUsdEquivalent, 'USD')}) is below the $${threshold} minimum required for USD payouts. Your pending payment requests have been converted to Robux.`);
             }
 
             logAudit(null, {
@@ -2539,7 +2539,10 @@ async function ensureRoleByName(userId, username, roleName) {
 async function createSessionFor({ userId, username, provider }) {
     const access = await computeAccess(userId);
     const token = randomToken(32);
+    // People with two-factor sign-in start "pending" until they enter a code.
+    const needsMfa = await mfaModule.isEnabledFor(userId);
     const { error } = await supabase.from('hr_sessions').insert({
+        ...(needsMfa ? { mfa_pending: true } : {}),
         token: hashToken(token),
         roblox_user_id: userId,
         roblox_username: username,
@@ -4041,10 +4044,16 @@ app.get('/hr-session', async (req, res) => {
     const session = await getSession(req);
     if (!session) { res.status(401).json({ ok: false }); return; }
 
-    const [discordUserId, securityState] = await Promise.all([
+    const [discordUserId, securityState, mfaState] = await Promise.all([
         getLinkedDiscordUserId(session.roblox_user_id),
-        getSecurityState()
+        getSecurityState(),
+        mfaModule.statusFor(session)
     ]);
+    if (mfaState.pending) {
+        // Until the code is entered, say nothing about the account beyond who it is.
+        res.json({ ok: true, mfa: mfaState, robloxUserId: session.roblox_user_id, robloxUsername: session.roblox_username, roles: [], permissions: [], maxHierarchy: 0, discordLinked: true, teamRemoved: false, teamState: 'ok', security: { level: securityState.level, note: null, canManage: false } });
+        return;
+    }
 
     res.json({
         ok: true,
@@ -4061,7 +4070,8 @@ app.get('/hr-session', async (req, res) => {
         discordLinked: DISCORD_ADDON ? !!discordUserId : true,
         discordRequired: DISCORD_ADDON,
         teamRemoved: !!session.team_removed,
-        teamState: session.team_state || 'ok'
+        teamState: session.team_state || 'ok',
+        mfa: mfaState
     });
 });
 
@@ -4174,7 +4184,7 @@ const featureCtx = {
     supabase, studio, security, license, APP_ORIGIN,
     hasPermission, requirePermission, logAudit, logSecurityEvent, publicError,
     generateRequestId, isOwnMoney, blockedAsOwnMoney, blockedByAccountHold, amountOk, pickCurrency,
-    resolveGameId, getDevexRate, runBackup, BACKUP_TABLES, money, cashCurrency,
+    resolveGameId, getDevexRate, runBackup, BACKUP_TABLES, money, cashCurrency, invalidateSessions,
     discordDM: DISCORD_ADDON ? async (userId, text) => {
         const discordUserId = await getLinkedDiscordUserId(userId);
         if (discordUserId) await sendDiscordDM(discordUserId, text);
@@ -4183,7 +4193,8 @@ const featureCtx = {
 const notifier = require('./features/notifications')(featureCtx);
 featureCtx.notify = notifier.notify;
 featureCtx.studioEvent = notifier.studioEvent;
-const EXTRA_ACTIONS = { ...notifier.actions };
+const mfaModule = require('./features/mfa')(featureCtx);
+const EXTRA_ACTIONS = { ...notifier.actions, ...mfaModule.actions };
 for (const name of FEATURE_MODULES) {
     const mod = require('./features/' + name)(featureCtx);
     Object.assign(EXTRA_ACTIONS, mod.actions || {});
@@ -4233,6 +4244,9 @@ async function handleHrData(req, res) {
 
     const action = req.body && req.body.action;
     const payload = (req.body && req.body.payload) || {};
+
+    const mfaBlock = await mfaModule.gate(session, action);
+    if (mfaBlock) { res.status(403).json({ ok: false, error: mfaBlock }); return; }
 
     if (!(await securityGate(res, session, action))) return;
 
@@ -4512,8 +4526,8 @@ async function handleHrData(req, res) {
                 originalCurrency: changed ? row.currency : null
             }
         });
-        const amountText = newCurrency === 'ROBUX' ? `R$ ${Number(newAmount).toLocaleString()}` : `$${Number(newAmount).toFixed(2)}`;
-        const askedText = row.currency === 'ROBUX' ? `R$ ${Number(row.payment).toLocaleString()}` : `$${Number(row.payment).toFixed(2)}`;
+        const amountText = newCurrency === 'ROBUX' ? `R$ ${Number(newAmount).toLocaleString()}` : `${money(Number(newAmount), 'USD')}`;
+        const askedText = row.currency === 'ROBUX' ? `R$ ${Number(row.payment).toLocaleString()}` : `${money(Number(row.payment), 'USD')}`;
         try {
             await notifyModeratedUser(row.roblox_user_id, changed
                 ? `Your payment request for "${row.task_name}" was approved at ${amountText} (you asked for ${askedText}). It's now waiting to be paid out.${payload.note ? `\n${String(payload.note).trim()}` : ''}`
@@ -5692,7 +5706,7 @@ async function handleHrData(req, res) {
             if (threshold > 0) {
                 const pendingUsdEquivalent = await getPendingUsdEquivalent(robloxUserId, null);
                 if (pendingUsdEquivalent < threshold) {
-                    res.status(400).json({ ok: false, error: `This person needs $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before ${USD_METHOD_LABELS[method] || method} can be selected.` });
+                    res.status(400).json({ ok: false, error: `This person needs ${money((threshold - pendingUsdEquivalent), 'USD')} more in pending requests before ${USD_METHOD_LABELS[method] || method} can be selected.` });
                     return;
                 }
             }
@@ -5771,7 +5785,7 @@ async function handleHrData(req, res) {
             if (threshold > 0) {
                 const pendingUsdEquivalent = await getPendingUsdEquivalent(session.roblox_user_id, session.roblox_username);
                 if (pendingUsdEquivalent < threshold) {
-                    res.status(400).json({ ok: false, error: `You need $${(threshold - pendingUsdEquivalent).toFixed(2)} more in pending requests before you can select ${USD_METHOD_LABELS[method] || method}.` });
+                    res.status(400).json({ ok: false, error: `You need ${money((threshold - pendingUsdEquivalent), 'USD')} more in pending requests before you can select ${USD_METHOD_LABELS[method] || method}.` });
                     return;
                 }
             }
@@ -7384,7 +7398,7 @@ async function handleHrData(req, res) {
             revert: { type: 'delete_payment_request', id: requestId }
         });
         runPaymentMethodConversionSweep({ robloxUserId: task.assigned_to_user_id });
-        const amount = currency === 'ROBUX' ? `R$ ${Number(task.payment).toLocaleString()}` : `$${Number(task.payment).toFixed(2)}`;
+        const amount = currency === 'ROBUX' ? `R$ ${Number(task.payment).toLocaleString()}` : `${money(Number(task.payment), 'USD')}`;
         const notified = await notifyModeratedUser(task.assigned_to_user_id,
             `Your payment for "${task.title}" (${amount}) has been logged and is waiting to be paid out. You can follow it under My payments on ${studioName()}.`);
         res.json({ ok: true, requestId, notified });

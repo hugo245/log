@@ -130,6 +130,49 @@ create table if not exists public.contract_milestones (
     payment_request_id  text
 );
 create index if not exists contract_milestones_contract_idx on public.contract_milestones (contract_id);
+
+-- Tax details -------------------------------------------------------------------------------
+-- Tax IDs and dates of birth are encrypted by the API (TAX_ENCRYPTION_KEY) before they get here.
+create table if not exists public.tax_profiles (
+    roblox_user_id      bigint primary key,
+    roblox_username     text,
+    form_type           text not null check (form_type in ('W9', 'W8BEN')),
+    legal_name          text not null,
+    business_name       text,
+    tax_classification  text,
+    country             text not null,
+    address_line1       text,
+    address_line2       text,
+    city                text,
+    region              text,
+    postal_code         text,
+    tin_encrypted       text,
+    tin_last4           text,
+    tin_type            text,
+    has_dob             boolean not null default false,
+    signed_name         text,
+    signed_at           timestamptz,
+    updated_at          timestamptz not null default now()
+);
+create index if not exists payment_requests_paid_at_idx on public.payment_requests (paid_at) where paid_at is not null;
+
+-- Game budgets ------------------------------------------------------------------------------
+alter table public.games add column if not exists budget_warned_pct integer not null default 0;
+
+-- Two-factor sign-in ------------------------------------------------------------------------
+create table if not exists public.user_mfa (
+    roblox_user_id      bigint primary key,
+    roblox_username     text,
+    secret_encrypted    text not null,
+    enabled             boolean not null default false,
+    enabled_at          timestamptz,
+    last_step           bigint not null default -1,
+    last_used_at        timestamptz,
+    recovery_hashes     jsonb not null default '[]'::jsonb,
+    created_at          timestamptz not null default now()
+);
+alter table public.hr_sessions add column if not exists mfa_pending boolean not null default false;
+alter table public.app_settings add column if not exists mfa_required boolean not null default false;
 -- <<< features schema
 
 -- 3. Keep the database closed to the public key -----------------------------------------------

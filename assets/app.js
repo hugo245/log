@@ -276,6 +276,11 @@
 
     const ROBUX_IMG = 'https://devforum-uploads.s3.dualstack.us-east-2.amazonaws.com/uploads/original/4X/e/a/9/ea98f8c6c438d2d8136a6751282a153c6b28b892.png';
     const CURRENCY_SYMBOL = { USD: '$' };
+    // Cash amounts are stored under the code "USD" and shown in the studio's cash currency
+    // (Settings > Branding > Payouts). Robux is always Robux.
+    const CASH_SYMBOL = { USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$' };
+    function cashCode() { return (STUDIO.payments && STUDIO.payments.cashCurrency) || 'USD'; }
+    function cashSymbol() { return CASH_SYMBOL[cashCode()] || '$'; }
 
     let DEVEX_RATE = 0.0038;
     let GAMES = [];
@@ -297,6 +302,9 @@
     let appDataReady = false;
     let needsOnboarding = false;
     let needsDiscordLink = false;
+    // Two-factor sign-in: waiting for a code, or the studio requires it and it isn't set up.
+    let mfaPending = false;
+    let mfaSetupRequired = false;
     let teamRemoved = false;
     let hrTeamState = 'ok';
 
@@ -312,7 +320,7 @@
 
     function devexLabel() {
       const per10k = DEVEX_RATE * 10000;
-      return `DevEx rate: $${per10k.toFixed(2)} per 10,000 Robux (${DEVEX_RATE})`;
+      return `Robux rate: ${money(per10k, 'USD')} per 10,000 Robux`;
     }
 
     function fmtAmount(data) {
@@ -327,7 +335,7 @@
     function devexEquivalent(data) {
       if (data.currency !== 'ROBUX') return '';
       const usd = (Number(data.payment) || 0) * DEVEX_RATE;
-      return `&asymp; $${usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD at DevEx`;
+      return `&asymp; ${money(usd, 'USD')} at the Robux rate`;
     }
 
     function robuxEquivalentLabel(data) {
@@ -586,7 +594,7 @@
         if (!r || !r.paymentMethod) return;
         bankDetailsFor = {
           name: r.robloxUsername || 'them',
-          amount: r.currency === 'ROBUX' ? `R$ ${Number(r.payment).toLocaleString()}` : `$${Number(r.payment).toFixed(2)}`,
+          amount: r.currency === 'ROBUX' ? `R$ ${Number(r.payment).toLocaleString()}` : `${money(r.payment, 'USD')}`,
           reference: r.id,
           details: r.paymentMethod.details || {}
         };
@@ -1171,6 +1179,8 @@
           teamRemoved = json.teamRemoved === true;
           hrTeamState = json.teamState || (json.teamRemoved ? 'removed' : 'ok');
           needsDiscordLink = discordOn() && json.discordLinked === false;
+          mfaPending = !!(json.mfa && json.mfa.pending);
+          mfaSetupRequired = !!(json.mfa && json.mfa.setupRequired);
           if (json.security) {
             securityLevel = json.security.level || 'normal';
             lockdownNote = json.security.note || '';
@@ -1253,6 +1263,8 @@
           teamRemoved = true;
           if (currentPath() !== '#/team-removed') window.location.hash = '#/team-removed';
         }
+        if (code === 'mfa_required' && !mfaPending) { mfaPending = true; route(); }
+        if (code === 'mfa_setup_required' && !mfaSetupRequired) { mfaSetupRequired = true; if (currentPath() !== '#/account') window.location.hash = '#/account'; }
         if (code === 'locked_down') {
           lockdownNote = (json.security && json.security.note) || '';
           if (!siteLocked) {
@@ -2696,7 +2708,7 @@
         const blocked = ['PAYPAL', 'VENMO', 'BANK_TRANSFER'].includes(key) && elig && !elig.eligible;
         return `<label class="pp-method ${st.method === key ? 'on' : ''} ${blocked ? 'blocked' : ''}">
                 <input type="radio" name="ppMethod" value="${esc(key)}" ${st.method === key ? 'checked' : ''} ${blocked ? 'disabled' : ''}>
-                <span><strong>${esc(m.label)}</strong><span class="hint">${blocked ? `Needs $${Number(elig.amountNeeded || 0).toFixed(2)} more pending first` : esc(m.sub)}</span></span>
+                <span><strong>${esc(m.label)}</strong><span class="hint">${blocked ? `Needs ${money(elig.amountNeeded || 0, 'USD')} more pending first` : esc(m.sub)}</span></span>
               </label>`;
       }).join('')}
           </div>
@@ -3080,11 +3092,11 @@
 
       sheet.mergeCells('A4:J4');
       const sub = sheet.getCell('A4');
-      sub.value = `Exported ${new Date().toLocaleString()}, DevEx rate ${(DEVEX_RATE * 10000).toFixed(2)} USD per 10,000 Robux`;
+      sub.value = `Exported ${new Date().toLocaleString()}, Robux rate ${(DEVEX_RATE * 10000).toFixed(2)} ${cashCode()} per 10,000 Robux`;
       sub.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF5B616E' } };
 
       const headerRowNum = 6;
-      const headers = ['#', 'DEV RBLX USERNAME', 'PRODUCER', 'GAME', 'TASK/BUG TITLE', 'APPROVED', 'PAID', 'R$', 'USD', 'DATE'];
+      const headers = ['#', 'DEV RBLX USERNAME', 'PRODUCER', 'GAME', 'TASK/BUG TITLE', 'APPROVED', 'PAID', 'R$', cashCode(), 'DATE'];
       const headerRow = sheet.getRow(headerRowNum);
       headers.forEach((h, i) => { headerRow.getCell(i + 1).value = h; });
       headerRow.eachCell(cell => {
@@ -3320,6 +3332,8 @@
       }
 
       const LEGAL_PATHS = ['#/terms', '#/privacy', '#/aup', '#/tos'];
+      if (isHrAuthed && mfaPending && !LEGAL_PATHS.includes(path)) { renderMfaChallenge(); return; }
+      if (isHrAuthed && mfaSetupRequired && path !== '#/account' && !LEGAL_PATHS.includes(path)) { window.location.hash = '#/account'; return; }
       if (isHrAuthed && needsOnboarding && path !== '#/onboarding' && !LEGAL_PATHS.includes(path)) {
         window.location.hash = '#/onboarding';
         return;
@@ -3351,6 +3365,8 @@
         if (isHrAuthed) renderExports(); else renderHrGate();
       } else if (path === '#/tax') {
         if (isHrAuthed) renderTaxAdmin(); else renderHrGate();
+      } else if (path === '#/account') {
+        if (isHrAuthed) renderAccount(); else renderHrGate();
       } else if (path === '#/setup') {
         if (isHrAuthed) renderSetupWizard(); else renderHrGate();
       } else if (path === '#/runs') {
@@ -3460,6 +3476,7 @@
         { group: 'team', label: 'Exports', href: '#/exports', show: hasPermission('dashboard.export'), keywords: 'quickbooks xero csv paypal wise accounting' },
         { group: 'admin', label: 'Tax & receipts', href: '#/tax', show: hasPermission('tax.view'), keywords: 'tax w9 w-8ben 1099 year end receipts' },
         { group: 'you', label: 'Tax details', href: '#/my?focus=tax', navHidden: true, keywords: 'tax w9 w-8ben' },
+        { group: 'you', label: 'Account & security', href: '#/account', keywords: 'two-factor 2fa authenticator password devices sessions sign out' },
         { group: 'you', label: 'My teams & skillsets', href: '#/my', navHidden: true },
         { group: 'you', label: 'Terms of Service', href: '#/terms', navHidden: true },
         { group: 'you', label: 'Privacy Policy', href: '#/privacy', navHidden: true },
@@ -3474,7 +3491,7 @@
         '#/request': 'claims', '#/runs': 'paymentRuns', '#/teams': 'teams', '#/analytics': 'analytics',
         '#/staff': 'staffDatabase', '#/recruitment': 'recruitment', '#/recruitment-analytics': 'recruitment',
         '#/security': 'security', '#/audit': 'audit',
-        '#/revenue': 'revenueShare', '#/contracts': 'contracts', '#/exports': 'accountingExport', '#/tax': 'taxForms'
+        '#/revenue': 'revenueShare', '#/contracts': 'contracts', '#/tax': 'taxForms'
       })[path] || (path.indexOf('#/contract/') === 0 ? 'contracts' : path.indexOf('#/receipt/') === 0 ? 'taxForms' : null);
     }
 
@@ -3525,7 +3542,8 @@
             canSeeDashboard && featureOn('paymentRuns') ? { href: '#/runs', label: 'Payment runs', icon: 'calendar', paths: ['#/runs'] } : null,
             featureOn('contracts') ? { href: '#/contracts', label: 'Contracts', icon: 'contract', paths: ['#/contracts', '#/contract'] } : null,
             hasPermission('revenue.manage') && featureOn('revenueShare') ? { href: '#/revenue', label: 'Revenue share', icon: 'pie', paths: ['#/revenue'] } : null,
-            hasPermission('dashboard.export') && featureOn('accountingExport') ? { href: '#/exports', label: 'Exports', icon: 'download', paths: ['#/exports'] } : null
+            (hasPermission('dashboard.export') && featureOn('accountingExport')) ? { href: '#/exports', label: 'Exports & budgets', icon: 'download', paths: ['#/exports'] }
+              : (featureOn('budgets') && hasPermission('settings.manage_games')) ? { href: '#/exports?tab=budgets', label: 'Budgets', icon: 'download', paths: ['#/exports'] } : null
           ]
         },
         {
@@ -3596,6 +3614,7 @@
           </summary>
           <div class="shell-menu">
             <button type="button" id="themeToggleBtn">${themeToggleIcon()}<span>${getTheme() === 'dark' ? 'Light mode' : 'Dark mode'}</span></button>
+            <a href="#/account"><span class="shell-menu-pad"></span><span>Account &amp; security</span></a>
             ${locked ? '' : `<button type="button" id="replayTourBtn"><span class="shell-menu-pad"></span><span>Take the tour</span></button>`}
             <a href="#/terms"><span class="shell-menu-pad"></span><span>Terms</span></a>
             <a href="#/privacy"><span class="shell-menu-pad"></span><span>Privacy</span></a>
@@ -5189,7 +5208,7 @@
     }
 
     function moneyUsd(n) {
-      return '$' + (Number(n) || 0).toFixed(2);
+      return money(n, 'USD');
     }
 
     function moneyRobux(n) {
@@ -5691,7 +5710,7 @@
 
         const copyBtn = document.getElementById('runCopyBtn');
         if (copyBtn && sheet) copyBtn.addEventListener('click', () => {
-          const header = ['Name', 'Method', 'Cash USD', 'Robux', 'Items'].join('\t');
+          const header = ['Name', 'Method', `Cash ${cashCode()}`, 'Robux', 'Items'].join('\t');
           const body = sheet.sheet.map(p => [
             p.robloxUsername || '',
             p.method ? methodDisplayLabel(p.method) : 'None set',
@@ -5914,7 +5933,8 @@
             <button type="button" class="btn btn-primary btn-sm" id="secSaveSettings" ${working ? 'disabled' : ''}>Save</button>
           </div>
         </div>
-      </div>` : ''}` : tab === 'holds' ? `
+      </div>` : ''}
+      ${canManage ? '<div id="mfaPolicyMount"></div>' : ''}` : tab === 'holds' ? `
       <div class="home-card">
         <div class="home-card-head"><h2>Payout holds</h2><span class="count">${holds.length}</span></div>
         <div class="home-note">A hold freezes one person without touching anyone else. They cannot be paid, change their payout details or send new requests until it is lifted. Nothing they are owed is removed.</div>
@@ -5954,6 +5974,8 @@
 
         wireTopbarSignOut();
 
+        const mfaMount = document.getElementById('mfaPolicyMount');
+        if (mfaMount) mountMfaPolicy(mfaMount);
         document.querySelectorAll('[data-sec-tab]').forEach(el => el.addEventListener('click', () => {
           tab = el.dataset.secTab;
           paint();
@@ -6495,7 +6517,7 @@
         const rowHtml = `
             <tr>
               <td><button type="button" class="expand-toggle" data-toggle="${esc(r.id)}">${isOpen ? '&minus;' : '+'}</button></td>
-              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.split ? `<div class="method-note has-method">Split: $${Number(r.split.cashUsd).toFixed(2)} + R$ ${Number(r.split.robux).toLocaleString()}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(r.paymentMethod)}>${esc(methodDisplayLabel(r.paymentMethod))}${r.paymentMethod.method === 'BANK_TRANSFER' && !r.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(r.id)}">Payment details</button>` : ''}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
+              <td class="name-cell"><strong>${userLink(r.robloxUserId, r.robloxUsername)}</strong><span>Logged by ${r.requestedBy ? userLink(r.requestedByUserId, r.requestedBy) : '-'}</span>${(r.requesterTeam || r.requesterSkillset) ? `<div class="role-meta" style="margin-top:2px;">${[r.requesterTeam, r.requesterSkillset].filter(Boolean).map(esc).join(' &middot; ')}</div>` : ''}${r.split ? `<div class="method-note has-method">Split: ${money(r.split.cashUsd, 'USD')} + R$ ${Number(r.split.robux).toLocaleString()}</div>` : ''}${r.paymentMethod ? `<div class="method-note has-method"${methodHiddenTitle(r.paymentMethod)}>${esc(methodDisplayLabel(r.paymentMethod))}${r.paymentMethod.method === 'BANK_TRANSFER' && !r.paymentMethod.detailsHidden ? ` <button type="button" class="pp-linkbtn" data-bank-details="${esc(r.id)}">Payment details</button>` : ''}</div>` : `<div class="method-note missing-method">No payment method set</div>`}</td>
               <td class="task-cell">
                 <div class="task-name">${esc(r.taskName || 'Untitled task')}</div>
                 ${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}
@@ -6524,7 +6546,7 @@
                   <input type="number" id="editAmt_${esc(r.id)}" value="${esc(r.payment)}" min="0.01" step="any">
                   <select id="editCur_${esc(r.id)}">
                     <option value="ROBUX" ${r.currency === 'ROBUX' ? 'selected' : ''}>Robux</option>
-                    <option value="USD" ${r.currency === 'USD' ? 'selected' : ''}>USD</option>
+                    <option value="USD" ${r.currency === 'USD' ? 'selected' : ''}>${esc(cashCode())}</option>
                   </select>
                   <button type="button" class="btn btn-ok btn-sm" data-save-amount="${esc(r.id)}" ${amountSaving.has(r.id) ? 'disabled' : ''}>${amountSaving.has(r.id) ? 'Saving...' : 'Save amount'}</button>
                 </div>` : ''}
@@ -6773,7 +6795,7 @@
         const pendingRobuxEl = document.getElementById('statPendingRobux');
         if (pendingRobuxEl) pendingRobuxEl.innerHTML = `<img src="${ROBUX_IMG}" alt="Robux">${pendingRobux.toLocaleString()}`;
         const pendingUsdEl = document.getElementById('statPendingUsd');
-        if (pendingUsdEl) pendingUsdEl.textContent = `$${pendingUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        if (pendingUsdEl) pendingUsdEl.textContent = `${money(pendingUsd, 'USD')}`;
         const paidThisMonthEl = document.getElementById('statPaidThisMonth');
         if (paidThisMonthEl) paidThisMonthEl.textContent = String(paidThisMonth);
         const missingMethodEl = document.getElementById('statMissingMethod');
@@ -6831,8 +6853,8 @@
           <div class="strip-value" id="statPendingRobux"><img src="${ROBUX_IMG}" alt="Robux">${pendingRobux.toLocaleString()}</div>
         </div>
         <div class="strip-card">
-          <div class="strip-label">Pending USD</div>
-          <div class="strip-value" id="statPendingUsd">$${pendingUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div class="strip-label">Pending ${esc(cashCode())}</div>
+          <div class="strip-value" id="statPendingUsd">${money(pendingUsd, 'USD')}</div>
         </div>
         <div class="strip-card">
           <div class="strip-label">Paid this month</div>
@@ -6889,8 +6911,8 @@
             ${Object.keys(PAYMENT_METHODS).map(k => `<option value="${k}" ${methodFilter === k ? 'selected' : ''}>${esc(PAYMENT_METHODS[k].label)}</option>`).join('')}
             <option value="none" ${methodFilter === 'none' ? 'selected' : ''}>No method set</option>
           </select>
-          <input type="number" id="minAmountInput" class="filter-select" placeholder="Min $" min="0" step="any" value="${esc(minAmount)}" style="width:92px;" title="Minimum amount in USD (Robux converted at DevEx rate)">
-          <input type="number" id="maxAmountInput" class="filter-select" placeholder="Max $" min="0" step="any" value="${esc(maxAmount)}" style="width:92px;" title="Maximum amount in USD (Robux converted at DevEx rate)">
+          <input type="number" id="minAmountInput" class="filter-select" placeholder="Min ${esc(cashSymbol())}" min="0" step="any" value="${esc(minAmount)}" style="width:92px;" title="Minimum amount in ${esc(cashCode())} (Robux converted at the Robux rate)">
+          <input type="number" id="maxAmountInput" class="filter-select" placeholder="Max ${esc(cashSymbol())}" min="0" step="any" value="${esc(maxAmount)}" style="width:92px;" title="Maximum amount in ${esc(cashCode())} (Robux converted at the Robux rate)">
           <select id="sortSelect" class="filter-select" aria-label="Sort">
             <option value="newest" ${sortBy === 'newest' ? 'selected' : ''}>Newest first</option>
             <option value="oldest" ${sortBy === 'oldest' ? 'selected' : ''}>Oldest first</option>
@@ -6910,7 +6932,7 @@
                 <div class="task-title">${esc(c.task_name || 'Work')}</div>
                 <div class="task-meta">
                   <span>${userLink(c.roblox_user_id, c.roblox_username)}</span>
-                  <span class="pp-tag">asked for ${esc(c.currency === 'USD' ? '$' + Number(c.payment).toFixed(2) : 'R$ ' + Number(c.payment).toLocaleString())}</span>
+                  <span class="pp-tag">asked for ${esc(c.currency === 'USD' ? money(c.payment, 'USD') : 'R$ ' + Number(c.payment).toLocaleString())}</span>
                   ${c.game ? `<span>${esc(c.game)}</span>` : ''}
                   <span>${esc(relTime(c.created_at))}</span>
                 </div>
@@ -6920,7 +6942,7 @@
                   <input type="number" id="claimAmt_${esc(c.id)}" value="${esc(c.payment)}" min="1" step="1">
                   <select id="claimCur_${esc(c.id)}">
                     <option value="ROBUX" ${c.currency === 'ROBUX' ? 'selected' : ''}>Robux</option>
-                    <option value="USD" ${c.currency === 'USD' ? 'selected' : ''}>USD</option>
+                    <option value="USD" ${c.currency === 'USD' ? 'selected' : ''}>${esc(cashCode())}</option>
                   </select>
                   <button type="button" class="btn btn-ok btn-sm" data-claim-decide="${esc(c.id)}" data-decision="approve"${frozenAttrs()}>Approve</button>
                   <button type="button" class="btn btn-ghost btn-sm" data-claim-decide="${esc(c.id)}" data-decision="reject">Turn down</button>
@@ -7133,15 +7155,15 @@
       let chartRange = '56';
 
       const METRICS = {
-        paid_usd: { label: 'Paid amount (USD equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r) },
+        paid_usd: { label: 'Paid amount (${esc(cashCode())} equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r) },
         paid_usd_only: { label: 'Paid amount ($ requests only)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid' && r.currency === 'USD', value: r => Number(r.payment) || 0 },
         paid_robux: { label: 'Paid amount (Robux requests only)', unit: 'robux', dateField: 'paidAt', match: r => r.status === 'paid' && r.currency === 'ROBUX', value: r => Number(r.payment) || 0 },
-        pending_usd: { label: 'Pending amount (USD equiv.)', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending', value: r => usdEquivalent(r) },
+        pending_usd: { label: 'Pending amount (${esc(cashCode())} equiv.)', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending', value: r => usdEquivalent(r) },
         pending_usd_only: { label: 'Pending amount ($ requests only)', unit: 'usd', dateField: 'createdAt', match: r => r.status === 'pending' && r.currency === 'USD', value: r => Number(r.payment) || 0 },
         pending_robux: { label: 'Pending amount (Robux requests only)', unit: 'robux', dateField: 'createdAt', match: r => r.status === 'pending' && r.currency === 'ROBUX', value: r => Number(r.payment) || 0 },
         tasks_completed: { label: 'Tasks completed', unit: 'count', dateField: 'paidAt', match: r => r.status === 'paid', value: () => 1 },
         requests_submitted: { label: 'Requests submitted', unit: 'count', dateField: 'createdAt', match: () => true, value: () => 1 },
-        avg_payment: { label: 'Average payment (USD equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r), isAverage: true }
+        avg_payment: { label: 'Average payment (${esc(cashCode())} equiv.)', unit: 'usd', dateField: 'paidAt', match: r => r.status === 'paid', value: r => usdEquivalent(r), isAverage: true }
       };
 
       const BREAKDOWN_DIMS = {
@@ -7176,7 +7198,7 @@
       }
 
       function fmtUsd(n) {
-        return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return money(n, 'USD');
       }
 
       function fmtRobux(n) {
@@ -7529,7 +7551,7 @@
           <select id="currencyFilterSelect" class="filter-select">
             <option value="all" ${currencyFilter === 'all' ? 'selected' : ''}>All currencies</option>
             <option value="ROBUX" ${currencyFilter === 'ROBUX' ? 'selected' : ''}>Robux</option>
-            <option value="USD" ${currencyFilter === 'USD' ? 'selected' : ''}>USD</option>
+            <option value="USD" ${currencyFilter === 'USD' ? 'selected' : ''}>${esc(cashCode())}</option>
           </select>
           ${getAllGames().length ? `
           <select id="gameFilterSelect" class="filter-select">
@@ -7558,7 +7580,7 @@
 
       <div id="anContent"></div>
 
-      <div class="footer-note">Robux amounts are converted to USD for charts and totals using the current DevEx rate (${(DEVEX_RATE * 10000).toFixed(2)} USD per 10,000 Robux). Tables show raw amounts per currency.</div>
+      <div class="footer-note">Robux amounts are converted to ${esc(cashCode())} for charts and totals using the current Robux rate (${esc(money(DEVEX_RATE * 10000, 'USD'))} per 10,000 Robux). Tables show raw amounts per currency.</div>
     </div>`;
 
         wireTopbarSignOut();
@@ -7575,7 +7597,7 @@
           <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${fmtRobux(pendingRobux)}</div>
         </div>
         <div class="strip-card">
-          <div class="strip-label">Pending USD</div>
+          <div class="strip-label">Pending ${esc(cashCode())}</div>
           <div class="strip-value">${fmtUsd(pendingUsd)}</div>
         </div>
         <div class="strip-card">
@@ -7583,11 +7605,11 @@
           <div class="strip-value"><img src="${ROBUX_IMG}" alt="Robux">${fmtRobux(paidRobux)}</div>
         </div>
         <div class="strip-card">
-          <div class="strip-label">Paid USD</div>
+          <div class="strip-label">Paid ${esc(cashCode())}</div>
           <div class="strip-value">${fmtUsd(paidUsd)}</div>
         </div>
         <div class="strip-card">
-          <div class="strip-label">Paid out (USD equiv.)</div>
+          <div class="strip-label">Paid out (${esc(cashCode())} equiv.)</div>
           <div class="strip-value">${fmtUsd(paidUsdEquiv)}</div>
         </div>
         <div class="strip-card">
@@ -7621,7 +7643,7 @@
                   <input type="number" id="owedAmt_${esc(r.id)}" value="${esc(r.payment)}" min="0.01" step="any" aria-label="Amount">
                   <select id="owedCur_${esc(r.id)}" aria-label="Currency">
                     <option value="ROBUX" ${r.currency === 'ROBUX' ? 'selected' : ''}>Robux</option>
-                    <option value="USD" ${r.currency === 'USD' ? 'selected' : ''}>USD</option>
+                    <option value="USD" ${r.currency === 'USD' ? 'selected' : ''}>${esc(cashCode())}</option>
                   </select>
                   <button type="button" class="btn btn-ghost btn-sm" data-owed-save="${esc(r.id)}" ${owedSaving.has(r.id) ? 'disabled' : ''}>${owedSaving.has(r.id) ? 'Saving...' : 'Save amount'}</button>
                   <button type="button" class="btn btn-ok btn-sm" data-owed-pay="${esc(r.id)}" ${owedSaving.has(r.id) ? 'disabled' : ''}${frozenAttrs()}>Paid</button>
@@ -7637,7 +7659,7 @@
         <div class="table-scroll">
           ${earningsRows.length ? `
           <table class="an-table">
-            <thead><tr><th>Person</th><th class="num-cell">Total earned (USD equiv.)</th><th class="num-cell">Paid Robux</th><th class="num-cell">Paid USD</th><th class="num-cell">Tasks completed</th></tr></thead>
+            <thead><tr><th>Person</th><th class="num-cell">Total earned (${esc(cashCode())} equiv.)</th><th class="num-cell">Paid Robux</th><th class="num-cell">Paid ${esc(cashCode())}</th><th class="num-cell">Tasks completed</th></tr></thead>
             <tbody>
               ${earningsRows.map(o => `<tr><td>${esc(o.user || '-')}</td><td class="num-cell"><strong>${fmtUsd(o.total)}</strong></td><td class="num-cell">${fmtRobux(o.robux)}</td><td class="num-cell">${fmtUsd(o.usd)}</td><td class="num-cell">${o.tasks}</td></tr>`).join('')}
             </tbody>
@@ -7650,7 +7672,7 @@
         <div class="table-scroll">
           ${breakdownRows.length ? `
           <table class="an-table">
-            <thead><tr><th>${esc(GROUP_LABELS[groupBy].charAt(0).toUpperCase() + GROUP_LABELS[groupBy].slice(1))}</th><th class="num-cell">Total (USD equiv.)</th><th class="num-cell">Robux</th><th class="num-cell">USD</th><th class="num-cell">Requests</th></tr></thead>
+            <thead><tr><th>${esc(GROUP_LABELS[groupBy].charAt(0).toUpperCase() + GROUP_LABELS[groupBy].slice(1))}</th><th class="num-cell">Total (${esc(cashCode())} equiv.)</th><th class="num-cell">Robux</th><th class="num-cell">USD</th><th class="num-cell">Requests</th></tr></thead>
             <tbody>
               ${breakdownRows.map(b => `<tr><td>${esc(b.label)}</td><td class="num-cell"><strong>${fmtUsd(b.amount)}</strong></td><td class="num-cell">${b.robux ? fmtRobux(b.robux) : '-'}</td><td class="num-cell">${b.usd ? fmtUsd(b.usd) : '-'}</td><td class="num-cell">${b.count}</td></tr>`).join('')}
             </tbody>
@@ -7827,7 +7849,7 @@
         const metric = METRICS[chartMetric];
         const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--line').trim() || '#E4E7ED';
         const inkColor = getComputedStyle(document.documentElement).getPropertyValue('--ink-soft').trim() || '#5B616E';
-        const valueTick = v => metric.unit === 'usd' ? '$' + v : (metric.unit === 'robux' ? v + ' R$' : v);
+        const valueTick = v => metric.unit === 'usd' ? cashSymbol() + v : (metric.unit === 'robux' ? v + ' R$' : v);
 
         if (chartType === 'pie') {
           const top = chartData.totalsPerCat;
@@ -7981,7 +8003,9 @@
       // Links like "Add payout method" land here with ?focus=payout: scroll to the form once it's loaded.
       let pendingPayoutFocus = landingQuery.get('focus') === 'payout';
       let pendingNotifFocus = landingQuery.get('focus') === 'notifications';
-      if (pendingPayoutFocus || pendingNotifFocus) history.replaceState(null, '', '#/my');
+      let pendingTaxFocus = landingQuery.get('focus') === 'tax';
+      let myRevenueShares = null;
+      if (pendingPayoutFocus || pendingNotifFocus || pendingTaxFocus) history.replaceState(null, '', '#/my');
 
       function focusPayout() {
         const panel = document.getElementById('payoutPanel');
@@ -8145,7 +8169,7 @@
         <div class="task-list">
           ${myTasks.map(t => {
           const st = taskState(t);
-          const pay = t.payment ? (t.currency === 'USD' ? '$' + Number(t.payment).toFixed(2) : 'R$ ' + Number(t.payment).toLocaleString()) : null;
+          const pay = t.payment ? (t.currency === 'USD' ? money(t.payment, 'USD') : 'R$ ' + Number(t.payment).toLocaleString()) : null;
           return `
             <a class="task-row my-task-row" href="#/task/${encodeURIComponent(t.id)}">
               ${t.game && t.game.icon_url ? `<img src="${esc(t.game.icon_url)}" alt="" class="game-icon" style="width:38px;height:38px;border-radius:8px;">` : ''}
@@ -8189,8 +8213,8 @@
           <div class="owed-amounts">
             ${currencies.map(cur => `
               <div class="owed-amount">
-                <span class="val">${cur === 'ROBUX' ? `<img src="${ROBUX_IMG}" alt="Robux">${Number(totals[cur].pending || 0).toLocaleString()}` : `$${Number(totals[cur].pending || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</span>
-                <span class="cur-label">${cur === 'ROBUX' ? 'Robux pending' : 'USD pending'}</span>
+                <span class="val">${cur === 'ROBUX' ? `<img src="${ROBUX_IMG}" alt="Robux">${Number(totals[cur].pending || 0).toLocaleString()}` : `${money(totals[cur].pending || 0, 'USD')}`}</span>
+                <span class="cur-label">${cur === 'ROBUX' ? 'Robux pending' : `${esc(cashCode())} pending`}</span>
               </div>`).join('')}
           </div>`}
           <div class="owed-sub">${pendingRequests.length} pending request${pendingRequests.length === 1 ? '' : 's'}, ${paidRequests.length} paid to date, ${devexLabel()}</div>
@@ -8248,7 +8272,7 @@
                   <div>
                     <div class="mo-label">${esc(PAYMENT_METHODS[key].label)}</div>
                     <div class="mo-sub">${esc(PAYMENT_METHODS[key].sub)}</div>
-                    ${blocked ? `<div class="mo-sub" style="color:var(--warn-text);margin-top:4px;">You need $${stillNeeded.toFixed(2)} more in pending requests to select this.</div>` : ''}
+                    ${blocked ? `<div class="mo-sub" style="color:var(--warn-text);margin-top:4px;">You need ${money(stillNeeded, 'USD')} more in pending requests to select this.</div>` : ''}
                   </div>
                 </label>`;
         }).join('')}
@@ -8275,7 +8299,7 @@
               <p class="hint" style="margin:8px 0 0;">${(() => {
                         const robuxShare = 100 * (splitPercent / 100);
                         const robux = DEVEX_RATE ? Math.round(robuxShare / DEVEX_RATE) : 0;
-                        return `On a $100 payment that is $${(100 - robuxShare).toFixed(2)} through ${savedLabel} plus about R$ ${robux.toLocaleString()}.`;
+                        return `On a ${money(100, 'USD')} payment that is ${money(100 - robuxShare, 'USD')} through ${savedLabel} plus about R$ ${robux.toLocaleString()}.`;
                       })()}</p>
               <p class="hint" style="margin:6px 0 0;">While a split is on, your pending requests keep the currency they were logged in.</p>`
                       : `<p class="hint" style="margin:0;">Everything goes through ${esc(savedLabel)} right now.</p>`}`}
@@ -8287,7 +8311,11 @@
         </div>
       </div>
 
-      <div class="panel np-panel" id="notifPrefsPanel"></div>
+      <div class="my-extra-grid">
+        <div class="panel np-panel" id="notifPrefsPanel"></div>
+        ${featureOn('taxForms') ? '<div class="panel np-panel" id="taxPanel"></div>' : ''}
+        ${featureOn('revenueShare') ? '<div class="panel np-panel" id="myRevenuePanel" hidden></div>' : ''}
+      </div>
 
       <div class="heading-block section-head">
         <h2 class="sec-title">My teams &amp; skillsets</h2>
@@ -8336,7 +8364,7 @@
                   <td class="task-cell"><div class="task-name">${esc(r.taskName || 'Untitled task')}</div>${r.skillsetNames && r.skillsetNames.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${r.skillsetNames.map(name => `<span class="skill-badge">${esc(name)}</span>`).join('')}</div>` : ''}</td>
                   <td>${r.game ? `<span class="game-badge" style="background:${gameColor(r.game)};">${esc(r.game)}</span>` : `<span class="empty-note">-</span>`}</td>
                   <td class="pay-cell">${fmtAmount(r)}${r.status === 'pending' ? `<button type="button" class="pp-linkbtn convert-btn" data-convert="${esc(r.id)}" title="Swap this request to the other currency at the current DevEx rate">Convert to ${r.currency === 'USD' ? 'Robux' : 'USD'}</button>` : ''}</td>
-                  <td><span class="status-chip ${r.status}">${r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending'}</span>${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
+                  <td><span class="status-chip ${r.status}">${r.status === 'paid' ? `Paid ${esc(fmtDate(r.paidAt || Date.now()))}` : r.status === 'rejected' ? 'Rejected' : 'Pending'}</span>${r.status === 'paid' && featureOn('taxForms') ? `<a class="pp-linkbtn receipt-link" href="#/receipt/${encodeURIComponent(r.id)}">Receipt</a>` : ''}${r.status === 'rejected' && r.statusNote ? `<div class="status-note">${esc(r.statusNote)}</div>` : ''}</td>
                   <td class="mono" style="white-space:nowrap;color:var(--muted);font-size:11.5px;">${esc(fmtDate(r.createdAt || Date.now()))}</td>
                 </tr>`).join('')}
             </tbody>
@@ -8351,6 +8379,19 @@
         document.querySelectorAll('[data-focus-payout]').forEach(b => b.addEventListener('click', focusPayout));
         const npHost = document.getElementById('notifPrefsPanel');
         if (npHost) mountNotifPrefs(npHost);
+        const taxHost = document.getElementById('taxPanel');
+        if (taxHost) mountTaxPanel(taxHost);
+        if (pendingTaxFocus && taxHost) { pendingTaxFocus = false; setTimeout(() => { taxHost.scrollIntoView({ behavior: 'smooth', block: 'start' }); taxHost.classList.add('flash-focus'); }, 80); }
+        const revHost = document.getElementById('myRevenuePanel');
+        if (revHost) {
+          const paintRev = (list) => {
+            if (!list || !list.length) { revHost.hidden = true; return; }
+            revHost.hidden = false;
+            revHost.innerHTML = `<div class="preview-label">Your revenue shares</div><ul class="rs-shares">${list.map(x => `<li><span>${esc(x.game)}</span><b>${esc(x.percent)}%</b><span class="hint" style="margin:0;">since ${esc(fmtDate(x.since))}</span></li>`).join('')}</ul><p class="hint" style="margin:10px 0 0;">Each month's share shows up in your requests once revenue is recorded.</p>`;
+          };
+          if (myRevenueShares) paintRev(myRevenueShares);
+          else callHrData('rs_my_shares').then(j => { myRevenueShares = j.data || []; paintRev(myRevenueShares); }).catch(() => { });
+        }
         if (pendingNotifFocus && npHost) { pendingNotifFocus = false; setTimeout(() => { npHost.scrollIntoView({ behavior: 'smooth', block: 'start' }); npHost.classList.add('flash-focus'); }, 80); }
         if (pendingPayoutFocus && !methodLoading) { pendingPayoutFocus = false; setTimeout(focusPayout, 60); }
         document.querySelectorAll('[data-convert]').forEach(el => el.addEventListener('click', async () => {
@@ -8360,12 +8401,12 @@
           const to = r.currency === 'USD' ? 'Robux' : 'USD';
           const estimate = r.currency === 'USD'
             ? `about R$ ${Math.round(Number(r.payment) / (DEVEX_RATE || 0.0038)).toLocaleString()}`
-            : `about $${(Number(r.payment) * (DEVEX_RATE || 0.0038)).toFixed(2)}`;
+            : `about ${money(Number(r.payment) * (DEVEX_RATE || 0.0038), 'USD')}`;
           if (!(await askConfirm(`Switch this request to ${to}? It becomes ${estimate} at today's DevEx rate, and it stays in ${to} from then on.`))) return;
           el.disabled = true;
           try {
             const res = await callHrData('convert_my_request', { id });
-            toast(`Switched to ${res.currency === 'USD' ? '$' + Number(res.payment).toFixed(2) : 'R$ ' + Number(res.payment).toLocaleString()}.`);
+            toast(`Switched to ${res.currency === 'USD' ? money(res.payment, 'USD') : 'R$ ' + Number(res.payment).toLocaleString()}.`);
             await loadSummary();
           } catch (e) {
             el.disabled = false;
@@ -8966,11 +9007,11 @@
         <div class="panel">
           <div class="preview-label">DevEx rate</div>
           <div class="rate-display">$<span id="rateBig">${(DEVEX_RATE * 10000).toFixed(2)}</span><span class="rate-sub">per 10,000 Robux</span></div>
-          <p class="sub" style="margin:0 0 18px;">Stored as USD per Robux: <span class="mono">${DEVEX_RATE}</span></p>
+          <p class="sub" style="margin:0 0 18px;">Stored as ${esc(cashCode())} per Robux: <span class="mono">${DEVEX_RATE}</span></p>
           ${rateError ? `<div class="error-box"><span>${esc(rateError)}</span></div>` : ''}
           ${rateSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Rate updated</strong><span>New requests and exports now use this rate.</span></div></div>` : ''}
           <div class="field">
-            <label>USD per 10,000 Robux</label>
+            <label>${esc(cashCode())} per 10,000 Robux</label>
             <input type="number" id="ratePer10k" min="0" step="0.01" value="${(DEVEX_RATE * 10000).toFixed(2)}">
           </div>
           <button type="button" class="btn btn-primary" id="saveRateBtn" ${savingRate ? 'disabled' : ''}>${savingRate ? 'Saving...' : 'Save rate'}</button>
@@ -8978,12 +9019,12 @@
 
         ${canManageRate ? `
         <div class="panel">
-          <div class="preview-label">USD minimum pending</div>
-          <p class="sub" style="margin:0 0 18px;">PayPal and Venmo can only be selected once someone has this much pending (in USD equivalent). Leave at 0 to disable the requirement.</p>
+          <div class="preview-label">Minimum before cash payouts</div>
+          <p class="sub" style="margin:0 0 18px;">PayPal and Venmo can only be selected once someone has this much pending (in ${esc(cashCode())}, Robux converted). Leave at 0 to disable the requirement.</p>
           ${usdMinError ? `<div class="error-box"><span>${esc(usdMinError)}</span></div>` : ''}
           ${usdMinSuccess ? `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Threshold updated</strong></div></div>` : ''}
           <div class="field">
-            <label>Minimum pending (USD)</label>
+            <label>Minimum pending (${esc(cashCode())})</label>
             <input type="number" id="usdMinInput" min="0" step="0.01" value="${usdMinimum != null ? usdMinimum : 0}">
           </div>
           <button type="button" class="btn btn-primary" id="saveUsdMinBtn" ${savingUsdMin ? 'disabled' : ''}>${savingUsdMin ? 'Saving...' : 'Save threshold'}</button>
@@ -10343,7 +10384,7 @@
       ['pushNotifications', 'Browser notifications', 'Push notifications where supported']
     ];
     const BRANDING_METHOD_LABELS = { PAYPAL: 'PayPal', DEVEX_ROBUX: 'Robux', VENMO: 'Venmo', BANK_TRANSFER: 'Bank transfer' };
-    const BRANDING_CURRENCY_LABELS = { ROBUX: 'Robux', USD: 'US dollars' };
+    const BRANDING_CURRENCY_LABELS = { ROBUX: 'Robux', USD: 'Cash' };
 
     function brandingGet(path) {
       return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), brandingState.draft);
@@ -10557,6 +10598,7 @@
             <h3>Payouts</h3>
             <div class="row2">
               <div class="field"><label>Currencies</label><div class="bk-chips">${(S.data.allCurrencies || []).map(c => `<label class="bk-chip"><input type="checkbox" data-bk-list="payments.currencies" value="${esc(c)}" ${(d.payments.currencies || []).includes(c) ? 'checked' : ''}> ${esc(BRANDING_CURRENCY_LABELS[c] || c)}</label>`).join('')}</div></div>
+${featureOn('multiCurrency') ? `              <div class="field"><label for="bkCash">Cash currency</label><select id="bkCash" data-bk-select="payments.cashCurrency">${[['USD', 'US dollar ($)'], ['EUR', 'Euro (€)'], ['GBP', 'Pound sterling (£)'], ['CAD', 'Canadian dollar (CA$)'], ['AUD', 'Australian dollar (A$)']].map(([v, l]) => `<option value="${v}" ${(d.payments.cashCurrency || 'USD') === v ? 'selected' : ''}>${l}</option>`).join('')}</select><p class="hint" style="margin:6px 0 0;">Every cash amount is shown and exported in this currency. Set the Robux rate in Games &amp; DevEx in the same currency.</p></div>` : ''}
               <div class="field"><label>Payout methods</label><div class="bk-chips">${(S.data.allMethods || []).map(m => `<label class="bk-chip"><input type="checkbox" data-bk-list="payments.methods" value="${esc(m)}" ${(d.payments.methods || []).includes(m) ? 'checked' : ''}> ${esc(BRANDING_METHOD_LABELS[m] || m)}</label>`).join('')}</div></div>
             </div>
           </section>
@@ -10957,9 +10999,6 @@
       const hit = (knownPeopleCache || []).find(p => p.name.toLowerCase() === name.toLowerCase());
       return hit ? { id: hit.id, name: hit.name } : { id: null, name };
     }
-    const CASH_SYMBOL = { USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$' };
-    function cashCode() { return (STUDIO.payments && STUDIO.payments.cashCurrency) || 'USD'; }
-    function cashSymbol() { return CASH_SYMBOL[cashCode()] || '$'; }
     function money(amount, currency) {
       const n = Number(amount) || 0;
       if (currency === 'ROBUX') return 'R$ ' + Math.round(n).toLocaleString();
@@ -11448,6 +11487,644 @@ Either side can end the contract in writing. Milestones already approved are sti
       }
       paint();
       load();
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Tax details (My payments), Tax & receipts admin page (#/tax), receipts (#/receipt/<id>)
+    // ---------------------------------------------------------------------------------
+    const TAX_CLASSIFICATIONS = [
+      ['individual', 'Individual'], ['sole_proprietor', 'Sole proprietor'], ['llc', 'LLC'], ['c_corp', 'C corporation'],
+      ['s_corp', 'S corporation'], ['partnership', 'Partnership'], ['trust', 'Trust or estate'], ['other', 'Other']
+    ];
+    const taxState = { loaded: false, data: null, ready: false, editing: false, form: null, busy: false, msg: null };
+
+    function taxFormDefaults(d) {
+      return {
+        formType: (d && d.formType) || 'W8BEN', legalName: (d && d.legalName) || '', businessName: (d && d.businessName) || '',
+        classification: (d && d.classification) || 'individual', country: (d && d.country) || '', address1: (d && d.address1) || '',
+        address2: (d && d.address2) || '', city: (d && d.city) || '', region: (d && d.region) || '', postalCode: (d && d.postalCode) || '',
+        tinType: (d && d.tinType === 'EIN') ? 'EIN' : 'SSN', tin: '', dob: '', signedName: '', certify: false
+      };
+    }
+
+    function taxPanelHtml() {
+      const S = taxState;
+      const head = `<div class="preview-label">Tax details</div>`;
+      if (!S.loaded) return `${head}<div class="dash-loading">Loading...</div>`;
+      const msg = S.msg ? `<div class="${S.msg.ok ? 'confirm-box' : 'error-box'}" role="status">${S.msg.ok ? `<div class="icon">&#10003;</div><div class="txt"><strong>${esc(S.msg.text)}</strong></div>` : `<span>${esc(S.msg.text)}</span>`}</div>` : '';
+      const d = S.data;
+      if (!S.editing) {
+        if (!d) return `${head}${msg}<p class="sub" style="margin:0 0 12px;">${esc(studioName())} may need your tax details before paying you in cash. They're encrypted and only people with special permission can see them.</p><button type="button" class="btn btn-ghost btn-sm" id="taxEdit">Add tax details</button>`;
+        return `${head}${msg}
+          <dl class="kv">
+            <div><dt>Form</dt><dd>${d.formType === 'W9' ? 'W-9 (US person)' : 'W-8BEN (not a US person)'}</dd></div>
+            <div><dt>Legal name</dt><dd>${esc(d.legalName)}${d.businessName ? `<br><span class="hint" style="margin:0;">${esc(d.businessName)}</span>` : ''}</dd></div>
+            <div><dt>Country</dt><dd>${esc(d.country)}</dd></div>
+            <div><dt>Tax ID</dt><dd>${d.tinLast4 ? `${esc(d.tinType === 'FOREIGN' ? 'Foreign tax ID' : d.tinType)} ending ${esc(d.tinLast4)}` : 'Not given'}</dd></div>
+            <div><dt>Signed</dt><dd>${esc(d.signedName || '')}${d.signedAt ? ` &middot; ${esc(fmtDate(d.signedAt))}` : ''}</dd></div>
+          </dl>
+          <button type="button" class="btn btn-ghost btn-sm" id="taxEdit" style="margin-top:12px;">Update</button>`;
+      }
+      const f = S.form;
+      const us = f.formType === 'W9';
+      return `${head}${msg}
+        <div class="field"><label>Are you a US person (citizen, resident or US company)?</label>
+          <div class="seg">
+            <label class="${us ? 'on' : ''}"><input type="radio" name="taxForm" value="W9" ${us ? 'checked' : ''}> Yes, W-9</label>
+            <label class="${!us ? 'on' : ''}"><input type="radio" name="taxForm" value="W8BEN" ${!us ? 'checked' : ''}> No, W-8BEN</label>
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="taxLegal">Legal name</label><input type="text" id="taxLegal" data-tax="legalName" value="${esc(f.legalName)}" autocomplete="name" maxlength="120"></div>
+          <div class="field"><label for="taxBiz">Business name <span class="hint">(optional)</span></label><input type="text" id="taxBiz" data-tax="businessName" value="${esc(f.businessName)}" maxlength="120"></div>
+        </div>
+        ${us ? `<div class="field"><label for="taxClass">Tax classification</label><select id="taxClass" data-tax="classification">${TAX_CLASSIFICATIONS.map(([v, l]) => `<option value="${v}" ${f.classification === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
+        <div class="row2">
+          <div class="field"><label for="taxCountry">Country</label><input type="text" id="taxCountry" data-tax="country" value="${esc(f.country || (us ? 'United States' : ''))}" autocomplete="country-name" maxlength="60"></div>
+          <div class="field"><label for="taxCity">City</label><input type="text" id="taxCity" data-tax="city" value="${esc(f.city)}" autocomplete="address-level2" maxlength="80"></div>
+        </div>
+        <div class="field"><label for="taxAddr1">Address</label><input type="text" id="taxAddr1" data-tax="address1" value="${esc(f.address1)}" autocomplete="address-line1" maxlength="160"></div>
+        <div class="row3">
+          <div class="field"><label for="taxAddr2">Apartment, suite <span class="hint">(optional)</span></label><input type="text" id="taxAddr2" data-tax="address2" value="${esc(f.address2)}" autocomplete="address-line2" maxlength="160"></div>
+          <div class="field"><label for="taxRegion">State / region</label><input type="text" id="taxRegion" data-tax="region" value="${esc(f.region)}" autocomplete="address-level1" maxlength="80"></div>
+          <div class="field"><label for="taxPostal">Postal code</label><input type="text" id="taxPostal" data-tax="postalCode" value="${esc(f.postalCode)}" autocomplete="postal-code" maxlength="20"></div>
+        </div>
+        ${S.ready ? `
+        <div class="row2">
+          <div class="field"><label for="taxTin">${us ? `<select data-tax="tinType" class="inline-select" aria-label="Tax ID type"><option value="SSN" ${f.tinType === 'SSN' ? 'selected' : ''}>SSN</option><option value="EIN" ${f.tinType === 'EIN' ? 'selected' : ''}>EIN</option></select>` : 'Foreign tax ID'} <span class="hint">${d && d.tinLast4 ? `(ending ${esc(d.tinLast4)}; leave empty to keep it)` : us ? '' : '(optional)'}</span></label><input type="password" id="taxTin" data-tax="tin" value="${esc(f.tin)}" autocomplete="off" inputmode="${us ? 'numeric' : 'text'}" maxlength="30" placeholder="${us ? '9 digits' : ''}"></div>
+          ${!us ? `<div class="field"><label for="taxDob">Date of birth <span class="hint">${d && d.hasDob ? '(saved; leave empty to keep it)' : ''}</span></label><input type="date" id="taxDob" data-tax="dob" value="${esc(f.dob)}"></div>` : '<div></div>'}
+        </div>` : `<div class="warn-box" style="margin-bottom:16px;"><span>Tax IDs can't be saved yet because encryption isn't set up on this panel. Ask an admin to set <code>TAX_ENCRYPTION_KEY</code>.</span></div>`}
+        <div class="field"><label for="taxSign">Type your full name to sign</label><input type="text" id="taxSign" data-tax="signedName" value="${esc(f.signedName)}" maxlength="120" autocomplete="name"></div>
+        <label class="pp-check"><input type="checkbox" id="taxCertify" ${f.certify ? 'checked' : ''}> ${us ? 'I certify that the information above is correct, and that I am a US person.' : 'I certify that the information above is correct, and that I am not a US person.'}</label>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn btn-primary btn-sm" id="taxSave" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Saving...' : 'Save tax details'}</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="taxCancel">Cancel</button>
+        </div>`;
+    }
+
+    function mountTaxPanel(el) {
+      const S = taxState;
+      const repaint = () => { const host = document.getElementById('taxPanel'); if (host) { host.innerHTML = taxPanelHtml(); wire(host); } };
+      async function load() {
+        try { const j = await callHrData('tax_get_mine'); S.data = j.data; S.ready = !!j.encryptionReady; }
+        catch (e) { S.msg = { ok: false, text: e.code === 'database_update_needed' ? 'Tax details need a database update (sql/upgrade.sql).' : e.message }; }
+        S.loaded = true; repaint();
+      }
+      function wire(host) {
+        const q = (id) => host.querySelector('#' + id);
+        if (q('taxEdit')) q('taxEdit').addEventListener('click', () => { S.editing = true; S.form = taxFormDefaults(S.data); S.msg = null; repaint(); });
+        if (q('taxCancel')) q('taxCancel').addEventListener('click', () => { S.editing = false; S.msg = null; repaint(); });
+        host.querySelectorAll('input[name="taxForm"]').forEach(r => r.addEventListener('change', () => { sync(host); S.form.formType = r.value; repaint(); }));
+        if (q('taxSave')) q('taxSave').addEventListener('click', async () => {
+          sync(host);
+          const f = S.form;
+          if (!f.legalName || !f.country || !f.address1 || !f.city) { S.msg = { ok: false, text: 'Fill in your legal name and address.' }; repaint(); return; }
+          if (f.formType === 'W9' && S.ready && !(S.data && S.data.tinLast4) && !/^\d{9}$/.test(f.tin.replace(/\D/g, ''))) { S.msg = { ok: false, text: 'Enter your 9-digit SSN or EIN.' }; repaint(); return; }
+          if (f.signedName.length < 2) { S.msg = { ok: false, text: 'Type your full name to sign.' }; repaint(); return; }
+          if (!f.certify) { S.msg = { ok: false, text: 'Tick the box to certify the details.' }; repaint(); return; }
+          S.busy = true; S.msg = null; repaint();
+          try {
+            await callHrData('tax_save_mine', { ...f, tin: f.tin.replace(f.formType === 'W9' ? /\D/g : /\s/g, ''), certify: true });
+            S.editing = false; S.msg = { ok: true, text: 'Tax details saved.' };
+            await load();
+          } catch (e) {
+            S.msg = { ok: false, text: e.code === 'invalid_tin' ? 'A US tax ID is 9 digits.' : e.code === 'tin_required' ? 'A W-9 needs your SSN or EIN.' : e.code === 'tax_key_missing' ? "Tax IDs can't be saved until encryption is set up." : e.message };
+          }
+          S.busy = false; repaint();
+        });
+      }
+      function sync(host) {
+        host.querySelectorAll('[data-tax]').forEach(i => { S.form[i.dataset.tax] = i.value; });
+        const c = host.querySelector('#taxCertify'); if (c) S.form.certify = c.checked;
+      }
+      el.innerHTML = taxPanelHtml();
+      wire(el);
+      if (!S.loaded) load();
+    }
+
+    function csvCell(v) {
+      const s = v == null ? '' : String(v);
+      return /[",\n\r]/.test(s) || /^[=+\-@]/.test(s) ? `"${s.replace(/^([=+\-@])/, "'$1").replace(/"/g, '""')}"` : s;
+    }
+    function downloadCsv(filename, header, rows) {
+      const text = (header ? [header, ...rows] : rows).map(r => r.map(csvCell).join(',')).join('\r\n');
+      // The BOM helps Excel read accents; headerless upload files (PayPal) go out without it.
+      const blob = new Blob([(header ? '\ufeff' : '') + text], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    function renderTaxAdmin() {
+      if (!hasPermission('tax.view')) { window.location.hash = '#/home'; return; }
+      const myGen = renderGen;
+      let tab = parseHashQuery().get('tab') === 'year' ? 'year' : 'people';
+      let year = new Date().getFullYear() - (new Date().getMonth() < 3 ? 1 : 0);
+      let people = null;
+      let summary = null;
+      let error = null;
+      const revealed = {};
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        const years = []; for (let y = new Date().getFullYear(); y >= new Date().getFullYear() - 5; y--) years.push(y);
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      ${pageHeadHtml('Tax & receipts', 'Tax details people have given you, and what each person was paid in a year. Every full tax ID you view or export is logged.')}
+      ${error ? `<div class="error-box"><span>${esc(error)}</span></div>` : ''}
+      <div class="tabs ct-tabs" role="tablist">
+        <button type="button" role="tab" class="tab-btn${tab === 'people' ? ' on active' : ''}" data-tax-tab="people">Tax details</button>
+        <button type="button" role="tab" class="tab-btn${tab === 'year' ? ' on active' : ''}" data-tax-tab="year">Year-end totals</button>
+      </div>
+      ${tab === 'people' ? (!people ? '<div class="dash-loading">Loading...</div>' : `
+        ${!people.encryptionReady ? `<div class="warn-box" style="margin-bottom:14px;"><span>Encryption isn't set up, so nobody can save a tax ID yet. Set <code>TAX_ENCRYPTION_KEY</code> on the API (see SETUP.md).</span></div>` : ''}
+        ${people.missing.length ? `<div class="panel" style="margin-bottom:16px;"><h3 class="panel-title">Paid this year without tax details</h3><p class="sub" style="margin:-8px 0 10px;">Ask them to add their details under My payments.</p><div class="chip-row">${people.missing.map(m => `<span class="chip-tag neutral">${esc(m.username || m.robloxUserId)}${m.cash ? ` &middot; ${esc(money(m.cash, 'USD'))}` : ''}</span>`).join('')}</div></div>` : ''}
+        <div class="table-wrap">${people.profiles.length ? `<div class="table-scroll"><table class="req-table"><thead><tr><th>Person</th><th>Form</th><th>Country</th><th>Tax ID</th><th>Signed</th></tr></thead><tbody>
+          ${people.profiles.map(p => `<tr>
+            <td><strong>${esc(p.legalName)}</strong><div class="hint" style="margin:0;">${esc(p.username || '')}${p.businessName ? ` &middot; ${esc(p.businessName)}` : ''}</div></td>
+            <td>${p.formType === 'W9' ? 'W-9' : 'W-8BEN'}</td>
+            <td>${esc(p.country)}</td>
+            <td class="mono">${revealed[p.robloxUserId] ? esc(revealed[p.robloxUserId].tin || '-') + (revealed[p.robloxUserId].dob ? `<div class="hint" style="margin:0;">Born ${esc(revealed[p.robloxUserId].dob)}</div>` : '') : p.tinLast4 ? `&bull;&bull;&bull;&bull; ${esc(p.tinLast4)} <button type="button" class="pp-linkbtn" data-tax-reveal="${esc(p.robloxUserId)}">Show</button>` : '<span class="hint" style="margin:0;">None</span>'}</td>
+            <td>${esc(p.signedName || '')}<div class="hint" style="margin:0;">${p.signedAt ? esc(fmtDate(p.signedAt)) : ''}</div></td>
+          </tr>`).join('')}</tbody></table></div>` : `<div class="dash-empty"><h3>No tax details yet</h3><p>People add them under My payments &rsaquo; Tax details.</p></div>`}</div>`) : ''}
+      ${tab === 'year' ? `
+        <div class="toolbar-row">
+          <select id="taxYear" class="filter-select" aria-label="Year">${years.map(y => `<option value="${y}" ${y === year ? 'selected' : ''}>${y}</option>`).join('')}</select>
+          <button type="button" class="btn btn-ghost btn-sm" id="taxCsv" ${summary && summary.rows.length ? '' : 'disabled'}>Download CSV</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="taxCsvFull" ${summary && summary.rows.length ? '' : 'disabled'}>CSV with full tax IDs</button>
+        </div>
+        ${!summary ? '<div class="dash-loading">Loading...</div>' : summary.rows.length ? `<div class="table-wrap"><div class="table-scroll"><table class="req-table"><thead><tr><th>Person</th><th>Form</th><th style="text-align:right;">Paid in ${esc(summary.cashCurrency)}</th><th style="text-align:right;">Paid in Robux</th><th style="text-align:right;">Payments</th></tr></thead><tbody>
+          ${summary.rows.map(r => `<tr><td><strong>${esc(r.legalName || r.username || r.robloxUserId)}</strong>${r.legalName && r.username ? `<div class="hint" style="margin:0;">${esc(r.username)}</div>` : ''}${!r.formType ? `<div class="hint" style="margin:0;color:var(--warn-text);">No tax details</div>` : ''}</td><td>${r.formType === 'W9' ? 'W-9' : r.formType === 'W8BEN' ? 'W-8BEN' : '-'}</td><td class="num">${esc(money(r.cash, 'USD'))}</td><td class="num">${esc(money(r.robux, 'ROBUX'))}</td><td class="num">${esc(r.payments)}</td></tr>`).join('')}
+          </tbody></table></div></div>
+          <p class="hint" style="margin-top:10px;">Totals are payments marked paid in ${esc(summary.year)}. In the US, contractors paid $600 or more in a year usually need a 1099-NEC; check with your accountant.</p>` : `<div class="dash-empty"><h3>Nobody was paid in ${esc(year)}</h3><p>Pick another year.</p></div>`}` : ''}
+    </div>`;
+        wireTopbarSignOut();
+        document.querySelectorAll('[data-tax-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.taxTab; paint(); if (tab === 'year' && !summary) loadYear(); }));
+        document.querySelectorAll('[data-tax-reveal]').forEach(b => b.addEventListener('click', async () => {
+          if (!(await askConfirm('Show this full tax ID?\n\nViewing it is recorded in the security log.', { okLabel: 'Show' }))) return;
+          try { const j = await callHrData('tax_reveal', { robloxUserId: b.dataset.taxReveal }); revealed[b.dataset.taxReveal] = j.data; paint(); }
+          catch (e) { toast(e.code === 'tax_key_mismatch' ? "That tax ID can't be read with the current encryption key." : e.message, 'err'); }
+        }));
+        const ySel = document.getElementById('taxYear');
+        if (ySel) ySel.addEventListener('change', () => { year = Number(ySel.value); summary = null; paint(); loadYear(); });
+        const exportRows = (rows, full) => rows.map(r => [r.legalName || '', r.username || '', r.formType || '', r.country || '', r.address || '', r.tinType || '', full ? (r.tin || '') : (r.tinLast4 ? '****' + r.tinLast4 : ''), Number(r.cash).toFixed(2), Math.round(r.robux), r.payments]);
+        const header = ['Legal name', 'Username', 'Form', 'Country', 'Address', 'Tax ID type', 'Tax ID', `Paid (${summary ? summary.cashCurrency : 'USD'})`, 'Paid (Robux)', 'Payments'];
+        const c1 = document.getElementById('taxCsv');
+        if (c1) c1.addEventListener('click', () => downloadCsv(`year-end-${year}.csv`, header, exportRows(summary.rows, false)));
+        const c2 = document.getElementById('taxCsvFull');
+        if (c2) c2.addEventListener('click', async () => {
+          if (!(await askConfirm('Download with full tax IDs?\n\nThe file contains sensitive data. Store it securely and delete it when you\'re done. The download is recorded in the security log.', { okLabel: 'Download', danger: true }))) return;
+          try { const j = await callHrData('tax_year_summary', { year, includeTin: true }); downloadCsv(`year-end-${year}-with-tax-ids.csv`, header, exportRows(j.data.rows, true)); }
+          catch (e) { toast(e.message, 'err'); }
+        });
+      }
+
+      async function loadPeople() {
+        try { const j = await callHrData('tax_list', { year: new Date().getFullYear() }); people = j.data; }
+        catch (e) { error = e.code === 'database_update_needed' ? 'Your database needs an update. Run sql/upgrade.sql in Supabase.' : e.message; people = { profiles: [], missing: [], encryptionReady: true }; }
+        paint();
+      }
+      async function loadYear() {
+        try { const j = await callHrData('tax_year_summary', { year }); summary = j.data; }
+        catch (e) { error = e.message; summary = { rows: [], year, cashCurrency: cashCode() }; }
+        paint();
+      }
+      paint();
+      loadPeople();
+      if (tab === 'year') loadYear();
+    }
+
+    const METHOD_NAMES = { PAYPAL: 'PayPal', DEVEX_ROBUX: 'Robux', VENMO: 'Venmo', BANK_TRANSFER: 'Bank transfer' };
+    function renderReceipt(id) {
+      const myGen = renderGen;
+      app.innerHTML = `${topbar()}<div class="shell"><div class="dash-loading">Loading receipt...</div></div>`;
+      wireTopbarSignOut();
+      callHrData('receipt_get', { id }).then(j => {
+        if (myGen !== renderGen) return;
+        const r = j.data;
+        const st = STUDIO.studio || {};
+        const logo = st.logoUrl ? `<img src="${esc(st.logoUrl)}" alt="">` : `<span class="auth-brand-mark">${esc(studioShort())}</span>`;
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell receipt-shell">
+      <div class="receipt-actions no-print">
+        <a class="back-link" href="#/my">&larr; My payments</a>
+        <button type="button" class="btn btn-primary btn-sm" id="printReceipt">Print or save as PDF</button>
+      </div>
+      <article class="receipt">
+        <header class="receipt-head">
+          <div class="receipt-brand">${logo}<div><strong>${esc(r.payer.name)}</strong>${r.payer.website ? `<span>${esc(r.payer.website.replace(/^https?:\/\//, ''))}</span>` : ''}${r.payer.email ? `<span>${esc(r.payer.email)}</span>` : ''}</div></div>
+          <div class="receipt-title"><h1>Payment receipt</h1><span class="mono">${esc(r.id)}</span></div>
+        </header>
+        <div class="receipt-grid">
+          <div><small>Paid to</small><strong>${esc(r.payee.legalName || r.payee.username)}</strong>${r.payee.businessName ? `<span>${esc(r.payee.businessName)}</span>` : ''}${r.payee.legalName ? `<span>${esc(r.payee.username)}</span>` : ''}${r.payee.address ? `<span>${esc(r.payee.address)}</span>` : ''}</div>
+          <div><small>Date paid</small><strong>${esc(fmtDate(r.paidAt))}</strong><small style="margin-top:10px;">Method</small><strong>${esc(METHOD_NAMES[r.method] || r.method || 'Not recorded')}</strong></div>
+        </div>
+        <table class="receipt-lines"><thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead><tbody>
+          <tr><td><strong>${esc(r.task)}</strong>${r.game ? `<div>${esc(r.game)}</div>` : ''}${r.details ? `<div class="receipt-detail">${esc(String(r.details).slice(0, 600))}</div>` : ''}</td><td class="num">${esc(money(r.amount, r.currency))}</td></tr>
+        </tbody><tfoot><tr><td>Total paid</td><td class="num">${esc(money(r.amount, r.currency))}${r.currency === 'ROBUX' ? '' : ` <span class="hint" style="margin:0;">${esc(r.cashCurrency)}</span>`}</td></tr></tfoot></table>
+        <footer class="receipt-foot">Logged ${esc(fmtDate(r.createdAt))}${r.approvedBy ? ` by ${esc(r.approvedBy)}` : ''}. This receipt confirms a payment recorded in ${esc(r.payer.name)}'s staff panel.</footer>
+      </article>
+    </div>`;
+        wireTopbarSignOut();
+        document.getElementById('printReceipt').addEventListener('click', () => window.print());
+      }).catch(e => {
+        if (myGen !== renderGen) return;
+        app.innerHTML = `${topbar()}<div class="shell"><div class="dash-empty"><h3>No receipt</h3><p>${esc(e.code === 'not_paid' ? "That payment hasn't been paid yet. Receipts appear once it's paid." : "It doesn't exist, or it isn't yours to see.")}</p><a class="btn btn-ghost btn-sm" href="#/my">Back to My payments</a></div></div>`;
+        wireTopbarSignOut();
+      });
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Exports & budgets (#/exports). Files are built in the browser from export_payments.
+    // ---------------------------------------------------------------------------------
+    const EXPORT_FORMATS = [
+      { key: 'quickbooks', label: 'QuickBooks', desc: 'Expenses CSV for QuickBooks Online (Banking > Upload transactions).', scope: 'paid' },
+      { key: 'xero', label: 'Xero', desc: 'Bills CSV for Xero (Business > Bills to pay > Import).', scope: 'paid' },
+      { key: 'paypal', label: 'PayPal Payouts', desc: 'Bulk payout file for approved, unpaid PayPal payments. Upload it in PayPal Payouts.', scope: 'unpaid' },
+      { key: 'wise', label: 'Wise batch', desc: 'Batch payment file for approved, unpaid bank transfers. Check it against Wise\'s current template before uploading.', scope: 'unpaid' },
+      { key: 'csv', label: 'Everything (CSV)', desc: 'Every column, for your own spreadsheets.', scope: 'all' }
+    ];
+
+    function buildExport(format, data, opts) {
+      const cash = data.cashCurrency || 'USD';
+      const ccy = (r) => (r.currency === 'ROBUX' ? 'ROBUX' : cash);
+      const day = (iso) => (iso ? String(iso).slice(0, 10) : '');
+      const usDay = (iso) => { const d = day(iso); return d ? `${d.slice(5, 7)}/${d.slice(8, 10)}/${d.slice(0, 4)}` : ''; };
+      const payee = (r) => r.businessName || r.legalName || r.payee;
+      const cashRows = data.rows.filter(r => r.currency !== 'ROBUX');
+      if (format === 'quickbooks') {
+        return { name: 'quickbooks-expenses', header: ['Date', 'Description', 'Amount', 'Payee', 'Reference'], rows: cashRows.map(r => [usDay(r.paidAt || r.createdAt), `${r.task}${r.game ? ' - ' + r.game : ''}`, (-Number(r.amount)).toFixed(2), payee(r), r.id]), skipped: data.rows.length - cashRows.length };
+      }
+      if (format === 'xero') {
+        return {
+          name: 'xero-bills',
+          header: ['*ContactName', 'EmailAddress', '*InvoiceNumber', '*InvoiceDate', '*DueDate', 'Description', '*Quantity', '*UnitAmount', '*AccountCode', '*TaxType', 'Currency'],
+          rows: cashRows.map(r => [payee(r), r.paypalEmail || '', r.id, day(r.paidAt || r.createdAt), day(r.paidAt || r.createdAt), `${r.task}${r.game ? ' - ' + r.game : ''}`, '1', Number(r.amount).toFixed(2), opts.accountCode || '', 'Tax Exempt', cash]),
+          skipped: data.rows.length - cashRows.length
+        };
+      }
+      if (format === 'paypal') {
+        const rows = cashRows.filter(r => r.method === 'PAYPAL' && r.paypalEmail);
+        return { name: 'paypal-payouts', header: null, rows: rows.map(r => [r.paypalEmail, Number(r.amount).toFixed(2), cash, r.id.slice(0, 30), `${studioName()}: ${r.task}`.slice(0, 165)]), skipped: data.rows.length - rows.length };
+      }
+      if (format === 'wise') {
+        const rows = cashRows.filter(r => r.method === 'BANK_TRANSFER' && r.bank && r.bank.iban);
+        return {
+          name: 'wise-batch',
+          header: ['name', 'recipientEmail', 'paymentReference', 'receiverType', 'amountCurrency', 'amount', 'sourceCurrency', 'targetCurrency', 'IBAN', 'BIC', 'addressCountryCode', 'addressCity', 'addressFirstLine', 'addressPostCode'],
+          rows: rows.map(r => [r.bank.fullName || payee(r), '', r.id.slice(0, 18), 'PRIVATE', cash, Number(r.amount).toFixed(2), cash, cash, r.bank.iban.replace(/\s/g, ''), r.bank.swift, r.bank.country, r.bank.city, r.bank.address, r.bank.postalCode]),
+          skipped: data.rows.length - rows.length
+        };
+      }
+      return {
+        name: 'payments',
+        header: ['ID', 'Status', 'Logged', 'Paid', 'Payee', 'Legal name', 'Country', 'Task', 'Game', 'Amount', 'Currency', 'Method', 'Payout destination', 'Approved by'],
+        rows: data.rows.map(r => [r.id, r.status, day(r.createdAt), day(r.paidAt), r.payee, r.legalName, r.country, r.task, r.game, r.currency === 'ROBUX' ? Math.round(r.amount) : Number(r.amount).toFixed(2), ccy(r), r.method, r.method === 'PAYPAL' ? r.paypalEmail : r.method === 'VENMO' ? r.venmoUsername : r.method === 'DEVEX_ROBUX' ? r.robloxPayee : r.method === 'BANK_TRANSFER' ? (r.bank ? 'Bank ' + (r.bank.iban || '').slice(-4) : 'Bank (hidden)') : '', r.approvedBy]),
+        skipped: 0
+      };
+    }
+
+    function renderExports() {
+      if (!hasPermission('dashboard.export') && !(featureOn('budgets') && hasPermission('settings.manage_games'))) { window.location.hash = '#/home'; return; }
+      const myGen = renderGen;
+      const canExport = hasPermission('dashboard.export') && featureOn('accountingExport');
+      const showBudgets = featureOn('budgets') && (hasPermission('settings.manage_games') || hasPermission('dashboard.view'));
+      let tab = parseHashQuery().get('tab') === 'budgets' && showBudgets ? 'budgets' : (canExport ? 'exports' : 'budgets');
+      const now = new Date();
+      const firstOfMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastOfMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+      const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      let range = { from: iso(firstOfMonth), to: iso(lastOfMonth) };
+      let accountCode = '';
+      try { accountCode = localStorage.getItem('pv_xero_account') || ''; } catch (e) { }
+      let busy = null;
+      let budgets = null;
+      let budgetError = null;
+
+      function exportsHtml() {
+        return `
+        <div class="panel ex-range">
+          <div class="row3">
+            <div class="field"><label for="exFrom">From</label><input type="date" id="exFrom" value="${esc(range.from)}"></div>
+            <div class="field"><label for="exTo">To</label><input type="date" id="exTo" value="${esc(range.to)}"></div>
+            <div class="field"><label>Quick pick</label><div class="chip-row">${[['This month', 0], ['Last month', 1], ['This year', 'y'], ['Last year', 'ly']].map(([l, v]) => `<button type="button" class="chip-filter" data-ex-quick="${v}">${l}</button>`).join('')}</div></div>
+          </div>
+          <p class="hint" style="margin:0;">Accounting files use the date each payment was paid. Payout files include every approved, unpaid payment logged in the range. Robux payments only appear in the "Everything" file.</p>
+        </div>
+        <div class="ex-grid">
+          ${EXPORT_FORMATS.map(f => `
+          <div class="panel ex-card">
+            <h3>${esc(f.label)}</h3>
+            <p>${esc(f.desc)}</p>
+            ${f.key === 'xero' ? `<div class="field" style="margin:0 0 10px;"><label for="exXeroAcc">Expense account code</label><input type="text" id="exXeroAcc" value="${esc(accountCode)}" placeholder="e.g. 400" maxlength="10"></div>` : ''}
+            ${f.key === 'wise' && !hasPermission('payouts.view_bank_details') ? `<p class="hint" style="color:var(--warn-text);">Needs the bank details permission.</p>` : ''}
+            <button type="button" class="btn btn-ghost btn-sm" data-ex="${f.key}" ${busy ? 'disabled' : ''} ${f.key === 'wise' && !hasPermission('payouts.view_bank_details') ? 'disabled' : ''}>${busy === f.key ? 'Building...' : 'Download'}</button>
+          </div>`).join('')}
+        </div>`;
+      }
+
+      function budgetsHtml() {
+        if (budgetError) return `<div class="error-box"><span>${esc(budgetError)}</span></div>`;
+        if (!budgets) return '<div class="dash-loading">Loading...</div>';
+        if (!budgets.games.length) return `<div class="dash-empty"><h3>No games yet</h3><p>Add games in Settings &rsaquo; Games &amp; DevEx.</p></div>`;
+        return `
+        <p class="sub" style="margin:0 0 14px;">Spend counts approved and paid work for each game, with Robux converted at the DevEx rate. Producers are told at 90% and when a game goes over.</p>
+        <div class="bud-list">${budgets.games.map(g => {
+          const pct = g.pct == null ? 0 : Math.min(100, g.pct);
+          const tone = g.pct == null ? '' : g.pct >= 100 ? 'over' : g.pct >= 90 ? 'near' : '';
+          return `
+          <div class="bud-row">
+            <div class="bud-name">${g.iconUrl ? `<img src="${esc(g.iconUrl)}" alt="">` : `<span class="rs-game-dot" style="background:${gameColor(g.name)}"></span>`}<div><strong>${esc(g.name)}</strong>${g.producer ? `<span>${esc(g.producer)}</span>` : ''}</div></div>
+            <div class="bud-meter"><div class="rs-bar ${tone}"><span style="width:${pct}%"></span></div><span>${esc(money(g.spent, 'USD'))}${g.budget ? ` of ${esc(money(g.budget, 'USD'))} &middot; ${esc(g.pct)}%` : ' spent, no budget'}${g.robux ? ` <span class="hint" style="margin:0;">(incl. ${esc(money(g.robux, 'ROBUX'))})</span>` : ''}</span></div>
+            ${budgets.canEdit ? `<div class="bud-edit"><input type="number" min="0" step="any" data-bud-input="${esc(g.id)}" value="${g.budget != null ? esc(g.budget) : ''}" placeholder="Budget" aria-label="Budget for ${esc(g.name)}"><button type="button" class="btn btn-ghost btn-sm" data-bud-save="${esc(g.id)}">Save</button></div>` : ''}
+          </div>`;
+        }).join('')}</div>`;
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      ${pageHeadHtml(canExport ? (showBudgets ? 'Exports & budgets' : 'Exports') : 'Budgets', canExport ? 'Files for your accountant and your payout provider. Every export is recorded in the audit log.' : 'What each game has cost against its budget.')}
+      ${canExport && showBudgets ? `<div class="tabs ct-tabs" role="tablist"><button type="button" class="tab-btn${tab === 'exports' ? ' on active' : ''}" data-ex-tab="exports">Exports</button><button type="button" class="tab-btn${tab === 'budgets' ? ' on active' : ''}" data-ex-tab="budgets">Budgets</button></div>` : ''}
+      ${tab === 'exports' ? exportsHtml() : budgetsHtml()}
+    </div>`;
+        wireTopbarSignOut();
+        wire();
+      }
+
+      function wire() {
+        document.querySelectorAll('[data-ex-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.exTab; paint(); if (tab === 'budgets' && !budgets) loadBudgets(); }));
+        const f = document.getElementById('exFrom'); const t = document.getElementById('exTo');
+        if (f) f.addEventListener('change', () => { range.from = f.value; });
+        if (t) t.addEventListener('change', () => { range.to = t.value; });
+        const acc = document.getElementById('exXeroAcc');
+        if (acc) acc.addEventListener('input', () => { accountCode = acc.value.trim(); try { localStorage.setItem('pv_xero_account', accountCode); } catch (e) { } });
+        document.querySelectorAll('[data-ex-quick]').forEach(b => b.addEventListener('click', () => {
+          const v = b.dataset.exQuick; const y = now.getFullYear();
+          if (v === 'y') range = { from: `${y}-01-01`, to: iso(now) };
+          else if (v === 'ly') range = { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` };
+          else { const m = now.getMonth() - Number(v); range = { from: iso(new Date(y, m, 1)), to: Number(v) === 0 ? iso(now) : iso(new Date(y, m + 1, 0)) }; }
+          paint();
+        }));
+        document.querySelectorAll('[data-ex]').forEach(b => b.addEventListener('click', async () => {
+          const fmt = EXPORT_FORMATS.find(x => x.key === b.dataset.ex);
+          if (fmt.key === 'xero' && !accountCode) { toast('Enter the Xero expense account code first.', 'err'); return; }
+          busy = fmt.key; paint();
+          try {
+            const j = await callHrData('export_payments', { from: range.from, to: range.to, scope: fmt.scope, format: fmt.key });
+            const out = buildExport(fmt.key, j.data, { accountCode });
+            if (!out.rows.length) toast(out.skipped ? `Nothing to export: ${out.skipped} payment${out.skipped === 1 ? '' : 's'} in that range don't fit this format.` : 'Nothing to export in that range.', 'err');
+            else {
+              downloadCsv(`${out.name}-${range.from}-to-${range.to}.csv`, out.header, out.rows);
+              toast(`Exported ${out.rows.length} row${out.rows.length === 1 ? '' : 's'}${out.skipped ? ` (${out.skipped} skipped: other currency or method)` : ''}.`);
+            }
+          } catch (e) { toast(e.message, 'err'); }
+          busy = null; paint();
+        }));
+        document.querySelectorAll('[data-bud-save]').forEach(b => b.addEventListener('click', async () => {
+          const input = document.querySelector(`[data-bud-input="${b.dataset.budSave}"]`);
+          const v = input.value.trim();
+          b.disabled = true;
+          try { await callHrData('set_game_budget', { gameId: b.dataset.budSave, amount: v === '' ? null : Number(v) }); toast(v === '' ? 'Budget removed.' : 'Budget saved.'); await loadBudgets(); }
+          catch (e) { b.disabled = false; toast(e.code === 'invalid_amount' ? 'Enter a positive amount, or leave it empty for no budget.' : e.message, 'err'); }
+        }));
+      }
+
+      async function loadBudgets() {
+        try { const j = await callHrData('budgets_overview'); budgets = j.data; budgetError = null; } catch (e) { budgetError = e.message; }
+        paint();
+      }
+      paint();
+      if (tab === 'budgets') loadBudgets();
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Two-factor sign-in: the code prompt after sign-in, Account & security (#/account),
+    // and the policy switch on the Security page.
+    // ---------------------------------------------------------------------------------
+    // Bundled (MIT, qrcode-generator 1.4.4) so 2FA setup never depends on a CDN.
+    const QR_LIB_URL = 'assets/vendor/qrcode.js';
+    function qrSvg(text) {
+      if (!window.qrcode) return '';
+      const qr = window.qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+      return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    }
+
+    function renderMfaChallenge() {
+      let busy = false;
+      let err = null;
+      let useRecovery = false;
+      function paint() {
+        app.innerHTML = authShell(`
+          <h1>Two-factor sign-in</h1>
+          <p class="auth-sub">${useRecovery ? 'Enter one of the recovery codes you saved when you set up two-factor sign-in.' : `Enter the 6-digit code from your authenticator app to finish signing in as <strong>${esc(hrUsername)}</strong>.`}</p>
+          ${err ? `<div class="error-box" role="alert"><span>${esc(err)}</span></div>` : ''}
+          <form id="mfaForm" class="mfa-form" autocomplete="off">
+            <input type="text" id="mfaCode" class="mfa-code${useRecovery ? ' rc' : ''}" ${useRecovery ? 'placeholder="xxxxx-xxxxx" maxlength="11"' : 'inputmode="numeric" autocomplete="one-time-code" placeholder="000000" maxlength="6" pattern="[0-9]*"'} aria-label="${useRecovery ? 'Recovery code' : 'Code'}">
+            <button type="submit" class="btn btn-primary btn-roblox" ${busy ? 'disabled' : ''}>${busy ? 'Checking...' : 'Continue'}</button>
+          </form>
+          <div class="mfa-links">
+            <button type="button" class="pp-linkbtn" id="mfaToggle">${useRecovery ? 'Use an authenticator code' : 'Use a recovery code'}</button>
+            <button type="button" class="pp-linkbtn" id="mfaSignOut">Sign out</button>
+          </div>`, { noPreview: true });
+        wireAuthShell();
+        const input = document.getElementById('mfaCode');
+        if (input) {
+          input.focus();
+          if (!useRecovery) input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 6); if (input.value.length === 6) document.getElementById('mfaForm').requestSubmit(); });
+        }
+        document.getElementById('mfaToggle').addEventListener('click', () => { useRecovery = !useRecovery; err = null; paint(); });
+        document.getElementById('mfaSignOut').addEventListener('click', hrSignOut);
+        document.getElementById('mfaForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const code = input.value.trim();
+          if (!code) return;
+          busy = true; err = null; paint();
+          try {
+            const r = await callHrData('mfa_verify_login', { code });
+            await verifySession();
+            if (r.usedRecovery) toast(`Signed in with a recovery code. ${r.recoveryLeft} left. Make new ones in Account & security.`);
+            route();
+          } catch (ex) {
+            busy = false;
+            err = ex.code === 'code_wrong' ? "That code didn't work. Check the time on your phone is right and try the newest code." : ex.message;
+            paint();
+          }
+        });
+      }
+      paint();
+    }
+
+    function recoveryCodesHtml(codes) {
+      return `
+        <div class="rc-box">
+          <p class="sub" style="margin:0 0 10px;"><strong>Save these recovery codes somewhere safe.</strong> Each one works once if you lose your phone. They won't be shown again.</p>
+          <div class="rc-grid">${codes.map(c => `<code>${esc(c)}</code>`).join('')}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+            <button type="button" class="btn btn-ghost btn-sm" id="rcCopy">Copy</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="rcDownload">Download</button>
+          </div>
+        </div>`;
+    }
+    function wireRecoveryCodes(codes) {
+      const copy = document.getElementById('rcCopy');
+      if (copy) copy.addEventListener('click', () => copyText(codes.join('\n'), copy, 'Copied'));
+      const dl = document.getElementById('rcDownload');
+      if (dl) dl.addEventListener('click', () => {
+        const blob = new Blob([`${brandName()} recovery codes for ${hrUsername}\n\n${codes.join('\n')}\n\nEach code works once.\n`], { type: 'text/plain' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'recovery-codes.txt'; document.body.appendChild(a); a.click(); a.remove();
+      });
+    }
+
+    function renderAccount() {
+      const myGen = renderGen;
+      let st = null;
+      let setup = null;
+      let codes = null;
+      let busy = false;
+      let msg = null;
+      let sessions = null;
+
+      function mfaHtml() {
+        if (!st) return '<div class="dash-loading">Loading...</div>';
+        if (codes) return `<div class="confirm-box"><div class="icon">&#10003;</div><div class="txt"><strong>Two-factor sign-in is on</strong><span>You'll be asked for a code each time you sign in.</span></div></div>${recoveryCodesHtml(codes)}<button type="button" class="btn btn-primary btn-sm" id="rcDone" style="margin-top:14px;">I've saved them</button>`;
+        if (setup) return `
+          <ol class="mfa-steps">
+            <li><strong>Scan this with an authenticator app</strong><span>Google Authenticator, Microsoft Authenticator, 1Password, Authy or similar.</span>
+              <div class="mfa-qr">${setup.qr || '<span class="hint">Loading QR code...</span>'}</div>
+              <details class="mfa-manual"><summary>Can't scan it?</summary><p class="hint" style="margin:6px 0;">Enter this key in the app instead (time-based):</p><code class="mfa-secret">${esc(setup.secret.replace(/(.{4})/g, '$1 ').trim())}</code></details>
+            </li>
+            <li><strong>Enter the 6-digit code it shows</strong>
+              <div class="inline-form" style="margin-top:8px;"><input type="text" id="mfaSetupCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" aria-label="Code"><button type="button" class="btn btn-primary btn-sm" id="mfaConfirm" ${busy ? 'disabled' : ''}>${busy ? 'Checking...' : 'Turn on'}</button></div>
+            </li>
+          </ol>
+          <button type="button" class="pp-linkbtn" id="mfaCancelSetup">Cancel</button>`;
+        if (st.enrolled) return `
+          <div class="mfa-on"><span class="tone-chip ok">On</span><span>Since ${esc(fmtDate(st.enabledAt))} &middot; ${esc(st.recoveryLeft)} recovery code${st.recoveryLeft === 1 ? '' : 's'} left</span></div>
+          ${st.required ? '<p class="hint" style="margin:10px 0 0;">Your role needs two-factor sign-in, so it can\'t be turned off.</p>' : ''}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
+            <button type="button" class="btn btn-ghost btn-sm" id="mfaNewCodes">New recovery codes</button>
+            ${st.required ? '' : '<button type="button" class="btn btn-danger-ghost btn-sm" id="mfaDisable">Turn off</button>'}
+          </div>`;
+        return `
+          ${st.setupRequired ? `<div class="warn-box" style="margin-bottom:14px;"><span><strong>Set this up to continue.</strong> Your role can move money or see sensitive details, so ${esc(studioName())} requires two-factor sign-in.</span></div>` : ''}
+          <p class="sub" style="margin:0 0 14px;">Ask for a code from your phone each time you sign in, so a stolen ${authProviders().includes('google') ? 'Roblox or Google' : 'Roblox'} login isn't enough to get into your account.</p>
+          <button type="button" class="btn btn-primary btn-sm" id="mfaStart" ${busy ? 'disabled' : ''}>Set up two-factor sign-in</button>`;
+      }
+
+      function sessionsHtml() {
+        if (!sessions) return '<div class="dash-loading">Loading...</div>';
+        const device = (ua) => {
+          const u = String(ua || '');
+          const os = /Windows/.test(u) ? 'Windows' : /Mac OS X|Macintosh/.test(u) ? 'Mac' : /iPhone|iPad/.test(u) ? 'iPhone or iPad' : /Android/.test(u) ? 'Android' : /Linux/.test(u) ? 'Linux' : 'Unknown device';
+          const br = /Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : /Firefox\//.test(u) ? 'Firefox' : /Safari\//.test(u) ? 'Safari' : '';
+          return br ? `${br} on ${os}` : os;
+        };
+        return `<ul class="sess-list">${sessions.map(x => `<li><div><strong>${esc(device(x.userAgent))}</strong>${x.isYou ? ' <span class="tone-chip info">This device</span>' : ''}<span>Signed in ${esc(relTime(x.createdAt))}${x.lastSeenAt ? ` &middot; last active ${esc(relTime(x.lastSeenAt))}` : ''}</span></div>${x.isYou ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-sess-revoke="${esc(x.token)}">Sign out</button>`}</li>`).join('')}</ul>`;
+      }
+
+      function paint() {
+        if (myGen !== renderGen) return;
+        app.innerHTML = `
+    ${topbar()}
+    <div class="shell">
+      ${pageHeadHtml('Account & security', `Signed in as ${esc(hrUsername)}.`)}
+      ${msg ? `<div class="${msg.ok ? 'confirm-box' : 'error-box'}" role="status">${msg.ok ? `<div class="icon">&#10003;</div><div class="txt"><strong>${esc(msg.text)}</strong></div>` : `<span>${esc(msg.text)}</span>`}</div>` : ''}
+      <div class="acct-grid">
+        <section class="panel"><h3 class="panel-title">Two-factor sign-in</h3>${mfaHtml()}</section>
+        <section class="panel"><h3 class="panel-title">Where you're signed in</h3>${sessionsHtml()}</section>
+      </div>
+      <div class="acct-links">
+        <a href="#/my?focus=notifications">Email notifications</a>
+        <a href="#/my?focus=payout">Payout method</a>
+        ${featureOn('taxForms') ? '<a href="#/my?focus=tax">Tax details</a>' : ''}
+      </div>
+    </div>`;
+        wireTopbarSignOut();
+        wire();
+      }
+
+      function wire() {
+        const q = (id) => document.getElementById(id);
+        if (q('mfaStart')) q('mfaStart').addEventListener('click', async () => {
+          busy = true; msg = null; paint();
+          try {
+            const j = await callHrData('mfa_begin_setup');
+            setup = { secret: j.data.secret, uri: j.data.uri, qr: '' };
+            loadScriptOnce(QR_LIB_URL).then(() => { if (setup) { setup.qr = qrSvg(setup.uri); paint(); } }).catch(() => { if (setup) { setup.qr = '<span class="hint">The QR code couldn\'t load. Use the key below.</span>'; paint(); } });
+          } catch (e) { msg = { ok: false, text: e.message }; }
+          busy = false; paint();
+          const c = q('mfaSetupCode'); if (c) c.focus();
+        });
+        if (q('mfaCancelSetup')) q('mfaCancelSetup').addEventListener('click', () => { setup = null; paint(); });
+        if (q('mfaConfirm')) q('mfaConfirm').addEventListener('click', async () => {
+          const code = q('mfaSetupCode').value.replace(/\D/g, '');
+          if (code.length !== 6) { msg = { ok: false, text: 'Enter the 6-digit code from the app.' }; paint(); return; }
+          busy = true; msg = null; paint();
+          try { const j = await callHrData('mfa_confirm_setup', { code }); codes = j.data.recoveryCodes; setup = null; mfaSetupRequired = false; await load(false); }
+          catch (e) { msg = { ok: false, text: e.code === 'code_wrong' ? "That code didn't match. Make sure your phone's clock is set automatically, then try the newest code." : e.message }; }
+          busy = false; paint();
+        });
+        if (codes) wireRecoveryCodes(codes);
+        if (q('rcDone')) q('rcDone').addEventListener('click', () => { codes = null; paint(); });
+        if (q('mfaNewCodes')) q('mfaNewCodes').addEventListener('click', async () => {
+          const code = await askForText({ title: 'Make new recovery codes', hint: 'Enter a code from your authenticator app. Your old recovery codes stop working.', placeholder: '000000', confirmLabel: 'Make new codes', required: true, requiredMessage: 'Enter the code.' });
+          if (code === null) return;
+          try { const j = await callHrData('mfa_new_recovery_codes', { code }); codes = j.data.recoveryCodes; await load(false); }
+          catch (e) { toast(e.code === 'code_wrong' ? "That code didn't work." : e.message, 'err'); }
+        });
+        if (q('mfaDisable')) q('mfaDisable').addEventListener('click', async () => {
+          const code = await askForText({ title: 'Turn off two-factor sign-in', hint: 'Enter a code from your authenticator app (or a recovery code) to confirm.', placeholder: '000000', confirmLabel: 'Turn off', required: true, requiredMessage: 'Enter the code.' });
+          if (code === null) return;
+          try { await callHrData('mfa_disable', { code }); msg = { ok: true, text: 'Two-factor sign-in is off.' }; await load(false); }
+          catch (e) { toast(e.code === 'code_wrong' ? "That code didn't work." : e.code === 'mfa_required_by_policy' ? 'Your role requires two-factor sign-in.' : e.message, 'err'); }
+        });
+        document.querySelectorAll('[data-sess-revoke]').forEach(b => b.addEventListener('click', async () => {
+          try { await callHrData('revoke_my_session', { token: b.dataset.sessRevoke }); toast('Signed out that device.'); await load(false); } catch (e) { toast(e.message, 'err'); }
+        }));
+      }
+
+      async function load(showLoading) {
+        try {
+          const [a, b] = await Promise.all([callHrData('mfa_status'), callHrData('list_my_sessions').catch(() => ({ data: [] }))]);
+          st = a.data; sessions = b.data || [];
+        } catch (e) { msg = { ok: false, text: e.message }; st = st || { enrolled: false }; sessions = sessions || []; }
+        paint();
+      }
+      paint();
+      load(true);
+    }
+
+    // Security page: require 2FA for sensitive roles, and reset someone's 2FA.
+    function mountMfaPolicy(el) {
+      callHrData('mfa_admin_overview').then(j => {
+        const d = j.data;
+        el.innerHTML = `
+        <div class="home-card" style="margin-top:16px;">
+          <div class="home-card-head"><h2>Two-factor sign-in</h2><span class="count">${esc(d.enrolled.length)} using it</span></div>
+          <div style="padding:16px;">
+            <label class="bk-toggle" style="border:0;padding:0;"><input type="checkbox" id="mfaPolicy" ${d.policy ? 'checked' : ''}><span class="bk-switch" aria-hidden="true"></span><span><b>Require it for sensitive roles</b><small>Anyone who can pay people, see bank or tax details, change roles, manage backups or change security has to set it up before they can do anything else.</small></span></label>
+            ${d.enrolled.length ? `<div class="mfa-users">${d.enrolled.map(u => `<div><span>${esc(u.roblox_username || u.roblox_user_id)}</span><small>${u.last_used_at ? 'used ' + esc(relTime(u.last_used_at)) : 'set up ' + esc(relTime(u.enabled_at))}</small>${String(u.roblox_user_id) === String(hrUserId) ? '' : `<button type="button" class="pp-linkbtn" data-mfa-reset="${esc(u.roblox_user_id)}" data-name="${esc(u.roblox_username || '')}">Reset</button>`}</div>`).join('')}</div>` : ''}
+          </div>
+        </div>`;
+        const pol = el.querySelector('#mfaPolicy');
+        pol.addEventListener('change', async () => {
+          try { await callHrData('mfa_set_policy', { required: pol.checked }); toast(pol.checked ? 'Two-factor sign-in is now required for sensitive roles.' : 'No longer required.'); }
+          catch (e) { pol.checked = !pol.checked; toast(e.code === 'enable_yours_first' ? 'Turn on two-factor sign-in for your own account first (Account & security).' : e.message, 'err'); }
+        });
+        el.querySelectorAll('[data-mfa-reset]').forEach(b => b.addEventListener('click', async () => {
+          if (!(await askConfirm(`Reset two-factor sign-in for ${b.dataset.name || 'this person'}?\n\nUse this if they lost their phone and recovery codes. They're signed out everywhere and can set it up again.`, { okLabel: 'Reset', danger: true }))) return;
+          try { await callHrData('mfa_reset_user', { robloxUserId: b.dataset.mfaReset }); toast('Reset. They\'ll set it up again next time.'); mountMfaPolicy(el); } catch (e) { toast(e.message, 'err'); }
+        }));
+      }).catch(() => { el.innerHTML = ''; });
     }
 
     function renderTeamRemovedPage() {
@@ -12007,7 +12684,7 @@ Either side can end the contract in writing. Milestones already approved are sti
       const src = monthOnly ? spend.thisMonth : spend;
       const bits = [];
       if (src.ROBUX) bits.push('R$ ' + bigNum(src.ROBUX));
-      if (src.USD) bits.push('$' + Number(src.USD).toLocaleString(undefined, { maximumFractionDigits: 2 }));
+      if (src.USD) bits.push(money(src.USD, 'USD'));
       return bits.length ? bits.join(' + ') : null;
     }
 
@@ -12037,7 +12714,7 @@ Either side can end the contract in writing. Milestones already approved are sti
       function money(task) {
         if (!task.payment) return null;
         return task.currency === 'USD'
-          ? '$' + Number(task.payment).toFixed(2)
+          ? money(task.payment, 'USD')
           : 'R$ ' + Number(task.payment).toLocaleString();
       }
 
@@ -12232,7 +12909,7 @@ Either side can end the contract in writing. Milestones already approved are sti
       let formOpen = false;
 
       function money(r) {
-        return r.currency === 'USD' ? `$${Number(r.payment).toFixed(2)}` : `R$ ${Number(r.payment).toLocaleString()}`;
+        return r.currency === 'USD' ? `${money(r.payment, 'USD')}` : `R$ ${Number(r.payment).toLocaleString()}`;
       }
 
       function stateChip(r) {
@@ -12267,7 +12944,7 @@ Either side can end the contract in writing. Milestones already approved are sti
           <div class="field"><label for="claimAmount">Amount</label>
             <input type="number" id="claimAmount" min="1" step="1" placeholder="e.g. 5000"></div>
           <div class="field"><label for="claimCurrency">Paid in</label>
-            <select id="claimCurrency">${currencyEnabled('ROBUX') ? '<option value="ROBUX">Robux</option>' : ''}${currencyEnabled('USD') ? '<option value="USD">USD</option>' : ''}</select></div>
+            <select id="claimCurrency">${currencyEnabled('ROBUX') ? '<option value="ROBUX">Robux</option>' : ''}${currencyEnabled('USD') ? '<option value="USD">${esc(cashCode())}</option>' : ''}</select></div>
           <div class="field"><label for="claimGame">Game <span class="hint">(optional)</span></label>
             <input type="text" id="claimGame" placeholder="e.g. Obby Rush"></div>
         </div>
@@ -12996,7 +13673,7 @@ Either side can end the contract in writing. Milestones already approved are sti
                 <span>${esc(done)} of ${esc(batch.length)} done</span>
                 ${game ? `<span>${esc(game.name)}</span>` : ''}
                 ${first.due_at ? `<span title="${esc(fmtDateTime(first.due_at))}">${esc(fmtDate(first.due_at))}</span>` : ''}
-                ${first.payment ? `<span class="pp-tag">${esc(first.currency === 'USD' ? '$' + Number(first.payment).toFixed(2) : 'R$ ' + Number(first.payment).toLocaleString())}</span>` : ''}
+                ${first.payment ? `<span class="pp-tag">${esc(first.currency === 'USD' ? money(first.payment, 'USD') : 'R$ ' + Number(first.payment).toLocaleString())}</span>` : ''}
                 ${first.repeat_every ? `<span class="pp-tag">Repeats ${esc({ weekly: 'weekly', fortnightly: 'every 2 weeks', monthly: 'monthly' }[first.repeat_every] || first.repeat_every)}</span>` : ''}
                 <button type="button" class="pp-linkbtn" data-batch-toggle="${esc(key)}">${expanded ? 'Hide people' : 'Show people'}</button>
               </div>
@@ -13043,7 +13720,7 @@ Either side can end the contract in writing. Milestones already approved are sti
                 ${game ? `<span>${esc(game.name)}</span>` : ''}
                 ${t.assigned_to_user_id ? `<span>${userLink(t.assigned_to_user_id, t.assigned_to_username)}</span>` : '<span class="hint">Nobody assigned</span>'}
                 ${t.due_at ? `<span title="${esc(fmtDateTime(t.due_at))}">${esc(fmtDate(t.due_at))}</span>` : ''}
-                ${t.payment ? `<span class="pp-tag">${esc(t.currency === 'USD' ? '$' + Number(t.payment).toFixed(2) : 'R$ ' + Number(t.payment).toLocaleString())}</span>` : ''}
+                ${t.payment ? `<span class="pp-tag">${esc(t.currency === 'USD' ? money(t.payment, 'USD') : 'R$ ' + Number(t.payment).toLocaleString())}</span>` : ''}
                 ${t.repeat_every ? `<span class="pp-tag">Repeats ${esc({ weekly: 'weekly', fortnightly: 'every 2 weeks', monthly: 'monthly' }[t.repeat_every] || t.repeat_every)}</span>` : ''}
                 <a class="pp-linkbtn" href="#/task/${encodeURIComponent(t.id)}">Open</a>
               </div>
@@ -13079,7 +13756,7 @@ Either side can end the contract in writing. Milestones already approved are sti
                   <input type="number" id="taskPayment" min="0" step="0.01" placeholder="e.g. 5000" value="${d.payment != null ? esc(d.payment) : ''}" style="flex:1;">
                   <select id="taskCurrency" aria-label="Currency" style="flex:0 0 100px;">
                     <option value="ROBUX" ${String(d.currency || 'ROBUX') === 'ROBUX' ? 'selected' : ''}>Robux</option>
-                    <option value="USD" ${d.currency === 'USD' ? 'selected' : ''}>USD</option>
+                    <option value="USD" ${d.currency === 'USD' ? 'selected' : ''}>${esc(cashCode())}</option>
                   </select>
                 </div>
               </div>
@@ -14243,7 +14920,7 @@ Either side can end the contract in writing. Milestones already approved are sti
         quick_unban: 'Lifted ban', unban_user: 'Lifted ban', ban_expired: 'Timed ban ended', remove_user_warning: 'Removed warning',
         note: 'Added note', submit_request: 'Submitted payment request', mark_paid: 'Marked paid', reject_request: 'Rejected request',
         reopen_request: 'Reopened request', delete_request: 'Deleted request', revert: 'Reverted a change',
-        auto_downgrade_payment_method: 'Payment method switched to Robux (below USD minimum)'
+        auto_downgrade_payment_method: 'Payment method switched to Robux (below the cash minimum)'
       };
       function actionLabel(a) {
         if (ACTION_LABELS[a]) return ACTION_LABELS[a];
